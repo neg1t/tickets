@@ -4,6 +4,15 @@ import { createEditorModel } from './editorModel.js';
 import { createObjectAt } from './editorOperations.js';
 
 describe('editor model', () => {
+  it.fails('R02: an equivalent controlled value preserves undo history', () => {
+    const draft = createEmptyDraft('Shared source');
+    const model = createEditorModel(draft);
+    const zone = createObjectAt(draft, 'zone', { x: 5, y: 5 });
+    model.commit(zone.command);
+    model.replace(structuredClone(model.$state.getState().draft));
+    expect(model.undo().draft.snapshot.zones).toHaveLength(0);
+  });
+
   it('isolates two editors on the same page', () => {
     const draft = createEmptyDraft('Shared source');
     const first = createEditorModel(draft);

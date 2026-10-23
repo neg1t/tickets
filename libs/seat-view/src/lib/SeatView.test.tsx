@@ -70,6 +70,26 @@ function ControlledView(props: {
 }
 
 describe('SeatView', () => {
+  it.fails('A08: rejects duplicate seats supplied by a controlled host', () => {
+    const onBuyClick = vi.fn();
+    render(
+      <SeatView
+        layout={layout}
+        occurrenceId="event-1"
+        availability={availability}
+        prices={prices}
+        selection={[
+          { kind: 'seat', seatId: first.id },
+          { kind: 'seat', seatId: first.id },
+        ]}
+        onSelectionChange={() => undefined}
+        onBuyClick={onBuyClick}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Купить' }));
+    expect(onBuyClick).not.toHaveBeenCalled();
+  });
+
   it('uses controlled selection and sends it to the host on buy', async () => {
     const onBuyClick = vi.fn();
     render(<ControlledView name="event-1" onBuyClick={onBuyClick} />);

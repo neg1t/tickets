@@ -13,6 +13,21 @@ import {
 } from './editorOperations.js';
 
 describe('editor tools', () => {
+  it.fails('creates a straight row with seats in one command (A03)', () => {
+    const state = createEditorState(createEmptyDraft('My hall'));
+    const row = createObjectAt(state.draft, 'row-line', { x: 10, y: 10 });
+    const created = applyEditorCommand(state, row.command);
+    expect(created.draft.snapshot.rows).toHaveLength(1);
+    expect(created.draft.snapshot.seats.length).toBeGreaterThan(0);
+  });
+
+  it.fails('creates a round table with seats in one command (A03)', () => {
+    const state = createEditorState(createEmptyDraft('My hall'));
+    const table = createObjectAt(state.draft, 'table-circle', { x: 10, y: 10 });
+    const created = applyEditorCommand(state, table.command);
+    expect(created.draft.snapshot.tables).toHaveLength(1);
+    expect(created.draft.snapshot.seats.length).toBeGreaterThan(0);
+  });
   it('creates on the selected floor and rejects a zone from another floor', () => {
     let state = createEditorState(createEmptyDraft('My hall'));
     const secondFloor = {

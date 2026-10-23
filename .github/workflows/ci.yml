@@ -40,5 +40,11 @@ jobs:
       - name: Install Playwright Chromium and system dependencies
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Run Nx checks
-        run: pnpm nx run-many -t lint typecheck test build e2e -p studio embed --output-style=static
+      - name: Run checks and tests for every project
+        run: pnpm nx run-many -t lint typecheck test build --all --output-style=static
+
+      - name: Run Studio browser scenarios
+        run: pnpm nx e2e studio --output-style=static
+
+      - name: Run Embed browser scenarios
+        run: pnpm nx e2e embed --output-style=static
