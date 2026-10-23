@@ -1,4 +1,7 @@
-import { layoutDocumentSchema } from '@hall-platform/domain';
+import {
+  layoutDocumentSchema,
+  layoutSnapshotSchema,
+} from '@hall-platform/domain';
 import { describe, expect, it } from 'vitest';
 import smallTheater from '@hall-platform/fixtures/small-theater.json' with { type: 'json' };
 import banquetHall from '@hall-platform/fixtures/banquet-hall.json' with { type: 'json' };
@@ -7,6 +10,56 @@ import operaHall from '@hall-platform/fixtures/opera-hall.json' with { type: 'js
 import { buildHallScene, hitTestHallScene } from './hallScene.js';
 
 describe('hall scene', () => {
+  it('hits polygon zones and decorations by their actual shapes', () => {
+    const base = layoutDocumentSchema.parse(smallTheater.document).snapshot;
+    const floorId = base.floors[0]?.id;
+    if (!floorId) throw new Error('Missing floor');
+    const snapshot = layoutSnapshotSchema.parse({
+      ...base,
+      rows: [],
+      seats: [],
+      tables: [],
+      backgrounds: [],
+      zones: [
+        {
+          id: 'zone-triangle',
+          floorId,
+          name: 'GA',
+          kind: 'ga',
+          capacity: 20,
+          polygon: [
+            { x: 0, y: 0 },
+            { x: 6, y: 0 },
+            { x: 0, y: 6 },
+          ],
+        },
+      ],
+      decorations: [
+        {
+          id: 'decoration-stage',
+          floorId,
+          kind: 'stage',
+          label: 'Сцена',
+          polygon: [
+            { x: 8, y: 0 },
+            { x: 12, y: 0 },
+            { x: 12, y: 4 },
+            { x: 8, y: 4 },
+          ],
+        },
+      ],
+    });
+    const scene = buildHallScene(snapshot, floorId);
+    expect(hitTestHallScene(scene, { x: 1, y: 1 })).toEqual({
+      kind: 'zone',
+      id: 'zone-triangle',
+    });
+    expect(hitTestHallScene(scene, { x: 5, y: 5 })).toBeNull();
+    expect(hitTestHallScene(scene, { x: 10, y: 2 })).toEqual({
+      kind: 'decoration',
+      id: 'decoration-stage',
+    });
+  });
   it('shows standalone general admission sections without seats or drawn bounds', () => {
     const snapshot = layoutDocumentSchema.parse(smallTheater.document).snapshot;
     const emptySections = {

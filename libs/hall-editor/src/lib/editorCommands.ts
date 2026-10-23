@@ -2,6 +2,8 @@ import {
   layoutSnapshotSchema,
   worldCalibrationSchema,
   type Background,
+  type Decoration,
+  type Floor,
   type Row,
   type Seat,
   type Table,
@@ -14,7 +16,19 @@ import {
   type PdfAsset,
 } from './editorDraft.js';
 
-export type EditorPatch =
+export type EditorPatch = (
+  | {
+      collection: 'floors';
+      id: string;
+      before: Floor | null;
+      after: Floor | null;
+    }
+  | {
+      collection: 'decorations';
+      id: string;
+      before: Decoration | null;
+      after: Decoration | null;
+    }
   | { collection: 'zones'; id: string; before: Zone | null; after: Zone | null }
   | {
       collection: 'backgrounds';
@@ -46,7 +60,8 @@ export type EditorPatch =
       id: string;
       before: SpatialBounds | null;
       after: SpatialBounds | null;
-    };
+    }
+) & { readonly index?: number };
 
 export type EditorCommand = Readonly<{
   kind: 'create' | 'update' | 'delete' | 'move';
@@ -67,10 +82,16 @@ function replaceItem<T extends { id: string }>(
   items: readonly T[],
   id: string,
   after: T | null,
+  index?: number,
 ): T[] {
   const existing = items.findIndex((item) => item.id === id);
   if (after === null) return items.filter((item) => item.id !== id);
-  if (existing < 0) return [...items, after];
+  if (existing < 0) {
+    if (index === undefined) return [...items, after];
+    const next = [...items];
+    next.splice(index, 0, after);
+    return next;
+  }
   return items.map((item) => (item.id === id ? after : item));
 }
 
@@ -84,16 +105,48 @@ function applyPatches(
   let calibration = draft.calibration;
   for (const patch of patches) {
     switch (patch.collection) {
+      case 'floors':
+        snapshot = {
+          ...snapshot,
+          floors: replaceItem(
+            snapshot.floors,
+            patch.id,
+            patch.after,
+            patch.index,
+          ),
+        };
+        break;
+      case 'decorations':
+        snapshot = {
+          ...snapshot,
+          decorations: replaceItem(
+            snapshot.decorations,
+            patch.id,
+            patch.after,
+            patch.index,
+          ),
+        };
+        break;
       case 'zones':
         snapshot = {
           ...snapshot,
-          zones: replaceItem(snapshot.zones, patch.id, patch.after),
+          zones: replaceItem(
+            snapshot.zones,
+            patch.id,
+            patch.after,
+            patch.index,
+          ),
         };
         break;
       case 'backgrounds':
         snapshot = {
           ...snapshot,
-          backgrounds: replaceItem(snapshot.backgrounds, patch.id, patch.after),
+          backgrounds: replaceItem(
+            snapshot.backgrounds,
+            patch.id,
+            patch.after,
+            patch.index,
+          ),
         };
         break;
       case 'assets': {
@@ -111,19 +164,29 @@ function applyPatches(
       case 'rows':
         snapshot = {
           ...snapshot,
-          rows: replaceItem(snapshot.rows, patch.id, patch.after),
+          rows: replaceItem(snapshot.rows, patch.id, patch.after, patch.index),
         };
         break;
       case 'seats':
         snapshot = {
           ...snapshot,
-          seats: replaceItem(snapshot.seats, patch.id, patch.after),
+          seats: replaceItem(
+            snapshot.seats,
+            patch.id,
+            patch.after,
+            patch.index,
+          ),
         };
         break;
       case 'tables':
         snapshot = {
           ...snapshot,
-          tables: replaceItem(snapshot.tables, patch.id, patch.after),
+          tables: replaceItem(
+            snapshot.tables,
+            patch.id,
+            patch.after,
+            patch.index,
+          ),
         };
         break;
       case 'zoneBounds': {

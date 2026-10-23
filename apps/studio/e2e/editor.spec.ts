@@ -174,16 +174,16 @@ test('creates and edits a new hall with undo, redo and save callback', async ({
   await page.getByRole('button', { name: 'Круглый стол' }).click();
   await stage.click({ position: { x: 500, y: 300 } });
   await expect(
-    page.getByText(/1 зон · 1 рядов · 1 мест · 1 столов/),
+    page.getByText(/1 зон · 1 рядов · 15 мест · 1 столов/),
   ).toBeVisible();
 
   await page.getByRole('button', { name: 'Отменить' }).click();
   await expect(
-    page.getByText(/1 зон · 1 рядов · 1 мест · 0 столов/),
+    page.getByText(/1 зон · 1 рядов · 9 мест · 0 столов/),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Повторить' }).click();
   await expect(
-    page.getByText(/1 зон · 1 рядов · 1 мест · 1 столов/),
+    page.getByText(/1 зон · 1 рядов · 15 мест · 1 столов/),
   ).toBeVisible();
 
   const downloadPromise = page.waitForEvent('download');
@@ -193,6 +193,11 @@ test('creates and edits a new hall with undo, redo and save callback', async ({
   const download = await downloadPromise;
   const saved = JSON.parse(await readFile(await download.path(), 'utf8'));
   expect(saved.snapshot.zones[0].name).toBe('Партер');
-  expect(saved.snapshot.seats[0].position.x).toBe(17.5);
+  expect(
+    saved.snapshot.seats.find(
+      (seat: { placement: { kind: string } }) =>
+        seat.placement.kind === 'standalone',
+    ).position.x,
+  ).toBe(17.5);
   expect(saved.snapshot.tables).toHaveLength(1);
 });

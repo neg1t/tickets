@@ -8,6 +8,7 @@ import {
   createDraftFromSnapshot,
   createEmptyDraft,
   parseHallLayoutDraft,
+  validateLayout,
   type HallLayoutDraft,
 } from '@hall-platform/hall-editor';
 import {
@@ -148,10 +149,21 @@ export const publishDraftFx = createEffect(
   async ({
     draft,
     revision,
+    warningsAcknowledged,
   }: {
     draft: HallLayoutDraft;
     revision: number | null;
+    warningsAcknowledged?: boolean;
   }) => {
+    const issues = validateLayout(draft);
+    const errors = issues.filter((issue) => issue.severity === 'error');
+    if (errors.length > 0)
+      throw new Error(`Публикация заблокирована: ${errors[0]?.message}`);
+    if (
+      issues.some((issue) => issue.severity === 'warning') &&
+      !warningsAcknowledged
+    )
+      throw new Error('Подтвердите публикацию с предупреждениями');
     const { record, published } = await repository.publishDraft(
       draft,
       revision ?? 0,

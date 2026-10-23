@@ -523,13 +523,20 @@ export function DashboardPage() {
 
             <HallEditor
               value={draft}
+              publishedSeatIds={versions.flatMap((version) =>
+                version.layout.snapshot.seats.map((seat) => seat.id),
+              )}
               onChange={changeDraft}
               saving={saving}
               onSave={async (layout) => {
                 await saveDraft({ draft: layout, revision });
               }}
-              onPublish={async (layout) => {
-                await publishDraft({ draft: layout, revision });
+              onPublish={async (layout, warningsAcknowledged) => {
+                await publishDraft({
+                  draft: layout,
+                  revision,
+                  warningsAcknowledged,
+                });
               }}
             />
           </>

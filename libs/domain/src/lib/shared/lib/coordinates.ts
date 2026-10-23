@@ -10,6 +10,14 @@ const pointShape = {
 export const worldPointSchema = z
   .strictObject(pointShape)
   .brand<'WorldPoint'>();
+export const worldBoundsSchema = z
+  .strictObject({
+    minX: z.number().finite(),
+    minY: z.number().finite(),
+    maxX: z.number().finite(),
+    maxY: z.number().finite(),
+  })
+  .refine((bounds) => bounds.minX < bounds.maxX && bounds.minY < bounds.maxY);
 export const pdfPointSchema = z.strictObject(pointShape).brand<'PdfPoint'>();
 export const viewportPointSchema = z
   .strictObject(pointShape)
@@ -39,6 +47,7 @@ export const worldCalibrationSchema = z.strictObject({
 });
 
 export type WorldPoint = z.infer<typeof worldPointSchema>;
+export type WorldBounds = z.infer<typeof worldBoundsSchema>;
 export type PdfPoint = z.infer<typeof pdfPointSchema>;
 export type ViewportPoint = z.infer<typeof viewportPointSchema>;
 export type DevicePoint = z.infer<typeof devicePointSchema>;

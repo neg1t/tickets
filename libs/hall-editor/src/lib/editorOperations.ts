@@ -10,15 +10,34 @@ import {
   type Table,
   type Zone,
 } from '@hall-platform/domain';
-import type { Vector2, SpatialBounds } from '@hall-platform/geometry';
+import {
+  generateTableSeatSlots,
+  type Vector2,
+  type SpatialBounds,
+} from '@hall-platform/geometry';
 import type { HallTarget } from '@hall-platform/renderer-konva';
 import type { EditorCommand, EditorPatch } from './editorCommands.js';
 import type { HallLayoutDraft } from './editorDraft.js';
+import {
+  preserveSeatManualAdjustment,
+  regenerateRowSeats,
+  regenerateTableSeats,
+} from './commands/regenerateSeats.js';
+import { makeDecoration } from './commands/structureOperations.js';
+import {
+  transformRow,
+  transformTable,
+  translateRow,
+} from './commands/transformSelection.js';
 
 export type EditorTool =
   | 'select'
   | 'pan'
   | 'zone'
+  | 'zone-ga'
+  | 'stage'
+  | 'obstacle'
+  | 'label'
   | 'row-line'
   | 'row-arc'
   | 'row-bezier'
@@ -31,45 +50,6 @@ function translated(point: Vector2, delta: Vector2): WorldPoint {
   return worldPointSchema.parse({ x: point.x + delta.x, y: point.y + delta.y });
 }
 
-function moveRow(row: Row, delta: Vector2): Row {
-  const curve = row.curve;
-  switch (curve.kind) {
-    case 'line':
-      return {
-        ...row,
-        curve: {
-          ...curve,
-          start: translated(curve.start, delta),
-          end: translated(curve.end, delta),
-        },
-      };
-    case 'arc':
-      return {
-        ...row,
-        curve: { ...curve, center: translated(curve.center, delta) },
-      };
-    case 'bezier':
-      return {
-        ...row,
-        curve: {
-          ...curve,
-          p0: translated(curve.p0, delta),
-          p1: translated(curve.p1, delta),
-          p2: translated(curve.p2, delta),
-          p3: translated(curve.p3, delta),
-        },
-      };
-    case 'polyline':
-      return {
-        ...row,
-        curve: {
-          ...curve,
-          points: curve.points.map((point) => translated(point, delta)),
-        },
-      };
-  }
-}
-
 function zoneReference(zoneId?: string): { zoneId?: Zone['id'] } {
   return zoneId ? { zoneId: zoneIdSchema.parse(zoneId) } : {};
 }
@@ -80,6 +60,7 @@ export function createObjectAt(
   point: Vector2,
   zoneId?: string,
   activeFloorId?: string,
+  publishedSeatIds: readonly Seat['id'][] = [],
 ): { command: EditorCommand; target: HallTarget } {
   const floorId = activeFloorId
     ? draft.snapshot.floors.find((floor) => floor.id === activeFloorId)?.id
@@ -93,13 +74,29 @@ export function createObjectAt(
   ) {
     throw new Error('Selected zone is not on the active floor');
   }
+  if (
+    zoneId &&
+    [
+      'row-line',
+      'row-arc',
+      'row-bezier',
+      'seat',
+      'table-circle',
+      'table-rectangle',
+    ].includes(tool) &&
+    draft.snapshot.zones.find((zone) => zone.id === zoneId)?.kind === 'ga'
+  )
+    throw new Error('В GA-зоне нельзя создавать отдельные места');
   const id = crypto.randomUUID();
   switch (tool) {
-    case 'zone': {
+    case 'zone':
+    case 'zone-ga': {
       const zone: Zone = {
         id: zoneIdSchema.parse(`zone-${id}`),
         floorId,
         name: `Зона ${draft.snapshot.zones.length + 1}`,
+        kind: tool === 'zone-ga' ? 'ga' : 'seated',
+        ...(tool === 'zone-ga' ? { capacity: 20 } : {}),
       };
       const bounds: SpatialBounds = {
         minX: point.x - 5,
@@ -118,6 +115,25 @@ export function createObjectAt(
               id: zone.id,
               before: null,
               after: bounds,
+            },
+          ],
+        },
+      };
+    }
+    case 'stage':
+    case 'obstacle':
+    case 'label': {
+      const decoration = makeDecoration(draft, tool, point, floorId);
+      return {
+        target: { kind: 'decoration', id: decoration.id },
+        command: {
+          kind: 'create',
+          patches: [
+            {
+              collection: 'decorations',
+              id: decoration.id,
+              before: null,
+              after: decoration,
             },
           ],
         },
@@ -154,15 +170,11 @@ export function createObjectAt(
         ...zoneReference(zoneId),
         name: `Ряд ${draft.snapshot.rows.length + 1}`,
         curve,
+        generation: { distribution: { kind: 'even', count: 8 } },
       };
       return {
         target: { kind: 'row', id: row.id },
-        command: {
-          kind: 'create',
-          patches: [
-            { collection: 'rows', id: row.id, before: null, after: row },
-          ],
-        },
+        command: regenerateRowSeats(draft, null, row, { publishedSeatIds }),
       };
     }
     case 'seat': {
@@ -188,12 +200,12 @@ export function createObjectAt(
     case 'table-rectangle': {
       const shape: Table['shape'] =
         tool === 'table-circle'
-          ? { kind: 'circle', radius: 2, seatCount: 0 }
+          ? { kind: 'circle', radius: 2, seatCount: 6 }
           : {
               kind: 'rectangle',
               width: 5,
               height: 3,
-              seatsPerSide: { top: 0, right: 0, bottom: 0, left: 0 },
+              seatsPerSide: { top: 2, right: 2, bottom: 2, left: 2 },
             };
       const table: Table = {
         id: tableIdSchema.parse(`table-${id}`),
@@ -203,15 +215,11 @@ export function createObjectAt(
         center: worldPointSchema.parse(point),
         rotationRadians: 0,
         shape,
+        generation: { seatOffset: 0.6 },
       };
       return {
         target: { kind: 'table', id: table.id },
-        command: {
-          kind: 'create',
-          patches: [
-            { collection: 'tables', id: table.id, before: null, after: table },
-          ],
-        },
+        command: regenerateTableSeats(draft, null, table, { publishedSeatIds }),
       };
     }
     default:
@@ -223,63 +231,92 @@ export function moveTarget(
   draft: HallLayoutDraft,
   target: HallTarget,
   delta: Vector2,
+  publishedSeatIds: readonly Seat['id'][] = [],
 ): EditorCommand {
   const patches: EditorPatch[] = [];
   const { snapshot } = draft;
-  function moveSeat(seat: Seat): void {
+  if (target.kind === 'row') {
+    const row = snapshot.rows.find((item) => item.id === target.id);
+    return row
+      ? {
+          kind: 'move',
+          patches: transformRow(
+            draft,
+            row,
+            translateRow(row, delta),
+            publishedSeatIds,
+          ).patches,
+        }
+      : { kind: 'move', patches: [] };
+  }
+  if (target.kind === 'table') {
+    const table = snapshot.tables.find((item) => item.id === target.id);
+    return table
+      ? {
+          kind: 'move',
+          patches: transformTable(
+            draft,
+            table,
+            {
+              ...table,
+              center: translated(table.center, delta),
+            },
+            publishedSeatIds,
+          ).patches,
+        }
+      : { kind: 'move', patches: [] };
+  }
+  function moveSeat(seat: Seat, individual = false): void {
+    const after = { ...seat, position: translated(seat.position, delta) };
     patches.push({
       collection: 'seats',
       id: seat.id,
       before: seat,
-      after: { ...seat, position: translated(seat.position, delta) },
-    });
-  }
-  function moveTable(table: Table): void {
-    patches.push({
-      collection: 'tables',
-      id: table.id,
-      before: table,
-      after: { ...table, center: translated(table.center, delta) },
-    });
-  }
-  function moveRowPatch(row: Row): void {
-    patches.push({
-      collection: 'rows',
-      id: row.id,
-      before: row,
-      after: moveRow(row, delta),
+      after: individual ? preserveSeatManualAdjustment(seat, after) : after,
     });
   }
   switch (target.kind) {
     case 'seat': {
       const seat = snapshot.seats.find((item) => item.id === target.id);
-      if (seat) moveSeat(seat);
+      if (seat) moveSeat(seat, true);
       break;
     }
-    case 'table': {
-      const table = snapshot.tables.find((item) => item.id === target.id);
-      if (table) moveTable(table);
-      snapshot.seats
-        .filter(
-          (seat) =>
-            seat.placement.kind === 'table' &&
-            seat.placement.tableId === target.id,
-        )
-        .forEach(moveSeat);
-      break;
-    }
-    case 'row': {
-      const row = snapshot.rows.find((item) => item.id === target.id);
-      if (row) moveRowPatch(row);
-      snapshot.seats
-        .filter(
-          (seat) =>
-            seat.placement.kind === 'row' && seat.placement.rowId === target.id,
-        )
-        .forEach(moveSeat);
+    case 'decoration': {
+      const decoration = snapshot.decorations.find(
+        (item) => item.id === target.id,
+      );
+      if (decoration)
+        patches.push({
+          collection: 'decorations',
+          id: decoration.id,
+          before: decoration,
+          after:
+            decoration.kind === 'label'
+              ? {
+                  ...decoration,
+                  position: translated(decoration.position, delta),
+                }
+              : {
+                  ...decoration,
+                  polygon: decoration.polygon.map((point) =>
+                    translated(point, delta),
+                  ),
+                },
+        });
       break;
     }
     case 'zone': {
+      const zone = snapshot.zones.find((item) => item.id === target.id);
+      if (zone?.polygon)
+        patches.push({
+          collection: 'zones',
+          id: zone.id,
+          before: zone,
+          after: {
+            ...zone,
+            polygon: zone.polygon.map((point) => translated(point, delta)),
+          },
+        });
       const bounds = draft.zoneBounds[target.id];
       if (bounds)
         patches.push({
@@ -297,20 +334,32 @@ export function moveTarget(
       const tables = snapshot.tables.filter(
         (table) => table.zoneId === target.id,
       );
-      const rowIds = new Set(rows.map((row) => row.id));
-      const tableIds = new Set(tables.map((table) => table.id));
-      rows.forEach(moveRowPatch);
-      tables.forEach(moveTable);
+      rows.forEach((row) =>
+        patches.push(
+          ...moveTarget(
+            draft,
+            { kind: 'row', id: row.id },
+            delta,
+            publishedSeatIds,
+          ).patches,
+        ),
+      );
+      tables.forEach((table) =>
+        patches.push(
+          ...moveTarget(
+            draft,
+            { kind: 'table', id: table.id },
+            delta,
+            publishedSeatIds,
+          ).patches,
+        ),
+      );
       snapshot.seats
         .filter(
           (seat) =>
-            seat.zoneId === target.id ||
-            (seat.placement.kind === 'row' &&
-              rowIds.has(seat.placement.rowId)) ||
-            (seat.placement.kind === 'table' &&
-              tableIds.has(seat.placement.tableId)),
+            seat.zoneId === target.id && seat.placement.kind === 'standalone',
         )
-        .forEach(moveSeat);
+        .forEach((seat) => moveSeat(seat));
       break;
     }
   }
@@ -397,9 +446,80 @@ export function deleteTarget(
       .forEach(removeSeat);
     const table = snapshot.tables.find((item) => item.id === target.id);
     if (table) removeTable(table);
+  } else if (target.kind === 'decoration') {
+    const decoration = snapshot.decorations.find(
+      (item) => item.id === target.id,
+    );
+    if (decoration)
+      patches.push({
+        collection: 'decorations',
+        id: decoration.id,
+        before: decoration,
+        after: null,
+      });
   } else {
     const seat = snapshot.seats.find((item) => item.id === target.id);
-    if (seat) removeSeat(seat);
+    if (seat?.placement.kind === 'row') {
+      const rowId = seat.placement.rowId;
+      const row = snapshot.rows.find((item) => item.id === rowId);
+      if (row) {
+        const attached = snapshot.seats.filter(
+          (item) =>
+            item.placement.kind === 'row' && item.placement.rowId === row.id,
+        );
+        const parsedSlot = Number(seat.slotKey);
+        const slotIndex = Number.isSafeInteger(parsedSlot)
+          ? parsedSlot
+          : attached.indexOf(seat);
+        const generation: NonNullable<Row['generation']> = row.generation ?? {
+          distribution: { kind: 'even', count: attached.length },
+        };
+        const after = {
+          ...row,
+          generation: {
+            ...generation,
+            skippedSlots: [...(generation.skippedSlots ?? []), slotIndex],
+          },
+        };
+        return {
+          kind: 'delete',
+          patches: regenerateRowSeats(draft, row, after).patches,
+        };
+      }
+      removeSeat(seat);
+    } else if (seat?.placement.kind === 'table') {
+      const tableId = seat.placement.tableId;
+      const table = snapshot.tables.find((item) => item.id === tableId);
+      if (table) {
+        const attached = snapshot.seats.filter(
+          (item) =>
+            item.placement.kind === 'table' &&
+            item.placement.tableId === table.id,
+        );
+        const slotKey =
+          seat.slotKey ??
+          generateTableSeatSlots(
+            table,
+            table.generation ?? { seatOffset: 0.6 },
+          )[attached.indexOf(seat)]?.slotKey;
+        if (slotKey) {
+          const generation: NonNullable<Table['generation']> =
+            table.generation ?? { seatOffset: 0.6 };
+          const after = {
+            ...table,
+            generation: {
+              ...generation,
+              skippedSlotKeys: [...(generation.skippedSlotKeys ?? []), slotKey],
+            },
+          };
+          return {
+            kind: 'delete',
+            patches: regenerateTableSeats(draft, table, after).patches,
+          };
+        }
+      }
+      removeSeat(seat);
+    } else if (seat) removeSeat(seat);
   }
   return { kind: 'delete', patches };
 }
@@ -422,6 +542,7 @@ export function moveTargets(
   draft: HallLayoutDraft,
   targets: readonly HallTarget[],
   delta: Vector2,
+  publishedSeatIds: readonly Seat['id'][] = [],
 ): EditorCommand {
   if (!Number.isFinite(delta.x) || !Number.isFinite(delta.y))
     throw new RangeError('Move delta must be finite');
@@ -429,7 +550,9 @@ export function moveTargets(
   return {
     kind: 'move',
     patches: uniquePatches(
-      targets.map((target) => moveTarget(draft, target, delta)),
+      targets.map((target) =>
+        moveTarget(draft, target, delta, publishedSeatIds),
+      ),
     ),
   };
 }
@@ -438,10 +561,122 @@ export function deleteTargets(
   draft: HallLayoutDraft,
   targets: readonly HallTarget[],
 ): EditorCommand {
+  const { snapshot } = draft;
+  const selected = new Set(
+    targets.map((target) => `${target.kind}:${target.id}`),
+  );
+  const effective = targets.filter((target) => {
+    if (target.kind === 'row') {
+      const row = snapshot.rows.find((item) => item.id === target.id);
+      return !row?.zoneId || !selected.has(`zone:${row.zoneId}`);
+    }
+    if (target.kind === 'table') {
+      const table = snapshot.tables.find((item) => item.id === target.id);
+      return !table?.zoneId || !selected.has(`zone:${table.zoneId}`);
+    }
+    if (target.kind !== 'seat') return true;
+    const seat = snapshot.seats.find((item) => item.id === target.id);
+    if (!seat) return false;
+    if (seat.zoneId && selected.has(`zone:${seat.zoneId}`)) return false;
+    if (seat.placement.kind === 'row') {
+      const rowId = seat.placement.rowId;
+      const row = snapshot.rows.find((item) => item.id === rowId);
+      return (
+        !selected.has(`row:${rowId}`) &&
+        (!row?.zoneId || !selected.has(`zone:${row.zoneId}`))
+      );
+    }
+    if (seat.placement.kind === 'table') {
+      const tableId = seat.placement.tableId;
+      const table = snapshot.tables.find((item) => item.id === tableId);
+      return (
+        !selected.has(`table:${tableId}`) &&
+        (!table?.zoneId || !selected.has(`zone:${table.zoneId}`))
+      );
+    }
+    return true;
+  });
+  const groupedRows = new Map<string, Seat[]>();
+  const groupedTables = new Map<string, Seat[]>();
+  const individual = effective.filter((target) => {
+    if (target.kind !== 'seat') return true;
+    const seat = snapshot.seats.find((item) => item.id === target.id);
+    if (seat?.placement.kind === 'row') {
+      const group = groupedRows.get(seat.placement.rowId) ?? [];
+      group.push(seat);
+      groupedRows.set(seat.placement.rowId, group);
+      return false;
+    }
+    if (seat?.placement.kind === 'table') {
+      const group = groupedTables.get(seat.placement.tableId) ?? [];
+      group.push(seat);
+      groupedTables.set(seat.placement.tableId, group);
+      return false;
+    }
+    return true;
+  });
+  const commands = individual.map((target) => deleteTarget(draft, target));
+  for (const [rowId, seats] of groupedRows) {
+    const row = snapshot.rows.find((item) => item.id === rowId);
+    if (!row) continue;
+    const attached = snapshot.seats.filter(
+      (seat) => seat.placement.kind === 'row' && seat.placement.rowId === rowId,
+    );
+    const generation: NonNullable<Row['generation']> = row.generation ?? {
+      distribution: { kind: 'even', count: attached.length },
+    };
+    const skippedSlots = [
+      ...new Set([
+        ...(generation.skippedSlots ?? []),
+        ...seats.map((seat) => {
+          const parsedSlot = Number(seat.slotKey);
+          return Number.isSafeInteger(parsedSlot)
+            ? parsedSlot
+            : attached.indexOf(seat);
+        }),
+      ]),
+    ];
+    commands.push({
+      kind: 'delete',
+      patches: regenerateRowSeats(draft, row, {
+        ...row,
+        generation: { ...generation, skippedSlots },
+      }).patches,
+    });
+  }
+  for (const [tableId, seats] of groupedTables) {
+    const table = snapshot.tables.find((item) => item.id === tableId);
+    if (!table) continue;
+    const attached = snapshot.seats.filter(
+      (seat) =>
+        seat.placement.kind === 'table' && seat.placement.tableId === tableId,
+    );
+    const oldSlots = generateTableSeatSlots(
+      table,
+      table.generation ?? { seatOffset: 0.6 },
+    );
+    const generation: NonNullable<Table['generation']> = table.generation ?? {
+      seatOffset: 0.6,
+    };
+    const skippedSlotKeys = [
+      ...new Set([
+        ...(generation.skippedSlotKeys ?? []),
+        ...seats.flatMap((seat) => {
+          const key = seat.slotKey ?? oldSlots[attached.indexOf(seat)]?.slotKey;
+          return key ? [key] : [];
+        }),
+      ]),
+    ];
+    commands.push({
+      kind: 'delete',
+      patches: regenerateTableSeats(draft, table, {
+        ...table,
+        generation: { ...generation, skippedSlotKeys },
+      }).patches,
+    });
+  }
   return {
     kind: 'delete',
-    patches: uniquePatches(
-      targets.map((target) => deleteTarget(draft, target)),
-    ),
+    patches: uniquePatches(commands),
   };
 }

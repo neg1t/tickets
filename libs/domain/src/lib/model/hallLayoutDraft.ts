@@ -1,8 +1,15 @@
-import type { SpatialBounds } from '@hall-platform/geometry';
 import { z } from 'zod';
 import { floorIdSchema, layoutVersionIdSchema } from '../shared/ids/index.js';
-import { worldCalibrationSchema } from '../shared/lib/coordinates.js';
+import {
+  worldBoundsSchema,
+  worldCalibrationSchema,
+  type WorldBounds,
+} from '../shared/lib/coordinates.js';
 import { layoutSnapshotSchema, type LayoutSnapshot } from './layoutSnapshot.js';
+import {
+  CURRENT_DRAFT_SCHEMA_VERSION,
+  migrateHallLayoutDraft,
+} from './migrations.js';
 
 export const pdfAssetSchema = z.strictObject({
   kind: z.literal('pdf'),
@@ -20,20 +27,12 @@ export const pdfAssetSchema = z.strictObject({
 
 export type PdfAsset = z.infer<typeof pdfAssetSchema>;
 
-const boundsSchema = z
-  .strictObject({
-    minX: z.number().finite(),
-    minY: z.number().finite(),
-    maxX: z.number().finite(),
-    maxY: z.number().finite(),
-  })
-  .refine((bounds) => bounds.minX < bounds.maxX && bounds.minY < bounds.maxY);
-
 const hallLayoutDraftSchema = z
   .strictObject({
+    schemaVersion: z.literal(CURRENT_DRAFT_SCHEMA_VERSION),
     hallName: z.string().min(1),
     snapshot: layoutSnapshotSchema,
-    zoneBounds: z.record(z.string(), boundsSchema),
+    zoneBounds: z.record(z.string(), worldBoundsSchema),
     assets: z.record(z.string(), pdfAssetSchema).default({}),
     calibration: worldCalibrationSchema.nullable().default(null),
   })
@@ -61,15 +60,16 @@ const hallLayoutDraftSchema = z
   });
 
 export type HallLayoutDraft = Readonly<{
+  schemaVersion: typeof CURRENT_DRAFT_SCHEMA_VERSION;
   hallName: string;
   snapshot: LayoutSnapshot;
-  zoneBounds: Readonly<Record<string, SpatialBounds>>;
+  zoneBounds: Readonly<Record<string, WorldBounds>>;
   assets: Readonly<Record<string, PdfAsset>>;
   calibration: z.infer<typeof worldCalibrationSchema> | null;
 }>;
 
 export function parseHallLayoutDraft(value: unknown): HallLayoutDraft {
-  return hallLayoutDraftSchema.parse(value);
+  return hallLayoutDraftSchema.parse(migrateHallLayoutDraft(value));
 }
 
 export function createEmptyDraft(hallName: string): HallLayoutDraft {
@@ -77,6 +77,7 @@ export function createEmptyDraft(hallName: string): HallLayoutDraft {
   const versionId = layoutVersionIdSchema.parse(`version-${id}`);
   const floorId = floorIdSchema.parse(`floor-${id}`);
   return {
+    schemaVersion: CURRENT_DRAFT_SCHEMA_VERSION,
     hallName: hallName.trim() || 'Новый зал',
     snapshot: layoutSnapshotSchema.parse({
       id: `snapshot-${id}`,
@@ -89,6 +90,7 @@ export function createEmptyDraft(hallName: string): HallLayoutDraft {
       seats: [],
       tables: [],
       backgrounds: [],
+      decorations: [],
     }),
     zoneBounds: {},
     assets: {},
@@ -100,5 +102,12 @@ export function createDraftFromSnapshot(
   hallName: string,
   snapshot: LayoutSnapshot,
 ): HallLayoutDraft {
-  return { hallName, snapshot, zoneBounds: {}, assets: {}, calibration: null };
+  return {
+    schemaVersion: CURRENT_DRAFT_SCHEMA_VERSION,
+    hallName,
+    snapshot,
+    zoneBounds: {},
+    assets: {},
+    calibration: null,
+  };
 }

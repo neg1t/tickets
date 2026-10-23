@@ -27,6 +27,27 @@ export const tableShapeSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 
+export const tableGenerationSchema = z.object({
+  seatOffset: z.number().nonnegative().finite(),
+  skippedSlotKeys: z.array(z.string().min(1)).optional(),
+  numbering: z
+    .object({
+      start: z.number().int().positive().optional(),
+      direction: z.enum(['forward', 'reverse']).optional(),
+      prefix: z.string().optional(),
+    })
+    .optional(),
+  adjustments: z
+    .array(
+      z.object({
+        slotKey: z.string().min(1),
+        offset: worldPointSchema.optional(),
+        facingOffsetRadians: z.number().finite().optional(),
+      }),
+    )
+    .optional(),
+});
+
 export const tableSchema = z.object({
   id: tableIdSchema,
   floorId: floorIdSchema,
@@ -36,7 +57,9 @@ export const tableSchema = z.object({
   center: worldPointSchema,
   rotationRadians: z.number().finite(),
   shape: tableShapeSchema,
+  generation: tableGenerationSchema.optional(),
 });
 
 export type TableShape = z.infer<typeof tableShapeSchema>;
 export type Table = z.infer<typeof tableSchema>;
+export type TableGeneration = z.infer<typeof tableGenerationSchema>;

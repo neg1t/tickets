@@ -15,7 +15,6 @@
     }
   },
   "dependencies": {
-    "@hall-platform/geometry": "workspace:*",
     "tslib": "^2.3.0",
     "zod": "^4.6.7"
   }

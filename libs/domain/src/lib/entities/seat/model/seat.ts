@@ -21,6 +21,15 @@ export const seatSchema = z.object({
   label: z.string().trim().min(1),
   position: worldPointSchema,
   placement: seatPlacementSchema,
+  slotKey: z.string().min(1).optional(),
+  rotationRadians: z.number().finite().optional(),
+  manual: z
+    .object({
+      offset: worldPointSchema,
+      label: z.string().trim().min(1).optional(),
+      rotationOffsetRadians: z.number().finite().optional(),
+    })
+    .optional(),
 });
 
 export type SeatPlacement = z.infer<typeof seatPlacementSchema>;

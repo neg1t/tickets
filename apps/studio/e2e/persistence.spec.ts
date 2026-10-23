@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 
 test('renders the hall management dashboard', async ({ page }) => {
   await page.goto('/');
@@ -11,6 +12,54 @@ test('renders the hall management dashboard', async ({ page }) => {
   await expect(
     page.locator('.hall-card').filter({ hasText: 'Опубликована версия 1' }),
   ).toHaveCount(4);
+});
+
+test('imports a v1 draft and exports the current schema version', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const legacy = {
+    hallName: 'Мигрированный зал',
+    snapshot: {
+      id: 'snapshot-legacy-import',
+      layoutVersionId: 'version-legacy-import',
+      floors: [
+        {
+          id: 'floor-legacy-import',
+          layoutVersionId: 'version-legacy-import',
+          name: 'Основной этаж',
+        },
+      ],
+      zones: [],
+      rows: [],
+      seats: [],
+      tables: [],
+      backgrounds: [],
+    },
+    zoneBounds: {},
+    assets: {},
+    calibration: null,
+  };
+  await page.getByLabel('Открыть JSON').setInputFiles({
+    name: 'legacy-hall.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(legacy)),
+  });
+  await expect(
+    page.getByRole('region', { name: 'Редактор зала Мигрированный зал' }),
+  ).toBeVisible();
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Экспорт JSON' }).click();
+  const download = await downloadPromise;
+  const path = await download.path();
+  expect(path).not.toBeNull();
+  const exported = JSON.parse(readFileSync(String(path), 'utf8')) as {
+    schemaVersion: number;
+    snapshot: { id: string };
+  };
+  expect(exported.schemaVersion).toBe(2);
+  expect(exported.snapshot.id).toBe(legacy.snapshot.id);
 });
 test('saves a draft in IndexedDB and restores it after reload without network access', async ({
   page,

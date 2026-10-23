@@ -2,6 +2,25 @@ import { describe, expect, it } from 'vitest';
 import { zoneSchema } from './zone.js';
 
 describe('zoneSchema', () => {
+  it('requires capacity for a general admission zone', () => {
+    expect(
+      zoneSchema.safeParse({
+        id: 'zone-ga',
+        floorId: 'floor-ground',
+        name: 'Standing',
+        kind: 'ga',
+      }).success,
+    ).toBe(false);
+    expect(
+      zoneSchema.safeParse({
+        id: 'zone-ga',
+        floorId: 'floor-ground',
+        name: 'Standing',
+        kind: 'ga',
+        capacity: 20,
+      }).success,
+    ).toBe(true);
+  });
   it('parses a zone linked to a floor', () => {
     expect(
       zoneSchema.parse({
@@ -12,6 +31,7 @@ describe('zoneSchema', () => {
     ).toEqual({
       id: 'zone-stalls',
       floorId: 'floor-ground',
+      kind: 'seated',
       name: 'Stalls',
     });
   });
@@ -34,6 +54,7 @@ describe('zoneSchema', () => {
     expect(zoneSchema.parse(JSON.parse(JSON.stringify(zone)))).toEqual({
       id: 'zone-stalls',
       floorId: 'floor-ground',
+      kind: 'seated',
       name: 'Stalls',
     });
   });

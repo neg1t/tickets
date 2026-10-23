@@ -59,9 +59,11 @@ export function createDemoOccurrence(
     zoneCapacity: Object.fromEntries(
       snapshot.zones
         .filter(
-          (zone) => !snapshot.seats.some((seat) => seat.zoneId === zone.id),
+          (zone) =>
+            zone.kind === 'ga' ||
+            !snapshot.seats.some((seat) => seat.zoneId === zone.id),
         )
-        .map((zone) => [zone.id, 20]),
+        .map((zone) => [zone.id, zone.capacity ?? 20]),
     ),
     prices: {
       seats: Object.fromEntries(

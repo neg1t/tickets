@@ -1,5 +1,6 @@
 import type {
   Background,
+  Decoration,
   LayoutSnapshot,
   Row,
   Table,
@@ -10,13 +11,14 @@ import {
   bezierPointAtParameter,
   distanceBetweenVectors,
   distanceToSegment,
+  isPointInPolygon,
   SpatialIndex,
   type SpatialBounds,
   type Vector2,
 } from '@hall-platform/geometry';
 
 export type HallTarget = Readonly<{
-  kind: 'seat' | 'row' | 'table' | 'zone';
+  kind: 'seat' | 'row' | 'table' | 'zone' | 'decoration';
   id: string;
 }>;
 
@@ -40,6 +42,7 @@ export type HallScene = Readonly<{
   rows: readonly SceneRow[];
   tables: readonly Table[];
   zones: readonly SceneZone[];
+  decorations: readonly Decoration[];
   backgrounds: readonly SceneBackground[];
   bounds: SpatialBounds;
   index: SpatialIndex<HallTarget>;
@@ -166,6 +169,9 @@ export function buildHallScene(
       return { row, points, bounds: boundsOfPoints(points) };
     });
   const tables = snapshot.tables.filter((table) => table.floorId === floorId);
+  const decorations = snapshot.decorations.filter(
+    (item) => item.floorId === floorId,
+  );
   const index = new SpatialIndex<HallTarget>(8);
   const memberBounds = new Map<string, SpatialBounds>();
   const allBounds: SpatialBounds[] = [];
@@ -211,12 +217,22 @@ export function buildHallScene(
   seats.forEach((seat) =>
     add('seat', seat.id, pointBounds(seat.position, seatRadius), seat.zoneId),
   );
+  decorations.forEach((decoration) =>
+    add(
+      'decoration',
+      decoration.id,
+      decoration.kind === 'label'
+        ? pointBounds(decoration.position, 1.2)
+        : boundsOfPoints(decoration.polygon),
+    ),
+  );
 
   const floorZones = snapshot.zones.filter((zone) => zone.floorId === floorId);
   const occupiedBounds: SpatialBounds[] = [...allBounds];
   floorZones.forEach((zone) => {
     const explicit = explicitZoneBounds[zone.id];
     if (explicit) occupiedBounds.push(explicit);
+    if (zone.polygon) occupiedBounds.push(boundsOfPoints(zone.polygon));
   });
   const occupied =
     occupiedBounds.length > 0
@@ -227,6 +243,7 @@ export function buildHallScene(
   const zones = floorZones.flatMap((zone) => {
     const members = memberBounds.get(zone.id);
     const bounds =
+      (zone.polygon ? boundsOfPoints(zone.polygon) : undefined) ??
       explicitZoneBounds[zone.id] ??
       (members
         ? expandBounds(members, zonePadding)
@@ -236,7 +253,8 @@ export function buildHallScene(
             maxX: occupied.maxX + 16,
             maxY: occupied.minY + standaloneZoneIndex * 10 + 8,
           });
-    if (!members && !explicitZoneBounds[zone.id]) standaloneZoneIndex += 1;
+    if (!members && !explicitZoneBounds[zone.id] && !zone.polygon)
+      standaloneZoneIndex += 1;
     add('zone', zone.id, bounds);
     allBounds.push(bounds);
     return [{ zone, bounds }];
@@ -245,7 +263,17 @@ export function buildHallScene(
     allBounds.length > 0
       ? allBounds.reduce(mergeBounds)
       : pointBounds({ x: 0, y: 0 }, 10);
-  return { floorId, seats, rows, tables, zones, backgrounds, bounds, index };
+  return {
+    floorId,
+    seats,
+    rows,
+    tables,
+    zones,
+    decorations,
+    backgrounds,
+    bounds,
+    index,
+  };
 }
 
 function isInsideTable(table: Table, point: Vector2): boolean {
@@ -272,7 +300,7 @@ export function hitTestHallScene(
   const candidates = scene.index.search(
     expandBounds(pointBounds(point), tolerance),
   );
-  const priority = { seat: 0, table: 1, row: 2, zone: 3 };
+  const priority = { seat: 0, table: 1, row: 2, decoration: 3, zone: 4 };
   candidates.sort(
     (first, second) => priority[first.value.kind] - priority[second.value.kind],
   );
@@ -312,10 +340,26 @@ export function hitTestHallScene(
         const zone = scene.zones.find((item) => item.zone.id === value.id);
         if (
           zone &&
-          point.x >= zone.bounds.minX &&
-          point.x <= zone.bounds.maxX &&
-          point.y >= zone.bounds.minY &&
-          point.y <= zone.bounds.maxY
+          (zone.zone.polygon
+            ? isPointInPolygon(zone.zone.polygon, point)
+            : point.x >= zone.bounds.minX &&
+              point.x <= zone.bounds.maxX &&
+              point.y >= zone.bounds.minY &&
+              point.y <= zone.bounds.maxY)
+        )
+          return value;
+        break;
+      }
+      case 'decoration': {
+        const decoration = scene.decorations.find(
+          (item) => item.id === value.id,
+        );
+        if (
+          decoration &&
+          (decoration.kind === 'label'
+            ? distanceBetweenVectors(decoration.position, point) <=
+              1.2 + tolerance
+            : isPointInPolygon(decoration.polygon, point))
         )
           return value;
         break;

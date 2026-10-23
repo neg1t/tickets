@@ -72,7 +72,6 @@ test('A05: deleting a multiselection removes both seats', async ({ page }) => {
 test('A04: changing a row in the inspector updates its seats', async ({
   page,
 }) => {
-  test.fail(); // Remove when H02 shares transform/regenerate commands.
   await page.goto('/');
   await page.getByRole('button', { name: 'Редактор', exact: true }).click();
   const stage = page.locator('#hall-stage');

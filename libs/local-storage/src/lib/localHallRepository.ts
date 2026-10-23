@@ -1,5 +1,6 @@
 import {
   backgroundIdSchema,
+  decorationIdSchema,
   floorIdSchema,
   layoutVersionIdSchema,
   rowIdSchema,
@@ -135,6 +136,11 @@ export function duplicateHallDraft(source: HallLayoutDraft): HallLayoutDraft {
         ...background,
         id: backgroundIdSchema.parse(newId('background')),
         floorId: floorId(background.floorId),
+      })),
+      decorations: original.snapshot.decorations.map((decoration) => ({
+        ...decoration,
+        id: decorationIdSchema.parse(newId('decoration')),
+        floorId: floorId(decoration.floorId),
       })),
     },
     zoneBounds: Object.fromEntries(
@@ -447,9 +453,12 @@ export function createLocalHallRepository(
             .getAll(id);
           request.onsuccess = () =>
             done(
-              (request.result as PublishedHallVersion[]).sort(
-                (a, b) => b.versionNumber - a.versionNumber,
-              ),
+              (request.result as PublishedHallVersion[])
+                .map((version) => ({
+                  ...version,
+                  layout: parseHallLayoutDraft(version.layout),
+                }))
+                .sort((a, b) => b.versionNumber - a.versionNumber),
             );
         },
       );
@@ -461,8 +470,14 @@ export function createLocalHallRepository(
         'readonly',
         (transaction, done) => {
           const request = transaction.objectStore('versions').get(versionId);
-          request.onsuccess = () =>
-            done((request.result as PublishedHallVersion | undefined) ?? null);
+          request.onsuccess = () => {
+            const version = request.result as PublishedHallVersion | undefined;
+            done(
+              version
+                ? { ...version, layout: parseHallLayoutDraft(version.layout) }
+                : null,
+            );
+          };
         },
       );
     },

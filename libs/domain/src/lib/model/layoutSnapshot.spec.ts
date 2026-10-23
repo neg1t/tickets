@@ -174,6 +174,44 @@ describe('layout snapshot schema', () => {
       }).success,
     ).toBe(false);
   });
+
+  it('accepts a GA polygon and rejects decorations on missing floors', () => {
+    const valid = layoutSnapshotSchema.parse({
+      ...snapshot,
+      zones: [
+        {
+          ...snapshot.zones[0],
+          kind: 'ga',
+          capacity: 20,
+          polygon: [
+            { x: 0, y: 0 },
+            { x: 5, y: 0 },
+            { x: 5, y: 5 },
+          ],
+        },
+      ],
+      decorations: [
+        {
+          id: 'stage-main',
+          floorId: 'floor-main',
+          kind: 'stage',
+          polygon: [
+            { x: 0, y: 0 },
+            { x: 3, y: 0 },
+            { x: 3, y: 2 },
+          ],
+        },
+      ],
+    });
+    expect(valid.zones[0]?.kind).toBe('ga');
+    expect(valid.decorations).toHaveLength(1);
+    expect(
+      layoutSnapshotSchema.safeParse({
+        ...valid,
+        decorations: [{ ...valid.decorations[0], floorId: 'missing' }],
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe('layout document schema', () => {

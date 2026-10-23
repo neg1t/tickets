@@ -57,6 +57,40 @@
 .hall-editor-properties h4 {
   margin: 8px 0 0;
 }
+.hall-editor-validation {
+  border-top: 1px solid #d9e4eb;
+  margin-top: 12px;
+  padding-top: 12px;
+  font-size: 12px;
+}
+.hall-editor-validation ul {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 220px;
+  overflow: auto;
+}
+.hall-editor-validation li[data-severity='error'] {
+  color: #a82318;
+}
+.hall-editor-validation li[data-severity='warning'] {
+  color: #7a5a00;
+}
+.hall-editor-generation {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin: 8px 0;
+}
+.hall-editor-generation label {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+}
+.hall-editor-generation input {
+  width: 100%;
+  box-sizing: border-box;
+}
 
 .hall-editor button,
 .hall-editor select,

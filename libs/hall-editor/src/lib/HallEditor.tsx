@@ -1,4 +1,10 @@
-import { useEffect, useState, type KeyboardEvent } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useState,
+  type KeyboardEvent,
+} from 'react';
 import { useUnit } from 'effector-react';
 import {
   backgroundIdSchema,
@@ -6,6 +12,7 @@ import {
   calibrateWorldDistance,
   worldPointSchema,
   type Background,
+  type Decoration,
   type Row,
   type Seat,
   type Table,
@@ -20,11 +27,23 @@ import type { HallLayoutDraft } from './editorDraft.js';
 import { createEditorModel } from './editorModel.js';
 import { PdfHallViewer } from './PdfHallViewer.js';
 import {
+  RowGenerationControls,
+  TableGenerationControls,
+} from './ui/GenerationControls.js';
+import {
   createObjectAt,
   deleteTargets,
   moveTargets,
   type EditorTool,
 } from './editorOperations.js';
+import { preserveSeatManualAdjustment } from './commands/regenerateSeats.js';
+import {
+  createFloor,
+  deleteFloor,
+  renameFloor,
+} from './commands/structureOperations.js';
+import { validateLayout } from './validation/validateLayout.js';
+import { transformRow, transformTable } from './commands/transformSelection.js';
 
 export type EditorChangeMeta = Readonly<{
   kind: EditorCommand['kind'] | 'undo' | 'redo';
@@ -38,8 +57,12 @@ export type HallEditorProps = {
   readonly saving?: boolean;
   readonly onChange: (layout: HallLayoutDraft, meta: EditorChangeMeta) => void;
   readonly onSave?: (layout: HallLayoutDraft) => void | Promise<void>;
-  readonly onPublish?: (layout: HallLayoutDraft) => void | Promise<void>;
+  readonly onPublish?: (
+    layout: HallLayoutDraft,
+    warningsAcknowledged: boolean,
+  ) => void | Promise<void>;
   readonly onError?: (error: Error) => void;
+  readonly publishedSeatIds?: readonly Seat['id'][];
 };
 
 type PropertyFieldProps = {
@@ -86,6 +109,10 @@ const tools: readonly { id: EditorTool; label: string }[] = [
   { id: 'select', label: 'Выбор' },
   { id: 'pan', label: 'Рука' },
   { id: 'zone', label: 'Зона' },
+  { id: 'zone-ga', label: 'GA-зона' },
+  { id: 'stage', label: 'Сцена' },
+  { id: 'label', label: 'Подпись' },
+  { id: 'obstacle', label: 'Препятствие' },
   { id: 'row-line', label: 'Прямой ряд' },
   { id: 'row-arc', label: 'Дуговой ряд' },
   { id: 'row-bezier', label: 'Ряд Безье' },
@@ -104,6 +131,7 @@ export function HallEditor(props: HallEditorProps) {
     onSave,
     onPublish,
     onError,
+    publishedSeatIds = [],
   } = props;
   const [model] = useState(() => createEditorModel(value));
   const [floorId, setFloorId] = useState(value.snapshot.floors[0]?.id ?? '');
@@ -113,6 +141,13 @@ export function HallEditor(props: HallEditorProps) {
     null,
   );
   const [importingPdf, setImportingPdf] = useState(false);
+  const [previewState, setPreviewState] = useState<{
+    key: string;
+    seats: readonly Vector2[];
+  }>({ key: '', seats: [] });
+  const [warningAcknowledgement, setWarningAcknowledgement] = useState<
+    HallLayoutDraft['snapshot'] | null
+  >(null);
   const [state, selection, tool, zoneId, backgroundId] = useUnit([
     model.$state,
     model.$selection,
@@ -121,12 +156,26 @@ export function HallEditor(props: HallEditorProps) {
     model.$backgroundId,
   ]);
   const draft = state.draft;
+  const validationIssues = validateLayout(draft);
+  const hasBlockingIssues = validationIssues.some(
+    (issue) => issue.severity === 'error',
+  );
+  const hasWarnings = validationIssues.some(
+    (issue) => issue.severity === 'warning',
+  );
+  const warningsAcknowledged = warningAcknowledgement === draft.snapshot;
   const activeFloorId = draft.snapshot.floors.some(
     (floor) => floor.id === floorId,
   )
     ? floorId
     : (draft.snapshot.floors[0]?.id ?? '');
   const target = selection[0] ?? null;
+  const targetKey = target ? `${target.kind}:${target.id}` : '';
+  const previewSeats = previewState.key === targetKey ? previewState.seats : [];
+  const handlePreview = useCallback(
+    (seats: readonly Vector2[]) => setPreviewState({ key: targetKey, seats }),
+    [targetKey],
+  );
   const background =
     draft.snapshot.backgrounds.find((item) => item.id === backgroundId) ?? null;
 
@@ -239,6 +288,7 @@ export function HallEditor(props: HallEditorProps) {
         point,
         zoneId || undefined,
         activeFloorId,
+        publishedSeatIds,
       );
       if (!commit(created.command, created.target)) return;
       model.selectionChanged([created.target]);
@@ -251,7 +301,10 @@ export function HallEditor(props: HallEditorProps) {
   }
 
   function handleMove(moved: readonly HallTarget[], delta: Vector2) {
-    commit(moveTargets(draft, moved, delta), moved[0] ?? null);
+    commit(
+      moveTargets(draft, moved, delta, publishedSeatIds),
+      moved[0] ?? null,
+    );
   }
 
   async function handlePdfImport(file: File, replace?: Background) {
@@ -403,11 +456,15 @@ export function HallEditor(props: HallEditorProps) {
   }
 
   function runCallback(
-    callback?: (layout: HallLayoutDraft) => void | Promise<void>,
+    callback?: (
+      layout: HallLayoutDraft,
+      warningsAcknowledged: boolean,
+    ) => void | Promise<void>,
+    acknowledgeWarnings = false,
   ) {
     if (!callback) return;
     try {
-      Promise.resolve(callback(draft)).catch(report);
+      Promise.resolve(callback(draft, acknowledgeWarnings)).catch(report);
     } catch (error) {
       report(error);
     }
@@ -422,20 +479,40 @@ export function HallEditor(props: HallEditorProps) {
   function updateSeat(seat: Seat, after: Seat) {
     commit({
       kind: 'update',
-      patches: [{ collection: 'seats', id: seat.id, before: seat, after }],
+      patches: [
+        {
+          collection: 'seats',
+          id: seat.id,
+          before: seat,
+          after: preserveSeatManualAdjustment(seat, after),
+        },
+      ],
     });
   }
   function updateRow(row: Row, after: Row) {
-    commit({
-      kind: 'update',
-      patches: [{ collection: 'rows', id: row.id, before: row, after }],
-    });
+    commit(
+      row.curve === after.curve && row.generation === after.generation
+        ? {
+            kind: 'update',
+            patches: [{ collection: 'rows', id: row.id, before: row, after }],
+          }
+        : transformRow(draft, row, after, publishedSeatIds),
+    );
   }
   function updateTable(table: Table, after: Table) {
-    commit({
-      kind: 'update',
-      patches: [{ collection: 'tables', id: table.id, before: table, after }],
-    });
+    commit(
+      table.center === after.center &&
+        table.rotationRadians === after.rotationRadians &&
+        table.shape === after.shape &&
+        table.generation === after.generation
+        ? {
+            kind: 'update',
+            patches: [
+              { collection: 'tables', id: table.id, before: table, after },
+            ],
+          }
+        : transformTable(draft, table, after, publishedSeatIds),
+    );
   }
   function updateBounds(
     id: string,
@@ -445,6 +522,12 @@ export function HallEditor(props: HallEditorProps) {
     commit({
       kind: 'update',
       patches: [{ collection: 'zoneBounds', id, before, after }],
+    });
+  }
+  function updateDecoration(before: Decoration, after: Decoration) {
+    commit({
+      kind: 'update',
+      patches: [{ collection: 'decorations', id: before.id, before, after }],
     });
   }
 
@@ -463,6 +546,10 @@ export function HallEditor(props: HallEditorProps) {
   const table =
     target?.kind === 'table'
       ? draft.snapshot.tables.find((item) => item.id === target.id)
+      : null;
+  const decoration =
+    target?.kind === 'decoration'
+      ? draft.snapshot.decorations.find((item) => item.id === target.id)
       : null;
   const bounds = zone ? draft.zoneBounds[zone.id] : null;
   const lineCurve = row?.curve.kind === 'line' ? row.curve : null;
@@ -514,8 +601,13 @@ export function HallEditor(props: HallEditorProps) {
         {onPublish && (
           <button
             type="button"
-            disabled={readonly || saving}
-            onClick={() => runCallback(onPublish)}
+            disabled={
+              readonly ||
+              saving ||
+              hasBlockingIssues ||
+              (hasWarnings && !warningsAcknowledged)
+            }
+            onClick={() => runCallback(onPublish, warningsAcknowledged)}
           >
             Опубликовать
           </button>
@@ -536,6 +628,75 @@ export function HallEditor(props: HallEditorProps) {
               {item.label}
             </button>
           ))}
+          <h3>Этажи</h3>
+          <label>
+            Активный этаж
+            <select
+              aria-label="Активный этаж"
+              value={activeFloorId}
+              onChange={(event) => {
+                setFloorId(event.target.value);
+                model.selectionChanged([]);
+                model.zoneChanged('');
+              }}
+            >
+              {draft.snapshot.floors.map((floor) => (
+                <option key={floor.id} value={floor.id}>
+                  {floor.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={readonly}
+            onClick={() => {
+              const command = createFloor(
+                draft,
+                `Этаж ${draft.snapshot.floors.length + 1}`,
+              );
+              if (commit(command, null)) {
+                const floorPatch = command.patches.find(
+                  (patch) => patch.collection === 'floors',
+                );
+                if (floorPatch?.collection === 'floors' && floorPatch.after)
+                  setFloorId(floorPatch.after.id);
+              }
+            }}
+          >
+            Добавить этаж
+          </button>
+          {draft.snapshot.floors
+            .filter((floor) => floor.id === activeFloorId)
+            .map((floor) => (
+              <Fragment key={floor.id}>
+                <PropertyField
+                  label="Название этажа"
+                  value={floor.name}
+                  disabled={readonly}
+                  onCommit={(name) =>
+                    commit(renameFloor(floor, String(name)), null)
+                  }
+                />
+                <button
+                  type="button"
+                  disabled={readonly || draft.snapshot.floors.length <= 1}
+                  onClick={() => {
+                    if (commit(deleteFloor(draft, floor.id), null)) {
+                      setFloorId(
+                        draft.snapshot.floors.find(
+                          (item) => item.id !== floor.id,
+                        )?.id ?? '',
+                      );
+                      model.selectionChanged([]);
+                      model.zoneChanged('');
+                    }
+                  }}
+                >
+                  Удалить этаж
+                </button>
+              </Fragment>
+            ))}
           <label>
             Зона для новых объектов
             <select
@@ -623,6 +784,8 @@ export function HallEditor(props: HallEditorProps) {
 
         <PdfHallViewer
           draft={draft}
+          focusedFloorId={activeFloorId}
+          previewSeats={previewSeats}
           onError={report}
           activeTool={tool}
           selectedTargets={selection}
@@ -648,6 +811,100 @@ export function HallEditor(props: HallEditorProps) {
           {zone && (
             <>
               <h4>Зона</h4>
+              <label>
+                Тип зоны
+                <select
+                  aria-label="Тип зоны"
+                  value={zone.kind}
+                  disabled={readonly}
+                  onChange={(event) =>
+                    updateZone(zone, {
+                      ...zone,
+                      kind: event.target.value as Zone['kind'],
+                      ...(event.target.value === 'ga'
+                        ? { capacity: zone.capacity ?? 20 }
+                        : {}),
+                    })
+                  }
+                >
+                  <option value="seated">С местами</option>
+                  <option value="ga">Без мест (GA)</option>
+                </select>
+              </label>
+              {zone.kind === 'ga' && (
+                <PropertyField
+                  label="Вместимость GA"
+                  value={zone.capacity ?? 20}
+                  disabled={readonly}
+                  onCommit={(capacity) =>
+                    updateZone(zone, { ...zone, capacity: Number(capacity) })
+                  }
+                />
+              )}
+              <button
+                type="button"
+                disabled={readonly || !bounds}
+                onClick={() => {
+                  if (!bounds) return;
+                  updateZone(zone, {
+                    ...zone,
+                    polygon: [
+                      worldPointSchema.parse({
+                        x: bounds.minX,
+                        y: bounds.minY,
+                      }),
+                      worldPointSchema.parse({
+                        x: bounds.maxX,
+                        y: bounds.minY,
+                      }),
+                      worldPointSchema.parse({
+                        x: bounds.maxX,
+                        y: bounds.maxY,
+                      }),
+                      worldPointSchema.parse({
+                        x: bounds.minX,
+                        y: bounds.maxY,
+                      }),
+                    ],
+                  });
+                }}
+              >
+                Преобразовать в полигон
+              </button>
+              {zone.polygon?.map((point, index) => (
+                <div key={index}>
+                  <PropertyField
+                    label={`Вершина ${index + 1} X`}
+                    value={point.x}
+                    disabled={readonly}
+                    onCommit={(x) =>
+                      updateZone(zone, {
+                        ...zone,
+                        polygon: zone.polygon?.map((item, i) =>
+                          i === index
+                            ? worldPointSchema.parse({ ...item, x: Number(x) })
+                            : item,
+                        ),
+                      })
+                    }
+                  />
+                  <PropertyField
+                    label={`Вершина ${index + 1} Y`}
+                    value={point.y}
+                    disabled={readonly}
+                    onCommit={(y) =>
+                      updateZone(zone, {
+                        ...zone,
+                        polygon: zone.polygon?.map((item, i) =>
+                          i === index
+                            ? worldPointSchema.parse({ ...item, y: Number(y) })
+                            : item,
+                        ),
+                      })
+                    }
+                  />
+                </div>
+              ))}
               <PropertyField
                 label="Название зоны"
                 value={zone.name}
@@ -656,7 +913,7 @@ export function HallEditor(props: HallEditorProps) {
                   updateZone(zone, { ...zone, name: String(name) })
                 }
               />
-              {bounds && (
+              {bounds && !zone.polygon && (
                 <>
                   <PropertyField
                     label="X зоны"
@@ -707,6 +964,107 @@ export function HallEditor(props: HallEditorProps) {
                     }
                   />
                 </>
+              )}
+            </>
+          )}
+          {decoration && (
+            <>
+              <h4>
+                {decoration.kind === 'stage'
+                  ? 'Сцена'
+                  : decoration.kind === 'obstacle'
+                    ? 'Препятствие'
+                    : 'Подпись'}
+              </h4>
+              <PropertyField
+                label="Текст объекта"
+                value={
+                  decoration.kind === 'label'
+                    ? decoration.text
+                    : (decoration.label ?? '')
+                }
+                disabled={readonly}
+                onCommit={(value) =>
+                  updateDecoration(
+                    decoration,
+                    decoration.kind === 'label'
+                      ? { ...decoration, text: String(value) }
+                      : { ...decoration, label: String(value) },
+                  )
+                }
+              />
+              {decoration.kind === 'label' ? (
+                <>
+                  <PropertyField
+                    label="X подписи"
+                    value={decoration.position.x}
+                    disabled={readonly}
+                    onCommit={(x) =>
+                      updateDecoration(decoration, {
+                        ...decoration,
+                        position: worldPointSchema.parse({
+                          ...decoration.position,
+                          x: Number(x),
+                        }),
+                      })
+                    }
+                  />
+                  <PropertyField
+                    label="Y подписи"
+                    value={decoration.position.y}
+                    disabled={readonly}
+                    onCommit={(y) =>
+                      updateDecoration(decoration, {
+                        ...decoration,
+                        position: worldPointSchema.parse({
+                          ...decoration.position,
+                          y: Number(y),
+                        }),
+                      })
+                    }
+                  />
+                </>
+              ) : (
+                decoration.polygon.map((point, index) => (
+                  <div key={index}>
+                    <PropertyField
+                      label={`Вершина объекта ${index + 1} X`}
+                      value={point.x}
+                      disabled={readonly}
+                      onCommit={(x) =>
+                        updateDecoration(decoration, {
+                          ...decoration,
+                          polygon: decoration.polygon.map((item, i) =>
+                            i === index
+                              ? worldPointSchema.parse({
+                                  ...item,
+                                  x: Number(x),
+                                })
+                              : item,
+                          ),
+                        })
+                      }
+                    />
+                    <PropertyField
+                      label={`Вершина объекта ${index + 1} Y`}
+                      value={point.y}
+                      disabled={readonly}
+                      onCommit={(y) =>
+                        updateDecoration(decoration, {
+                          ...decoration,
+                          polygon: decoration.polygon.map((item, i) =>
+                            i === index
+                              ? worldPointSchema.parse({
+                                  ...item,
+                                  y: Number(y),
+                                })
+                              : item,
+                          ),
+                        })
+                      }
+                    />
+                  </div>
+                ))
               )}
             </>
           )}
@@ -920,6 +1278,20 @@ export function HallEditor(props: HallEditorProps) {
                     />
                   </div>
                 ))}
+              <RowGenerationControls
+                key={`${row.id}:${JSON.stringify(row.generation)}`}
+                row={row}
+                seatCount={
+                  draft.snapshot.seats.filter(
+                    (seat) =>
+                      seat.placement.kind === 'row' &&
+                      seat.placement.rowId === row.id,
+                  ).length
+                }
+                readonly={readonly}
+                onPreview={handlePreview}
+                onApply={(after) => updateRow(row, after)}
+              />
             </>
           )}
           {table && (
@@ -1013,6 +1385,13 @@ export function HallEditor(props: HallEditorProps) {
                   />
                 </>
               )}
+              <TableGenerationControls
+                key={`${table.id}:${JSON.stringify(table.shape)}:${JSON.stringify(table.generation)}`}
+                table={table}
+                readonly={readonly}
+                onPreview={handlePreview}
+                onApply={(after) => updateTable(table, after)}
+              />
             </>
           )}
           {background &&
@@ -1169,6 +1548,46 @@ export function HallEditor(props: HallEditorProps) {
             <button type="button" disabled={readonly} onClick={handleDelete}>
               Удалить объект
             </button>
+          )}
+          {validationIssues.length > 0 && (
+            <section
+              className="hall-editor-validation"
+              aria-label="Проверка схемы"
+            >
+              <h3>Проверка схемы</h3>
+              <p>
+                Номера проверяются внутри ряда или стола; для отдельных мест —
+                внутри зоны либо этажа.
+              </p>
+              {hasWarnings && (
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={warningsAcknowledged}
+                    onChange={(event) =>
+                      setWarningAcknowledgement(
+                        event.target.checked ? draft.snapshot : null,
+                      )
+                    }
+                  />
+                  Публиковать с предупреждениями
+                </label>
+              )}
+              <ul>
+                {validationIssues.slice(0, 20).map((issue, index) => (
+                  <li
+                    key={`${issue.code}:${issue.targetId ?? index}`}
+                    data-severity={issue.severity}
+                  >
+                    {issue.severity === 'error' ? 'Ошибка' : 'Предупреждение'}:{' '}
+                    {issue.message}
+                  </li>
+                ))}
+              </ul>
+              {validationIssues.length > 20 && (
+                <p>Ещё {validationIssues.length - 20} замечаний</p>
+              )}
+            </section>
           )}
         </aside>
       </div>

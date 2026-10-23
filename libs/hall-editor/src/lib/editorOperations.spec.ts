@@ -15,7 +15,7 @@ import {
 } from './editorOperations.js';
 
 describe('editor tools', () => {
-  it.fails('creates a straight row with seats in one command (A03)', () => {
+  it('creates a straight row with seats in one command (A03)', () => {
     const state = createEditorState(createEmptyDraft('My hall'));
     const row = createObjectAt(state.draft, 'row-line', { x: 10, y: 10 });
     const created = applyEditorCommand(state, row.command);
@@ -23,7 +23,7 @@ describe('editor tools', () => {
     expect(created.draft.snapshot.seats.length).toBeGreaterThan(0);
   });
 
-  it.fails('creates a round table with seats in one command (A03)', () => {
+  it('creates a round table with seats in one command (A03)', () => {
     const state = createEditorState(createEmptyDraft('My hall'));
     const table = createObjectAt(state.draft, 'table-circle', { x: 10, y: 10 });
     const created = applyEditorCommand(state, table.command);
@@ -96,8 +96,15 @@ describe('editor tools', () => {
     state = applyEditorCommand(state, seat.command);
     const moved = moveTarget(state.draft, seat.target, { x: 3, y: -2 });
     state = applyEditorCommand(state, moved);
-    expect(state.draft.snapshot.seats[0]?.position).toEqual({ x: 23, y: 18 });
-    expect(undoEditor(state).draft.snapshot.seats[0]?.position).toEqual({
+    expect(
+      state.draft.snapshot.seats.find(({ id }) => id === seat.target.id)
+        ?.position,
+    ).toEqual({ x: 23, y: 18 });
+    expect(
+      undoEditor(state).draft.snapshot.seats.find(
+        ({ id }) => id === seat.target.id,
+      )?.position,
+    ).toEqual({
       x: 20,
       y: 20,
     });
@@ -124,33 +131,23 @@ describe('editor tools', () => {
     let state = createEditorState(createEmptyDraft('My hall'));
     const row = createObjectAt(state.draft, 'row-line', { x: 10, y: 10 });
     state = applyEditorCommand(state, row.command);
-    const seat = createObjectAt(state.draft, 'seat', { x: 10, y: 10 });
-    state = applyEditorCommand(state, seat.command);
     const original = state.draft.snapshot.seats[0];
     if (!original) throw new Error('Missing seat');
-    state = applyEditorCommand(state, {
-      kind: 'update',
-      patches: [
-        {
-          collection: 'seats',
-          id: original.id,
-          before: original,
-          after: {
-            ...original,
-            placement: { kind: 'row', rowId: row.target.id as never },
-          },
-        },
-      ],
-    });
 
     state = applyEditorCommand(
       state,
       moveTarget(state.draft, row.target, { x: 5, y: -3 }),
     );
-    expect(state.draft.snapshot.seats[0]?.position).toEqual({ x: 15, y: 7 });
-    expect(undoEditor(state).draft.snapshot.seats[0]?.position).toEqual({
-      x: 10,
-      y: 10,
+    expect(
+      state.draft.snapshot.seats.find(({ id }) => id === original.id)?.position,
+    ).toEqual({ x: original.position.x + 5, y: original.position.y - 3 });
+    expect(
+      undoEditor(state).draft.snapshot.seats.find(
+        ({ id }) => id === original.id,
+      )?.position,
+    ).toEqual({
+      x: original.position.x,
+      y: original.position.y,
     });
   });
 
@@ -167,7 +164,9 @@ describe('editor tools', () => {
     state = applyEditorCommand(state, row.command);
     const seat = createObjectAt(state.draft, 'seat', { x: 0, y: 0 });
     state = applyEditorCommand(state, seat.command);
-    const original = state.draft.snapshot.seats[0];
+    const original = state.draft.snapshot.seats.find(
+      ({ id }) => id === seat.target.id,
+    );
     if (!original) throw new Error('Missing seat');
     state = applyEditorCommand(state, {
       kind: 'update',

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { backgroundSchema } from '../entities/background/index.js';
+import { decorationSchema } from '../entities/decoration/index.js';
 import { floorSchema } from '../entities/floor/index.js';
 import { hallSchema } from '../entities/hall/index.js';
 import { layoutSchema, layoutVersionSchema } from '../entities/layout/index.js';
@@ -19,10 +20,17 @@ export const layoutSnapshotSchema = z
     seats: z.array(seatSchema),
     tables: z.array(tableSchema),
     backgrounds: z.array(backgroundSchema),
+    decorations: z.array(decorationSchema).default([]),
   })
   .superRefine((snapshot, context) => {
     type Collection =
-      'floors' | 'zones' | 'rows' | 'seats' | 'tables' | 'backgrounds';
+      | 'floors'
+      | 'zones'
+      | 'rows'
+      | 'seats'
+      | 'tables'
+      | 'backgrounds'
+      | 'decorations';
 
     const addIssue = (path: (string | number)[], message: string): void => {
       context.addIssue({ code: 'custom', path, message });
@@ -45,6 +53,7 @@ export const layoutSnapshotSchema = z
       'seats',
       'tables',
       'backgrounds',
+      'decorations',
     ];
     collections.forEach(checkUniqueIds);
 
@@ -135,6 +144,14 @@ export const layoutSnapshotSchema = z
         addIssue(
           ['backgrounds', index, 'floorId'],
           'Background floor does not exist',
+        );
+      }
+    });
+    snapshot.decorations.forEach((decoration, index) => {
+      if (!floorsById.has(decoration.floorId)) {
+        addIssue(
+          ['decorations', index, 'floorId'],
+          'Decoration floor does not exist',
         );
       }
     });

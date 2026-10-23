@@ -31,18 +31,21 @@ export type TableGeometry = {
 
 export type TableSeatAdjustment = {
   readonly slotKey: string;
-  readonly offset?: Vector2;
-  readonly facingOffsetRadians?: number;
+  readonly offset?: Vector2 | undefined;
+  readonly facingOffsetRadians?: number | undefined;
 };
 
 export type TableSeatGenerationOptions = {
   readonly seatOffset: number;
-  readonly numbering?: {
-    readonly start?: number;
-    readonly direction?: 'forward' | 'reverse';
-    readonly prefix?: string;
-  };
-  readonly adjustments?: readonly TableSeatAdjustment[];
+  readonly skippedSlotKeys?: readonly string[] | undefined;
+  readonly numbering?:
+    | {
+        readonly start?: number | undefined;
+        readonly direction?: 'forward' | 'reverse' | undefined;
+        readonly prefix?: string | undefined;
+      }
+    | undefined;
+  readonly adjustments?: readonly TableSeatAdjustment[] | undefined;
 };
 
 export type TableSeatSlot = {
@@ -193,6 +196,14 @@ export function generateTableSeatSlots(
     localSlots = createRectangularSlots(table.shape, options.seatOffset);
   }
 
+  const validKeys = new Set(localSlots.map(({ slotKey }) => slotKey));
+  const skipped = new Set<string>();
+  for (const key of options.skippedSlotKeys ?? []) {
+    if (!validKeys.has(key) || skipped.has(key))
+      throw new RangeError(`Invalid skipped table slot: ${key}`);
+    skipped.add(key);
+  }
+  localSlots = localSlots.filter(({ slotKey }) => !skipped.has(slotKey));
   const numberingStart = options.numbering?.start ?? 1;
   if (!Number.isSafeInteger(numberingStart) || numberingStart < 1) {
     throw new RangeError('Numbering start must be a positive integer');
@@ -204,7 +215,6 @@ export function generateTableSeatSlots(
     throw new RangeError('Seat number exceeds safe integer range');
   }
 
-  const validKeys = new Set(localSlots.map(({ slotKey }) => slotKey));
   const adjustments = new Map<string, TableSeatAdjustment>();
   for (const adjustment of options.adjustments ?? []) {
     if (!validKeys.has(adjustment.slotKey)) {

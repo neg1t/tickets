@@ -69,6 +69,7 @@ export type HallViewerProps = {
   readonly seatAppearance?: Readonly<
     Record<string, { fill: string; stroke?: string }>
   >;
+  readonly previewSeats?: readonly Vector2[];
   readonly zoneBounds?: Readonly<Record<string, SpatialBounds>>;
   readonly backgroundPages?: Readonly<
     Record<
@@ -138,6 +139,7 @@ export function HallViewer(props: HallViewerProps) {
     focusedFloorId,
     focusedZoneId,
     seatAppearance,
+    previewSeats = [],
     zoneBounds,
     backgroundPages,
     activeTool,
@@ -542,6 +544,14 @@ export function HallViewer(props: HallViewerProps) {
             scene.zones.find(({ zone }) => zone.id === target.id)?.zone.name ??
             target.id
           );
+        case 'decoration': {
+          const decoration = scene.decorations.find(
+            (item) => item.id === target.id,
+          );
+          return decoration?.kind === 'label'
+            ? decoration.text
+            : (decoration?.label ?? target.id);
+        }
         default:
           return target.id;
       }
@@ -667,6 +677,7 @@ export function HallViewer(props: HallViewerProps) {
         onPointerCancel={(event) => handlePointerCancel(event.nativeEvent)}
         onLostPointerCapture={(event) => handlePointerCancel(event.nativeEvent)}
         data-visible-seats={showSeats}
+        data-preview-seats={previewSeats.length}
         data-viewport-x={viewport.x}
         data-viewport-y={viewport.y}
         data-viewport-scale={viewport.scale}
@@ -726,17 +737,31 @@ export function HallViewer(props: HallViewerProps) {
               {scene.zones.map(({ zone, bounds }) =>
                 previewNode(
                   `zone:${zone.id}`,
-                  <Rect
-                    key={zone.id}
-                    x={bounds.minX}
-                    y={bounds.minY}
-                    width={bounds.maxX - bounds.minX}
-                    height={bounds.maxY - bounds.minY}
-                    fill={palette.zone}
-                    stroke={palette.zoneStroke}
-                    strokeWidth={0.12}
-                    cornerRadius={0.8}
-                  />,
+                  zone.polygon ? (
+                    <Line
+                      key={zone.id}
+                      points={zone.polygon.flatMap((point) => [
+                        point.x,
+                        point.y,
+                      ])}
+                      closed
+                      fill={palette.zone}
+                      stroke={palette.zoneStroke}
+                      strokeWidth={0.12}
+                    />
+                  ) : (
+                    <Rect
+                      key={zone.id}
+                      x={bounds.minX}
+                      y={bounds.minY}
+                      width={bounds.maxX - bounds.minX}
+                      height={bounds.maxY - bounds.minY}
+                      fill={palette.zone}
+                      stroke={palette.zoneStroke}
+                      strokeWidth={0.12}
+                      cornerRadius={0.8}
+                    />
+                  ),
                 ),
               )}
               {scene.zones.map(({ zone, bounds }) =>
@@ -757,6 +782,61 @@ export function HallViewer(props: HallViewerProps) {
 
           <Layer name="objects" listening={false}>
             <Group name="rows-seats-tables">
+              {scene.decorations.map((decoration) =>
+                previewNode(
+                  `decoration:${decoration.id}`,
+                  decoration.kind === 'label' ? (
+                    <Text
+                      key={decoration.id}
+                      x={decoration.position.x}
+                      y={decoration.position.y}
+                      text={decoration.text}
+                      fontSize={1.2}
+                      fill={palette.ink}
+                    />
+                  ) : (
+                    <Group key={decoration.id}>
+                      <Line
+                        points={decoration.polygon.flatMap((point) => [
+                          point.x,
+                          point.y,
+                        ])}
+                        closed
+                        fill={
+                          decoration.kind === 'stage' ? '#c3a288' : '#787d83'
+                        }
+                        stroke={palette.ink}
+                        strokeWidth={0.14}
+                      />
+                      {decoration.label && (
+                        <Text
+                          x={
+                            decoration.polygon.reduce(
+                              (sum, point) => sum + point.x,
+                              0,
+                            ) /
+                              decoration.polygon.length -
+                            3
+                          }
+                          y={
+                            decoration.polygon.reduce(
+                              (sum, point) => sum + point.y,
+                              0,
+                            ) /
+                              decoration.polygon.length -
+                            0.5
+                          }
+                          width={6}
+                          align="center"
+                          text={decoration.label}
+                          fontSize={0.9}
+                          fill={palette.ink}
+                        />
+                      )}
+                    </Group>
+                  ),
+                ),
+              )}
               {showSeats &&
                 scene.rows.map(({ row, points }) =>
                   previewNode(
@@ -840,6 +920,21 @@ export function HallViewer(props: HallViewerProps) {
 
           <Layer name="overlays" listening={false}>
             <Group name="interaction" />
+
+            <Group name="generation-preview">
+              {previewSeats.map((seat, index) => (
+                <Circle
+                  key={index}
+                  x={seat.x}
+                  y={seat.y}
+                  radius={0.7}
+                  fill="#f8b84e"
+                  stroke="#8b5600"
+                  strokeWidth={0.15}
+                  opacity={0.65}
+                />
+              ))}
+            </Group>
 
             <Group name="selection">
               {selection.flatMap((target) => {

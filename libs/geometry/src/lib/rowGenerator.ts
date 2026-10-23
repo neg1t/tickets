@@ -35,22 +35,24 @@ export type RowSeatGap = {
 
 export type RowSeatAdjustment = {
   readonly slotIndex: number;
-  readonly offset?: Vector2;
-  readonly rotationOffsetRadians?: number;
+  readonly offset?: Vector2 | undefined;
+  readonly rotationOffsetRadians?: number | undefined;
 };
 
 export type RowSeatGenerationOptions = {
   readonly distribution: RowSeatDistribution;
-  readonly startInset?: number;
-  readonly endInset?: number;
-  readonly gaps?: readonly RowSeatGap[];
-  readonly skippedSlots?: readonly number[];
-  readonly numbering?: {
-    readonly start?: number;
-    readonly direction?: 'forward' | 'reverse';
-    readonly skippedNumbers?: readonly number[];
-  };
-  readonly adjustments?: readonly RowSeatAdjustment[];
+  readonly startInset?: number | undefined;
+  readonly endInset?: number | undefined;
+  readonly gaps?: readonly RowSeatGap[] | undefined;
+  readonly skippedSlots?: readonly number[] | undefined;
+  readonly numbering?:
+    | {
+        readonly start?: number | undefined;
+        readonly direction?: 'forward' | 'reverse' | undefined;
+        readonly skippedNumbers?: readonly number[] | undefined;
+      }
+    | undefined;
+  readonly adjustments?: readonly RowSeatAdjustment[] | undefined;
 };
 
 export type RowSeatSlot = {

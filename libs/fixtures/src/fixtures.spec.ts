@@ -1,9 +1,11 @@
 import { readFileSync } from 'node:fs';
 import {
   assertPublishedVersionForOccurrence,
+  createDraftFromSnapshot,
   inventorySchema,
   layoutDocumentSchema,
   occurrenceSchema,
+  parseHallLayoutDraft,
 } from '@hall-platform/domain';
 import { describe, expect, it } from 'vitest';
 
@@ -96,5 +98,21 @@ describe('synthetic hall fixtures', () => {
     expect(
       snapshot.seats.some(({ placement }) => placement.kind === 'standalone'),
     ).toBe(true);
+  });
+
+  it.each(fixtureNames)('migrates a v1 %s draft export', (name) => {
+    const document = layoutDocumentSchema.parse(loadFixture(name).document);
+    const current = createDraftFromSnapshot(
+      document.hall.name,
+      document.snapshot,
+    );
+    const { schemaVersion: _, ...legacy } = current;
+    const imported = parseHallLayoutDraft(JSON.parse(JSON.stringify(legacy)));
+
+    expect(imported.schemaVersion).toBe(2);
+    expect(imported.snapshot).toEqual(document.snapshot);
+    expect(imported.snapshot.seats.map((seat) => seat.id)).toEqual(
+      document.snapshot.seats.map((seat) => seat.id),
+    );
   });
 });
