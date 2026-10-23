@@ -403,3 +403,45 @@ export function deleteTarget(
   }
   return { kind: 'delete', patches };
 }
+
+function uniquePatches(commands: readonly EditorCommand[]): EditorPatch[] {
+  const patches = new Map<string, EditorPatch>();
+  for (const command of commands) {
+    for (const patch of command.patches) {
+      const key =
+        patch.collection === 'calibration'
+          ? 'calibration'
+          : `${patch.collection}:${patch.id}`;
+      if (!patches.has(key)) patches.set(key, patch);
+    }
+  }
+  return [...patches.values()];
+}
+
+export function moveTargets(
+  draft: HallLayoutDraft,
+  targets: readonly HallTarget[],
+  delta: Vector2,
+): EditorCommand {
+  if (!Number.isFinite(delta.x) || !Number.isFinite(delta.y))
+    throw new RangeError('Move delta must be finite');
+  if (delta.x === 0 && delta.y === 0) return { kind: 'move', patches: [] };
+  return {
+    kind: 'move',
+    patches: uniquePatches(
+      targets.map((target) => moveTarget(draft, target, delta)),
+    ),
+  };
+}
+
+export function deleteTargets(
+  draft: HallLayoutDraft,
+  targets: readonly HallTarget[],
+): EditorCommand {
+  return {
+    kind: 'delete',
+    patches: uniquePatches(
+      targets.map((target) => deleteTarget(draft, target)),
+    ),
+  };
+}

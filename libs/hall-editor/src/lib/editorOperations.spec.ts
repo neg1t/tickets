@@ -9,7 +9,9 @@ import {
 import {
   createObjectAt,
   deleteTarget,
+  deleteTargets,
   moveTarget,
+  moveTargets,
 } from './editorOperations.js';
 
 describe('editor tools', () => {
@@ -184,5 +186,57 @@ describe('editor tools', () => {
 
     state = applyEditorCommand(state, deleteTarget(state.draft, zone.target));
     expect(state.draft.snapshot.seats).toHaveLength(0);
+  });
+
+  it('moves a parent and its selected child once in one undoable command', () => {
+    let state = createEditorState(createEmptyDraft('My hall'));
+    const zone = createObjectAt(state.draft, 'zone', { x: 10, y: 10 });
+    state = applyEditorCommand(state, zone.command);
+    const seat = createObjectAt(
+      state.draft,
+      'seat',
+      { x: 10, y: 10 },
+      zone.target.id,
+    );
+    state = applyEditorCommand(state, seat.command);
+    const before = state.past.length;
+
+    state = applyEditorCommand(
+      state,
+      moveTargets(state.draft, [zone.target, seat.target], { x: 4, y: -2 }),
+    );
+
+    expect(state.draft.snapshot.seats[0]?.position).toEqual({ x: 14, y: 8 });
+    expect(state.draft.zoneBounds[zone.target.id]?.minX).toBe(9);
+    expect(state.past).toHaveLength(before + 1);
+    expect(undoEditor(state).draft.snapshot.seats[0]?.position).toEqual({
+      x: 10,
+      y: 10,
+    });
+  });
+
+  it('deletes an entire multiselection once and undo restores it', () => {
+    let state = createEditorState(createEmptyDraft('My hall'));
+    const first = createObjectAt(state.draft, 'seat', { x: 0, y: 0 });
+    state = applyEditorCommand(state, first.command);
+    const second = createObjectAt(state.draft, 'seat', { x: 4, y: 0 });
+    state = applyEditorCommand(state, second.command);
+    state = applyEditorCommand(
+      state,
+      deleteTargets(state.draft, [first.target, second.target]),
+    );
+    expect(state.draft.snapshot.seats).toHaveLength(0);
+    expect(undoEditor(state).draft.snapshot.seats).toHaveLength(2);
+  });
+
+  it('does not add history for a zero-distance group move', () => {
+    let state = createEditorState(createEmptyDraft('My hall'));
+    const seat = createObjectAt(state.draft, 'seat', { x: 0, y: 0 });
+    state = applyEditorCommand(state, seat.command);
+    const result = applyEditorCommand(
+      state,
+      moveTargets(state.draft, [seat.target], { x: 0, y: 0 }),
+    );
+    expect(result).toBe(state);
   });
 });

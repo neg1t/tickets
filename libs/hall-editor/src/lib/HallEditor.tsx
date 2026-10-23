@@ -21,8 +21,8 @@ import { createEditorModel } from './editorModel.js';
 import { PdfHallViewer } from './PdfHallViewer.js';
 import {
   createObjectAt,
-  deleteTarget,
-  moveTarget,
+  deleteTargets,
+  moveTargets,
   type EditorTool,
 } from './editorOperations.js';
 
@@ -250,8 +250,8 @@ export function HallEditor(props: HallEditorProps) {
     }
   }
 
-  function handleMove(moved: HallTarget, delta: Vector2) {
-    commit(moveTarget(draft, moved, delta), moved);
+  function handleMove(moved: readonly HallTarget[], delta: Vector2) {
+    commit(moveTargets(draft, moved, delta), moved[0] ?? null);
   }
 
   async function handlePdfImport(file: File, replace?: Background) {
@@ -375,9 +375,10 @@ export function HallEditor(props: HallEditorProps) {
 
   function handleDelete() {
     if (!target) return;
-    commit(deleteTarget(draft, target), target);
+    if (!commit(deleteTargets(draft, selection), target)) return;
     model.selectionChanged([]);
-    if (target.kind === 'zone' && zoneId === target.id) model.zoneChanged('');
+    if (selection.some((item) => item.kind === 'zone' && item.id === zoneId))
+      model.zoneChanged('');
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -626,7 +627,7 @@ export function HallEditor(props: HallEditorProps) {
           activeTool={tool}
           selectedTargets={selection}
           onCanvasClick={handleCanvasClick}
-          {...(!readonly ? { onObjectMove: handleMove } : {})}
+          {...(!readonly ? { onObjectsMove: handleMove } : {})}
           onSelectionChange={(next) => {
             model.selectionChanged(next);
             if (next.length > 0) model.backgroundChanged('');

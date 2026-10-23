@@ -175,12 +175,14 @@ Tailwind генерирует CSS, поэтому технически «пол�
 **Изменить:** `HallViewer.tsx`, `HallEditor.tsx`, `editorOperations.ts`, `editorCommands.ts`.  
 **Создать:** `libs/renderer-konva/src/lib/interaction/pointerSession.ts`, `usePointerInteraction.ts`, `DragPreview.tsx`; соответствующие spec и `apps/studio/e2e/editor-drag.spec.ts`.
 
-- [ ] Реализовать контракт раздела 5 с live preview, pointer capture/cancel и корректными screen/world преобразованиями.
-- [ ] Реализовать group move/delete без двойной обработки вложенных объектов; selection outline движется вместе с объектами.
-- [ ] Отделить pick/edit/pan, добавить tap selection и подавление click после жеста; сохранить pinch.
-- [ ] Проверить readonly, undo/redo, один onChange, no-op, pointerleave и новую value во время жеста.
+- [x] Реализовать контракт раздела 5 с live preview, pointer capture/cancel и корректными screen/world преобразованиями.
+- [x] Реализовать group move/delete без двойной обработки вложенных объектов; selection outline движется вместе с объектами.
+- [x] Отделить pick/edit/pan, добавить tap selection и подавление click после жеста; сохранить pinch.
+- [x] Проверить readonly, undo/redo, один onChange, no-op, pointerleave и новую value во время жеста.
 
 **Готово:** A01/A02 и групповой move/delete из A05 закрыты; live preview проверен до mouseup. Групповые свойства и mixed values из A05 завершаются в H04. Промежуточный layout не пишется в IndexedDB и не проходит полную Zod-валидацию на каждом кадре. Snapping/handles следующего этапа опираются на этот механизм.
+
+**Результат H01:** pointer session показывает временный сдвиг объекта, связанных мест и контура выделения до отпускания. Мышь, touch и pen используют один путь событий; уход за край холста включает auto-pan, Escape/pointercancel/смена документа отменяют жест. Групповые move/delete формируют одну команду без повторной обработки дочерних объектов. Проверки H00 для A01, A02 и группового удаления A05 переведены из expected failure в обычные тесты; новые E2E покрывают атомарный undo/redo, отсутствие промежуточного onChange, no-op и отмену жеста, компонентный тест — readonly. Система привязки и её направляющие остаются задачей следующего этапа.
 
 ### H02 — полноценные места, модель и генерация
 

@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import {
+  isValidElement,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactNode,
+} from 'react';
 import type { LayoutSnapshot } from '@hall-platform/domain';
 import type { SpatialBounds, Vector2 } from '@hall-platform/geometry';
 import type Konva from 'konva';
@@ -27,6 +35,9 @@ import {
   zoomViewportAt,
   type Viewport,
 } from './viewport.js';
+import { DragPreview } from './interaction/DragPreview.js';
+import { movedTargetKeys } from './interaction/movedTargetKeys.js';
+import { usePointerInteraction } from './interaction/usePointerInteraction.js';
 
 export type HallViewerLabels = Readonly<{
   hall: string;
@@ -69,11 +80,23 @@ export type HallViewerProps = {
   readonly selectedTargets?: readonly HallTarget[];
   readonly onCanvasClick?: (point: Vector2, target: HallTarget | null) => void;
   readonly onObjectMove?: (target: HallTarget, delta: Vector2) => void;
+  readonly onObjectsMove?: (
+    targets: readonly HallTarget[],
+    delta: Vector2,
+  ) => void;
   readonly onSelectionChange?: (selection: readonly HallTarget[]) => void;
   readonly onFloorChange?: (floorId: string) => void;
 };
 
-type TouchGesture = { x: number; y: number; distance: number };
+type PointerMode = 'pan' | 'pick' | 'edit' | 'create';
+type PointerIntent = {
+  mode: PointerMode;
+  target: HallTarget | null;
+  targets: readonly HallTarget[];
+  selectionReady: boolean;
+  lastScreen: Vector2;
+  modifiers: { shift: boolean; ctrl: boolean; meta: boolean };
+};
 
 const palette = {
   ink: '#193047',
@@ -121,6 +144,7 @@ export function HallViewer(props: HallViewerProps) {
     selectedTargets,
     onCanvasClick,
     onObjectMove,
+    onObjectsMove,
     onSelectionChange,
     onFloorChange,
   } = props;
@@ -154,12 +178,68 @@ export function HallViewer(props: HallViewerProps) {
   const sceneRef = useRef(scene);
   const previousFitKey = useRef(fitKey);
   const stageRef = useRef<Konva.Stage>(null);
-  const dragRef = useRef<{ x: number; y: number } | null>(null);
-  const objectDragRef = useRef<{ point: Vector2; target: HallTarget } | null>(
-    null,
-  );
-  const draggedRef = useRef(false);
-  const touchRef = useRef<TouchGesture | null>(null);
+  const { preview, begin, move, finish, cancel } = usePointerInteraction();
+  const [movingKeys, setMovingKeys] = useState<ReadonlySet<string>>(new Set());
+  const intentRef = useRef<PointerIntent | null>(null);
+  const pointersRef = useRef(new Map<number, Vector2>());
+  const pinchRef = useRef<{ center: Vector2; distance: number } | null>(null);
+  const viewportRef = useRef(viewport);
+  useEffect(() => {
+    viewportRef.current = viewport;
+  }, [viewport]);
+
+  useEffect(() => {
+    cancel();
+    intentRef.current = null;
+    pointersRef.current.clear();
+    pinchRef.current = null;
+  }, [snapshot, activeFloorId, activeTool, cancel]);
+
+  useEffect(() => {
+    function cancelOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      cancel();
+      setMovingKeys(new Set());
+      intentRef.current = null;
+      pinchRef.current = null;
+    }
+    document.addEventListener('keydown', cancelOnEscape);
+    return () => document.removeEventListener('keydown', cancelOnEscape);
+  }, [cancel]);
+
+  useEffect(() => {
+    const session = preview;
+    if (!session?.dragging || intentRef.current?.mode !== 'edit') return;
+    let frame = 0;
+    function advance() {
+      if (!session) return;
+      const edge = 24;
+      const speed = 10;
+      const pan = {
+        x:
+          session.screen.x < edge
+            ? speed
+            : session.screen.x > width - edge
+              ? -speed
+              : 0,
+        y:
+          session.screen.y < edge
+            ? speed
+            : session.screen.y > height - edge
+              ? -speed
+              : 0,
+      };
+      if (pan.x || pan.y) {
+        const next = panViewportBy(viewportRef.current, pan);
+        viewportRef.current = next;
+        setViewport(next);
+        move(session.pointerId, session.screen, next);
+      }
+      frame = requestAnimationFrame(advance);
+    }
+    frame = requestAnimationFrame(advance);
+    return () => cancelAnimationFrame(frame);
+  }, [preview, move, width, height]);
 
   useEffect(() => {
     sceneRef.current = scene;
@@ -240,143 +320,203 @@ export function HallViewer(props: HallViewerProps) {
     const point = stageRef.current?.getPointerPosition();
     if (!point) return;
     const factor = Math.exp(-event.evt.deltaY * 0.0015);
-    setViewport((current) => zoomViewportAt(current, point, factor));
+    const next = zoomViewportAt(viewportRef.current, point, factor);
+    viewportRef.current = next;
+    setViewport(next);
+    if (preview) move(preview.pointerId, preview.screen, next);
   }
 
-  function handleMouseDown(event: Konva.KonvaEventObject<MouseEvent>) {
-    if (event.evt.button !== 0 && event.evt.button !== 1) return;
-    if (tool === 'pan' || event.evt.button === 1 || event.evt.altKey) {
-      const point = stageRef.current?.getPointerPosition();
-      if (point) dragRef.current = point;
-      draggedRef.current = false;
-    } else if (activeTool === 'select' && onObjectMove) {
-      const point = stageRef.current?.getPointerPosition();
-      if (!point) return;
-      const target = hitTestHallScene(
-        scene,
-        screenToWorld(viewport, point),
-        3 / viewport.scale,
-      );
-      if (target) objectDragRef.current = { point, target };
-      draggedRef.current = false;
-    }
+  function pointerPoint(event: PointerEvent): Vector2 | null {
+    const rect = stageRef.current?.container().getBoundingClientRect();
+    return rect
+      ? { x: event.clientX - rect.left, y: event.clientY - rect.top }
+      : null;
   }
 
-  function handleMouseMove() {
-    const point = stageRef.current?.getPointerPosition();
-    if (point && objectDragRef.current) {
-      const start = objectDragRef.current.point;
-      if (Math.hypot(point.x - start.x, point.y - start.y) > 3)
-        draggedRef.current = true;
-      return;
-    }
-    const previous = dragRef.current;
-    if (!point || !previous) return;
-    const delta = { x: point.x - previous.x, y: point.y - previous.y };
-    if (Math.abs(delta.x) + Math.abs(delta.y) > 0) {
-      draggedRef.current = true;
-      setViewport((current) => panViewportBy(current, delta));
-      dragRef.current = point;
-    }
-  }
-
-  function handleMouseUp() {
-    const objectDrag = objectDragRef.current;
-    const point = stageRef.current?.getPointerPosition();
-    if (objectDrag && point && draggedRef.current) {
-      onObjectMove?.(objectDrag.target, {
-        x: (point.x - objectDrag.point.x) / viewport.scale,
-        y: (point.y - objectDrag.point.y) / viewport.scale,
-      });
-    }
-    objectDragRef.current = null;
-    dragRef.current = null;
-  }
-
-  function handleClick(event: Konva.KonvaEventObject<MouseEvent>) {
-    if (tool === 'pan' || draggedRef.current) {
-      draggedRef.current = false;
-      return;
-    }
-    const screen = stageRef.current?.getPointerPosition();
-    if (!screen) return;
-    const worldPoint = screenToWorld(viewport, screen);
-    const target = hitTestHallScene(
-      scene,
-      worldPoint,
-      3 / viewport.scale,
-      showSeats ? undefined : farZoomTargets,
-    );
-    if (activeTool && activeTool !== 'select' && activeTool !== 'pan') {
-      onCanvasClick?.(worldPoint, target);
-      return;
-    }
-    if (!target) {
-      handleSelection([]);
-      return;
-    }
-    if (event.evt.shiftKey || event.evt.ctrlKey || event.evt.metaKey) {
-      const key = `${target.kind}:${target.id}`;
-      handleSelection(
-        selectedKeys.has(key)
-          ? selection.filter((item) => `${item.kind}:${item.id}` !== key)
-          : [...selection, target],
-      );
-    } else {
-      handleSelection([target]);
-    }
-  }
-
-  function readTouchGesture(touches: TouchList): TouchGesture | null {
-    const rect = containerRef.current?.getBoundingClientRect();
-    const first = touches[0];
-    if (!rect || !first) return null;
-    const second = touches[1];
-    if (!second)
-      return {
-        x: first.clientX - rect.left,
-        y: first.clientY - rect.top,
-        distance: 0,
-      };
-    const x = (first.clientX + second.clientX) / 2 - rect.left;
-    const y = (first.clientY + second.clientY) / 2 - rect.top;
+  function pinchGesture(): { center: Vector2; distance: number } | null {
+    const [first, second] = [...pointersRef.current.values()];
+    if (!first || !second) return null;
     return {
-      x,
-      y,
-      distance: Math.hypot(
-        first.clientX - second.clientX,
-        first.clientY - second.clientY,
-      ),
+      center: { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 },
+      distance: Math.hypot(first.x - second.x, first.y - second.y),
     };
   }
 
-  function handleTouchStart(event: Konva.KonvaEventObject<TouchEvent>) {
-    touchRef.current = readTouchGesture(event.evt.touches);
+  function handlePointerDown(native: PointerEvent) {
+    if (
+      native.pointerType === 'mouse' &&
+      native.button !== 0 &&
+      native.button !== 1
+    )
+      return;
+    const point = pointerPoint(native);
+    if (!point) return;
+    pointersRef.current.set(native.pointerId, point);
+    if (
+      native.target instanceof Element &&
+      'setPointerCapture' in native.target
+    )
+      native.target.setPointerCapture(native.pointerId);
+    if (pointersRef.current.size > 1) {
+      cancel();
+      setMovingKeys(new Set());
+      intentRef.current = null;
+      pinchRef.current = pinchGesture();
+      return;
+    }
+    const target = hitTestHallScene(
+      scene,
+      screenToWorld(viewport, point),
+      3 / viewport.scale,
+      showSeats ? undefined : farZoomTargets,
+    );
+    const pan = tool === 'pan' || native.button === 1 || native.altKey;
+    const create = activeTool !== undefined && activeTool !== 'select' && !pan;
+    const selected = target && selectedKeys.has(`${target.kind}:${target.id}`);
+    const modifiers = {
+      shift: native.shiftKey,
+      ctrl: native.ctrlKey,
+      meta: native.metaKey,
+    };
+    const edit =
+      !pan &&
+      !create &&
+      activeTool === 'select' &&
+      (onObjectsMove || onObjectMove) &&
+      target &&
+      !modifiers.shift &&
+      !modifiers.ctrl &&
+      !modifiers.meta;
+    const targets =
+      edit && target ? (onObjectsMove && selected ? selection : [target]) : [];
+    setMovingKeys(
+      targets.length > 0 ? movedTargetKeys(snapshot, targets) : new Set(),
+    );
+    intentRef.current = {
+      mode: pan ? 'pan' : create ? 'create' : edit ? 'edit' : 'pick',
+      target,
+      targets,
+      selectionReady: Boolean(selected),
+      lastScreen: point,
+      modifiers,
+    };
+    begin(native.pointerId, point, viewport);
   }
 
-  function handleTouchMove(event: Konva.KonvaEventObject<TouchEvent>) {
-    event.evt.preventDefault();
-    const current = readTouchGesture(event.evt.touches);
-    const previous = touchRef.current;
-    if (!current || !previous) return;
-    setViewport((before) => {
-      const moved = panViewportBy(before, {
-        x: current.x - previous.x,
-        y: current.y - previous.y,
+  function handlePointerMove(native: PointerEvent) {
+    const point = pointerPoint(native);
+    if (!point || !pointersRef.current.has(native.pointerId)) return;
+    pointersRef.current.set(native.pointerId, point);
+    if (pointersRef.current.size > 1) {
+      const previous = pinchRef.current;
+      const current = pinchGesture();
+      if (previous && current) {
+        const moved = panViewportBy(viewportRef.current, {
+          x: current.center.x - previous.center.x,
+          y: current.center.y - previous.center.y,
+        });
+        const next = zoomViewportAt(
+          moved,
+          current.center,
+          previous.distance > 0 ? current.distance / previous.distance : 1,
+        );
+        viewportRef.current = next;
+        setViewport(next);
+      }
+      pinchRef.current = current;
+      return;
+    }
+    const previous = intentRef.current?.lastScreen ?? point;
+    if (intentRef.current) intentRef.current.lastScreen = point;
+    const next = move(native.pointerId, point, viewportRef.current);
+    if (
+      next?.dragging &&
+      intentRef.current?.mode === 'edit' &&
+      !intentRef.current.selectionReady &&
+      intentRef.current.target
+    ) {
+      handleSelection([intentRef.current.target]);
+      intentRef.current.selectionReady = true;
+    }
+    if (next?.dragging && intentRef.current?.mode === 'pan') {
+      const moved = panViewportBy(viewportRef.current, {
+        x: point.x - previous.x,
+        y: point.y - previous.y,
       });
-      return current.distance > 0 && previous.distance > 0
-        ? zoomViewportAt(
-            moved,
-            { x: current.x, y: current.y },
-            current.distance / previous.distance,
-          )
-        : moved;
-    });
-    touchRef.current = current;
+      viewportRef.current = moved;
+      setViewport(moved);
+    }
   }
 
-  function handleTouchEnd(event: Konva.KonvaEventObject<TouchEvent>) {
-    touchRef.current = readTouchGesture(event.evt.touches);
+  function handlePointerUp(native: PointerEvent) {
+    const point = pointerPoint(native);
+    pointersRef.current.delete(native.pointerId);
+    if (pinchRef.current) {
+      pinchRef.current = pointersRef.current.size > 1 ? pinchGesture() : null;
+      cancel();
+      setMovingKeys(new Set());
+      intentRef.current = null;
+      return;
+    }
+    const intent = intentRef.current;
+    const result =
+      point && finish(native.pointerId, point, viewportRef.current);
+    intentRef.current = null;
+    setMovingKeys(new Set());
+    if (!point || !intent || !result) return;
+    if (intent.mode === 'edit' && result.dragging) {
+      if (!intent.selectionReady && intent.target)
+        handleSelection([intent.target]);
+      if (result.delta.x !== 0 || result.delta.y !== 0) {
+        if (onObjectsMove) onObjectsMove(intent.targets, result.delta);
+        else if (intent.target) onObjectMove?.(intent.target, result.delta);
+      }
+      return;
+    }
+    if (result.dragging || intent.mode === 'pan') return;
+    const worldPoint = screenToWorld(viewportRef.current, point);
+    if (intent.mode === 'create') {
+      onCanvasClick?.(worldPoint, intent.target);
+      return;
+    }
+    if (!intent.target) {
+      handleSelection([]);
+      return;
+    }
+    if (
+      intent.modifiers.shift ||
+      intent.modifiers.ctrl ||
+      intent.modifiers.meta
+    ) {
+      const key = `${intent.target.kind}:${intent.target.id}`;
+      handleSelection(
+        selectedKeys.has(key)
+          ? selection.filter((item) => `${item.kind}:${item.id}` !== key)
+          : [...selection, intent.target],
+      );
+    } else handleSelection([intent.target]);
+  }
+
+  function handlePointerCancel(native: PointerEvent) {
+    pointersRef.current.delete(native.pointerId);
+    if (!cancel(native.pointerId)) return;
+    setMovingKeys(new Set());
+    intentRef.current = null;
+    pinchRef.current = null;
+  }
+
+  const previewDelta = preview && movingKeys.size > 0 ? preview.delta : null;
+  function previewNode(key: string, node: ReactNode): ReactNode {
+    return previewDelta && movingKeys?.has(key) ? (
+      <DragPreview
+        key={isValidElement(node) ? node.key : key}
+        delta={previewDelta}
+      >
+        {node}
+      </DragPreview>
+    ) : (
+      node
+    );
   }
 
   const selectedText = selection
@@ -520,6 +660,12 @@ export function HallViewer(props: HallViewerProps) {
       <div
         ref={containerRef}
         className="hall-viewer-canvas"
+        style={{ touchAction: 'none' }}
+        onPointerDown={(event) => handlePointerDown(event.nativeEvent)}
+        onPointerMove={(event) => handlePointerMove(event.nativeEvent)}
+        onPointerUp={(event) => handlePointerUp(event.nativeEvent)}
+        onPointerCancel={(event) => handlePointerCancel(event.nativeEvent)}
+        onLostPointerCapture={(event) => handlePointerCancel(event.nativeEvent)}
         data-visible-seats={showSeats}
         data-viewport-x={viewport.x}
         data-viewport-y={viewport.y}
@@ -535,14 +681,6 @@ export function HallViewer(props: HallViewerProps) {
           scaleX={viewport.scale}
           scaleY={viewport.scale}
           onWheel={handleWheel}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          onClick={handleClick}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
         >
           <Layer name="base" listening={false}>
             <Group name="background">
@@ -585,100 +723,118 @@ export function HallViewer(props: HallViewerProps) {
 
           <Layer name="zones" listening={false}>
             <Group name="zone-geometry">
-              {scene.zones.map(({ zone, bounds }) => (
-                <Rect
-                  key={zone.id}
-                  x={bounds.minX}
-                  y={bounds.minY}
-                  width={bounds.maxX - bounds.minX}
-                  height={bounds.maxY - bounds.minY}
-                  fill={palette.zone}
-                  stroke={palette.zoneStroke}
-                  strokeWidth={0.12}
-                  cornerRadius={0.8}
-                />
-              ))}
-              {scene.zones.map(({ zone, bounds }) => (
-                <Text
-                  key={`label:${zone.id}`}
-                  x={bounds.minX + 0.8}
-                  y={bounds.minY + 0.55}
-                  text={zone.name}
-                  fill={palette.ink}
-                  fontSize={1.15}
-                />
-              ))}
+              {scene.zones.map(({ zone, bounds }) =>
+                previewNode(
+                  `zone:${zone.id}`,
+                  <Rect
+                    key={zone.id}
+                    x={bounds.minX}
+                    y={bounds.minY}
+                    width={bounds.maxX - bounds.minX}
+                    height={bounds.maxY - bounds.minY}
+                    fill={palette.zone}
+                    stroke={palette.zoneStroke}
+                    strokeWidth={0.12}
+                    cornerRadius={0.8}
+                  />,
+                ),
+              )}
+              {scene.zones.map(({ zone, bounds }) =>
+                previewNode(
+                  `zone:${zone.id}`,
+                  <Text
+                    key={`label:${zone.id}`}
+                    x={bounds.minX + 0.8}
+                    y={bounds.minY + 0.55}
+                    text={zone.name}
+                    fill={palette.ink}
+                    fontSize={1.15}
+                  />,
+                ),
+              )}
             </Group>
           </Layer>
 
           <Layer name="objects" listening={false}>
             <Group name="rows-seats-tables">
               {showSeats &&
-                scene.rows.map(({ row, points }) => (
-                  <Line
-                    key={row.id}
-                    points={points.flatMap((point) => [point.x, point.y])}
-                    stroke={palette.row}
-                    strokeWidth={0.15}
-                  />
-                ))}
-              {showSeats &&
-                scene.tables.map((table) =>
-                  table.shape.kind === 'circle' ? (
-                    <Circle
-                      key={table.id}
-                      x={table.center.x}
-                      y={table.center.y}
-                      radius={table.shape.radius}
-                      fill={palette.table}
+                scene.rows.map(({ row, points }) =>
+                  previewNode(
+                    `row:${row.id}`,
+                    <Line
+                      key={row.id}
+                      points={points.flatMap((point) => [point.x, point.y])}
                       stroke={palette.row}
-                      strokeWidth={0.14}
-                    />
-                  ) : (
-                    <Rect
-                      key={table.id}
-                      x={table.center.x}
-                      y={table.center.y}
-                      offsetX={table.shape.width / 2}
-                      offsetY={table.shape.height / 2}
-                      width={table.shape.width}
-                      height={table.shape.height}
-                      rotation={(table.rotationRadians * 180) / Math.PI}
-                      fill={palette.table}
-                      stroke={palette.row}
-                      strokeWidth={0.14}
-                    />
+                      strokeWidth={0.15}
+                    />,
                   ),
                 )}
               {showSeats &&
-                scene.seats.map((seat) => (
-                  <Circle
-                    key={seat.id}
-                    x={seat.position.x}
-                    y={seat.position.y}
-                    radius={
-                      editorMode ? Math.max(0.65, 4 / viewport.scale) : 0.65
-                    }
-                    fill={seatAppearance?.[seat.id]?.fill ?? palette.seat}
-                    stroke={
-                      seatAppearance?.[seat.id]?.stroke ?? palette.seatStroke
-                    }
-                    strokeWidth={0.11}
-                  />
-                ))}
+                scene.tables.map((table) =>
+                  previewNode(
+                    `table:${table.id}`,
+                    table.shape.kind === 'circle' ? (
+                      <Circle
+                        key={table.id}
+                        x={table.center.x}
+                        y={table.center.y}
+                        radius={table.shape.radius}
+                        fill={palette.table}
+                        stroke={palette.row}
+                        strokeWidth={0.14}
+                      />
+                    ) : (
+                      <Rect
+                        key={table.id}
+                        x={table.center.x}
+                        y={table.center.y}
+                        offsetX={table.shape.width / 2}
+                        offsetY={table.shape.height / 2}
+                        width={table.shape.width}
+                        height={table.shape.height}
+                        rotation={(table.rotationRadians * 180) / Math.PI}
+                        fill={palette.table}
+                        stroke={palette.row}
+                        strokeWidth={0.14}
+                      />
+                    ),
+                  ),
+                )}
+              {showSeats &&
+                scene.seats.map((seat) =>
+                  previewNode(
+                    `seat:${seat.id}`,
+                    <Circle
+                      key={seat.id}
+                      x={seat.position.x}
+                      y={seat.position.y}
+                      radius={
+                        editorMode ? Math.max(0.65, 4 / viewport.scale) : 0.65
+                      }
+                      fill={seatAppearance?.[seat.id]?.fill ?? palette.seat}
+                      stroke={
+                        seatAppearance?.[seat.id]?.stroke ?? palette.seatStroke
+                      }
+                      strokeWidth={0.11}
+                    />,
+                  ),
+                )}
               {showLabels &&
-                scene.seats.map((seat) => (
-                  <Text
-                    key={`label:${seat.id}`}
-                    x={seat.position.x - 1}
-                    y={seat.position.y - 0.28}
-                    width={2}
-                    align="center"
-                    text={seat.label}
-                    fill="white"
-                    fontSize={0.52}
-                  />
-                ))}
+                scene.seats.map((seat) =>
+                  previewNode(
+                    `seat:${seat.id}`,
+                    <Text
+                      key={`label:${seat.id}`}
+                      x={seat.position.x - 1}
+                      y={seat.position.y - 0.28}
+                      width={2}
+                      align="center"
+                      text={seat.label}
+                      fill="white"
+                      fontSize={0.52}
+                    />,
+                  ),
+                )}
             </Group>
           </Layer>
 
@@ -690,16 +846,19 @@ export function HallViewer(props: HallViewerProps) {
                 const bounds = targetBounds(scene, target);
                 return bounds
                   ? [
-                      <Rect
-                        key={`${target.kind}:${target.id}`}
-                        x={bounds.minX - 0.2}
-                        y={bounds.minY - 0.2}
-                        width={bounds.maxX - bounds.minX + 0.4}
-                        height={bounds.maxY - bounds.minY + 0.4}
-                        stroke={palette.selected}
-                        strokeWidth={0.2}
-                        cornerRadius={0.3}
-                      />,
+                      previewNode(
+                        `${target.kind}:${target.id}`,
+                        <Rect
+                          key={`${target.kind}:${target.id}`}
+                          x={bounds.minX - 0.2}
+                          y={bounds.minY - 0.2}
+                          width={bounds.maxX - bounds.minX + 0.4}
+                          height={bounds.maxY - bounds.minY + 0.4}
+                          stroke={palette.selected}
+                          strokeWidth={0.2}
+                          cornerRadius={0.3}
+                        />,
+                      ),
                     ]
                   : [];
               })}

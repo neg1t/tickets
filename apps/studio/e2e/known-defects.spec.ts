@@ -4,7 +4,6 @@ import { readFile } from 'node:fs/promises';
 test('A01: a dragged seat visibly moves before pointer release', async ({
   page,
 }) => {
-  test.fail(); // Remove when H01 implements live drag preview.
   await page.goto('/');
   await page.getByRole('button', { name: 'Новый зал' }).click();
   const stage = page.locator('#hall-stage');
@@ -41,7 +40,6 @@ test('A07: a dirty draft survives reload as a recoverable copy', async ({
 test('A02: leaving the canvas does not commit an unfinished drag', async ({
   page,
 }) => {
-  test.fail(); // Remove when H01 handles pointer capture and cancel.
   await page.goto('/');
   await page.getByRole('button', { name: 'Новый зал' }).click();
   const stage = page.locator('#hall-stage');
@@ -54,10 +52,10 @@ test('A02: leaving the canvas does not commit an unfinished drag', async ({
   await page.mouse.move(bounds.x - 20, bounds.y - 20);
   await expect(page.getByText('Изменений через onChange: 1')).toBeVisible();
   await page.mouse.up();
+  await expect(page.getByText('Изменений через onChange: 2')).toBeVisible();
 });
 
 test('A05: deleting a multiselection removes both seats', async ({ page }) => {
-  test.fail(); // Remove when H01 introduces group commands.
   await page.goto('/');
   await page.getByRole('button', { name: 'Новый зал' }).click();
   const stage = page.locator('#hall-stage');
