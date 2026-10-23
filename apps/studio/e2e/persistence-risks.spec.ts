@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { makeTwoPagePdf } from './pdfFixture';
+import { chooseEditorAction } from './navigation';
 
 test('R03: a PDF finishing after hall switch cannot enter the new hall', async ({
   page,
@@ -21,8 +22,8 @@ test('R03: a PDF finishing after hall switch cannot enter the new hall', async (
     buffer: makeTwoPagePdf(),
   });
   page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: 'Открыть тестовый зал' }).click();
-  await expect(page.getByText('Текущий зал: Small Theater')).toBeVisible();
+  await chooseEditorAction(page, 'Открыть тестовый зал');
+  await expect(page.locator('.studio-editor-title strong')).toHaveText('Small Theater');
   await page.waitForTimeout(1500);
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Экспорт JSON' }).click();
@@ -117,7 +118,7 @@ test('R06: failed demo reset leaves the saved hall intact', async ({
     };
   });
   page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: 'Сбросить демо-данные' }).click();
+  await chooseEditorAction(page, 'Сбросить демо-данные');
   await expect(page.getByRole('alert').first()).toContainText(
     'injected demo clear failure',
   );

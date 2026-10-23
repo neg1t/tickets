@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { makeTwoPagePdf } from './pdfFixture';
+import { openCatalogServices, openCurrentEditor } from './navigation';
 
 test('keeps an imported PDF and seat coordinates after local save and reload', async ({
   page,
@@ -24,7 +25,7 @@ test('keeps an imported PDF and seat coordinates after local save and reload', a
   );
 
   await page.reload();
-  await page.getByRole('button', { name: 'Редактор', exact: true }).click();
+  await openCurrentEditor(page);
   await expect(page.getByText('local-plan.pdf · 2 страницы')).toBeVisible();
   await expect(page.getByText('Подложка: отображается')).toBeVisible();
   const secondDownload = page.waitForEvent('download');
@@ -97,6 +98,7 @@ test('imports a PDF, draws over page two, calibrates, and reopens the same geome
   expect(saved.calibration.millimetersPerWorldUnit).toBeGreaterThan(0);
 
   page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'К списку залов' }).click();
   await page.getByRole('button', { name: 'Новый зал' }).click();
   await expect(page.getByText(/0 мест · 0 столов/)).toBeVisible();
   await expect
@@ -114,6 +116,8 @@ test('imports a PDF, draws over page two, calibrates, and reopens the same geome
       .getAttribute('data-viewport-scale'),
   );
   page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'К списку залов' }).click();
+  await openCatalogServices(page);
   await page.getByLabel('Открыть JSON').setInputFiles({
     name: 'saved.json',
     mimeType: 'application/json',

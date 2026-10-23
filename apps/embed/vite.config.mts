@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { nxReadySignal } from '@nx/vite/plugins/nx-ready-signal.plugin';
 export default defineConfig(() => ({
   root: import.meta.dirname,
@@ -24,7 +25,7 @@ export default defineConfig(() => ({
     port: 4301,
     host: 'localhost',
   },
-  plugins: [react(), nxReadySignal()],
+  plugins: [react(), tailwindcss(), nxReadySignal()],
   // Uncomment this if you are using workers.
   // worker: {
   //  plugins: [],

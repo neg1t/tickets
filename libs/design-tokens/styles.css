@@ -1,0 +1,50 @@
+:root,
+.hall-theme {
+  --hall-color-ink: #182b38;
+  --hall-color-muted: #587080;
+  --hall-color-accent: #087e87;
+  --hall-color-accent-ink: #ffffff;
+  --hall-color-border: #c8d8dd;
+  --hall-color-surface: #ffffff;
+  --hall-color-background: #f4f8f9;
+  --hall-color-canvas: #e9f1f3;
+  --hall-color-danger: #b52d3a;
+  --hall-color-success: #167a50;
+  --hall-color-focus: #176bcb;
+  --hall-font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --hall-radius-sm: 6px;
+  --hall-radius-md: 10px;
+  --hall-radius-lg: 16px;
+  --hall-shadow-popover: 0 12px 32px rgb(24 43 56 / 18%);
+  --hall-space-1: 4px;
+  --hall-space-2: 8px;
+  --hall-space-3: 12px;
+  --hall-space-4: 16px;
+  --hall-space-6: 24px;
+  --hall-canvas-ink: #193047;
+  --hall-canvas-seat: #2079a8;
+  --hall-canvas-seat-stroke: #145577;
+  --hall-canvas-zone: #e7f2f8;
+  --hall-canvas-zone-stroke: #91b4ca;
+  --hall-canvas-row: #65869b;
+  --hall-canvas-table: #c3dbe6;
+  --hall-canvas-selected: #ed8936;
+}
+
+.hall-theme-canvas {
+  --hall-color-ink: #dce9ef;
+  --hall-color-muted: #9bb3c0;
+  --hall-color-border: #49616e;
+  --hall-color-surface: #253d4b;
+  --hall-color-background: #162e3b;
+  --hall-color-canvas: #102633;
+  --hall-canvas-ink: #dce9ef;
+  --hall-canvas-seat: #57b8d5;
+  --hall-canvas-seat-stroke: #a5e3f1;
+  --hall-canvas-zone: #294a5b;
+  --hall-canvas-zone-stroke: #6e9bad;
+  --hall-canvas-row: #91adba;
+  --hall-canvas-table: #456c7d;
+  color: var(--hall-color-ink);
+  background: var(--hall-color-canvas);
+}

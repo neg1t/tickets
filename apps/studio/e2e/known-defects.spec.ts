@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { openCatalogServices, openCurrentEditor } from './navigation';
 
 test('A01: a dragged seat visibly moves before pointer release', async ({
   page,
@@ -73,7 +74,7 @@ test('A04: changing a row in the inspector updates its seats', async ({
   page,
 }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Редактор', exact: true }).click();
+  await openCurrentEditor(page);
   const stage = page.locator('#hall-stage');
   const viewer = page.locator('.hall-viewer-canvas');
   const x = Number(await viewer.getAttribute('data-viewport-x'));
@@ -99,6 +100,7 @@ test('A04: changing a row in the inspector updates its seats', async ({
 test('A06: oversized JSON is rejected before parsing it', async ({ page }) => {
   test.fail(); // Remove when H06 adds import limits.
   await page.goto('/');
+  await openCatalogServices(page);
   await page.getByLabel('Открыть JSON').setInputFiles({
     name: 'oversized.json',
     mimeType: 'application/json',

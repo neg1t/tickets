@@ -34,6 +34,9 @@
   "include": ["src/**/*.js", "src/**/*.jsx", "src/**/*.ts", "src/**/*.tsx"],
   "references": [
     {
+      "path": "../../libs/ui/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/seat-view/tsconfig.lib.json"
     },
     {
@@ -43,13 +46,13 @@
       "path": "../../libs/local-storage/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/hall-editor/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/fixtures/tsconfig.lib.json"
     },
     {
       "path": "../../libs/domain/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/hall-editor/tsconfig.lib.json"
     }
   ]
 }

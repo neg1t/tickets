@@ -12,11 +12,13 @@ vi.mock('@hall-platform/hall-editor', async (importOriginal) => ({
 
 describe('DashboardPage', () => {
   it('shows the hall management dashboard', async () => {
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
     await act(async () => {
       render(<DashboardPage />);
     });
 
-    expect(screen.getByRole('heading', { name: 'Hall Studio' })).toBeTruthy();
+    expect(screen.getByText('Hall Studio')).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Мои залы' })).toBeTruthy();
+    expect(screen.queryByLabelText(/Редактор зала/)).toBeNull();
   });
 });

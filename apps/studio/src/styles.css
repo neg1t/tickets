@@ -1,93 +1,30 @@
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities) source(none);
+@source './';
+@source '../../../libs/ui/src';
+@source '../../../libs/hall-editor/src';
+@source '../../../libs/seat-view/src';
+@import '../../../libs/design-tokens/styles.css';
+@import '../../../libs/ui/styles.css';
 @import '@hall-platform/renderer-konva/styles.css';
 @import '@hall-platform/hall-editor/styles.css';
 @import '@hall-platform/seat-view/styles.css';
 
+@theme inline {
+  --color-hall-ink: var(--hall-color-ink);
+  --color-hall-muted: var(--hall-color-muted);
+  --color-hall-accent: var(--hall-color-accent);
+  --color-hall-border: var(--hall-color-border);
+  --color-hall-surface: var(--hall-color-surface);
+  --color-hall-background: var(--hall-color-background);
+  --color-hall-canvas: var(--hall-color-canvas);
+  --color-hall-danger: var(--hall-color-danger);
+  --font-hall: var(--hall-font-family);
+}
+
 body {
   margin: 0;
-  color: #193047;
-  background: #f6f9fb;
-  font-family: system-ui, sans-serif;
-}
-
-main {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 24px;
-}
-
-.dashboard-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.dashboard-actions button {
-  padding: 8px 12px;
-  border: 1px solid #a9bdca;
-  border-radius: 5px;
-  background: white;
-  color: #193047;
-  cursor: pointer;
-}
-
-.hall-catalog {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
-  margin-top: 16px;
-}
-
-.hall-card {
-  padding: 12px;
-  border: 1px solid #cbd9e2;
-  border-radius: 8px;
-  background: white;
-}
-
-.hall-card h3 {
-  margin: 0 0 8px;
-}
-
-.hall-card p {
-  margin: 0 0 12px;
-}
-
-.hall-card button,
-.published-versions button {
-  padding: 6px 10px;
-  border: 1px solid #a9bdca;
-  border-radius: 5px;
-  background: white;
-  cursor: pointer;
-}
-
-.published-versions {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.demo-events {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
-}
-
-.demo-checkout {
-  max-width: 480px;
-  padding: 18px;
-  border: 1px solid #cbd9e2;
-  border-radius: 8px;
-  background: white;
-}
-
-.demo-checkout button {
-  min-height: 42px;
-  margin: 0 8px 8px 0;
-  padding: 8px 12px;
-  border: 1px solid #a9bdca;
-  border-radius: 6px;
-  background: #e7f2f8;
-  color: #193047;
-  cursor: pointer;
+  color: var(--hall-color-ink);
+  background: var(--hall-color-background);
+  font-family: var(--hall-font-family);
 }

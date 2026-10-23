@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { openBuyer, openCurrentEditor } from './navigation';
 
 async function capture(name: string, screenshot: Buffer) {
   await test
@@ -23,7 +24,7 @@ test('captures the desktop catalog baseline', async ({ page }) => {
 test('captures the desktop editor baseline', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Редактор', exact: true }).click();
+  await openCurrentEditor(page);
   await expect(page.locator('#hall-stage')).toBeVisible();
   await page.locator('#hall-stage').scrollIntoViewIfNeeded();
   await capture('studio-editor-1280x800', await page.screenshot());
@@ -32,7 +33,7 @@ test('captures the desktop editor baseline', async ({ page }) => {
 test('captures the mobile buyer baseline', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Покупательская схема' }).click();
+  await openBuyer(page);
   const buyer = page.getByRole('region', { name: /Места: Small Theater/ });
   await expect(buyer).toBeVisible();
   await buyer.scrollIntoViewIfNeeded();

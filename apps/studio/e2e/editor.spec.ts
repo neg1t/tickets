@@ -1,12 +1,14 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { openCurrentEditor } from './navigation';
 
 test('renders a hall, zooms, pans and selects a seat', async ({ page }) => {
   await page.goto('/');
+  await openCurrentEditor(page);
 
   const stage = page.locator('#hall-stage');
   await expect(stage).toBeVisible();
-  await expect(stage).toHaveCSS('height', '500px');
+  expect((await stage.boundingBox())?.height).toBeGreaterThan(300);
   await expect(stage.locator('canvas')).toHaveCount(4);
 
   const viewer = page.locator('.hall-viewer-canvas');
@@ -39,7 +41,7 @@ test('renders a hall, zooms, pans and selects a seat', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Вписать' }).click();
 
-  await page.getByRole('button', { name: 'Перемещение' }).click();
+  await page.getByRole('button', { name: 'Рука' }).click();
   const box = await stage.evaluate((element) => {
     const rect = (element as HTMLElement).getBoundingClientRect();
     return { x: rect.x, y: rect.y };
@@ -56,6 +58,7 @@ test('keeps the cursor point fixed during wheel zoom and opens a zone', async ({
   page,
 }) => {
   await page.goto('/');
+  await openCurrentEditor(page);
   const stage = page.locator('#hall-stage');
   const viewer = page.locator('.hall-viewer-canvas');
   await stage.scrollIntoViewIfNeeded();
@@ -104,6 +107,7 @@ test('pinch gesture zooms the hall', async ({ browser }) => {
   });
   const page = await context.newPage();
   await page.goto('/');
+  await openCurrentEditor(page);
   const viewer = page.locator('.hall-viewer-canvas');
   const stage = page.locator('#hall-stage');
   await stage.scrollIntoViewIfNeeded();

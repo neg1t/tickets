@@ -30,11 +30,13 @@ import {
   RowGenerationControls,
   TableGenerationControls,
 } from './ui/GenerationControls.js';
+import { ToolsPanel, editorTools } from './ui/ToolsPanel.js';
+import { toggleEditorPanel, type EditorPanel } from './ui/editorPanels.js';
+import { useCanvasHeight } from './ui/useCanvasHeight.js';
 import {
   createObjectAt,
   deleteTargets,
   moveTargets,
-  type EditorTool,
 } from './editorOperations.js';
 import { preserveSeatManualAdjustment } from './commands/regenerateSeats.js';
 import {
@@ -105,23 +107,6 @@ function PropertyField(props: PropertyFieldProps) {
   );
 }
 
-const tools: readonly { id: EditorTool; label: string }[] = [
-  { id: 'select', label: 'Выбор' },
-  { id: 'pan', label: 'Рука' },
-  { id: 'zone', label: 'Зона' },
-  { id: 'zone-ga', label: 'GA-зона' },
-  { id: 'stage', label: 'Сцена' },
-  { id: 'label', label: 'Подпись' },
-  { id: 'obstacle', label: 'Препятствие' },
-  { id: 'row-line', label: 'Прямой ряд' },
-  { id: 'row-arc', label: 'Дуговой ряд' },
-  { id: 'row-bezier', label: 'Ряд Безье' },
-  { id: 'seat', label: 'Место' },
-  { id: 'table-circle', label: 'Круглый стол' },
-  { id: 'table-rectangle', label: 'Прямоугольный стол' },
-  { id: 'calibrate', label: 'Калибровать' },
-];
-
 export function HallEditor(props: HallEditorProps) {
   const {
     value,
@@ -134,6 +119,9 @@ export function HallEditor(props: HallEditorProps) {
     publishedSeatIds = [],
   } = props;
   const [model] = useState(() => createEditorModel(value));
+  const [mobilePanel, setMobilePanel] = useState<EditorPanel | null>(null);
+  const { setElement: setCanvasElement, height: canvasHeight } =
+    useCanvasHeight();
   const [floorId, setFloorId] = useState(value.snapshot.floors[0]?.id ?? '');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [knownMillimeters, setKnownMillimeters] = useState(1000);
@@ -435,6 +423,10 @@ export function HallEditor(props: HallEditorProps) {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === 'Escape') {
+      setMobilePanel(null);
+      if (tool !== 'select') model.toolChanged('select');
+    }
     if (
       event.target instanceof HTMLInputElement ||
       event.target instanceof HTMLSelectElement
@@ -615,19 +607,49 @@ export function HallEditor(props: HallEditorProps) {
       </header>
 
       <div className="hall-editor-workspace">
-        <aside className="hall-editor-tools" aria-label="Инструменты редактора">
-          <h3>Инструменты</h3>
-          {tools.map((item) => (
+        <ToolsPanel
+          activeTool={tool}
+          readonly={readonly}
+          onSelect={(next) => {
+            model.toolChanged(next);
+            setMobilePanel(null);
+          }}
+        />
+        <aside
+          className="hall-editor-tools"
+          aria-label="Структура и настройки"
+          data-mobile-open={mobilePanel === 'layers' || mobilePanel === 'tools'}
+          data-mobile-panel={mobilePanel ?? ''}
+        >
+          <div className="hall-editor-panel-heading">
+            <h3>{mobilePanel === 'tools' ? 'Инструменты' : 'Структура'}</h3>
             <button
-              key={item.id}
               type="button"
-              aria-pressed={tool === item.id}
-              disabled={readonly && item.id !== 'select' && item.id !== 'pan'}
-              onClick={() => model.toolChanged(item.id)}
+              className="hall-editor-panel-close"
+              aria-label="Закрыть панель"
+              onClick={() => setMobilePanel(null)}
             >
-              {item.label}
+              ×
             </button>
-          ))}
+          </div>
+          {mobilePanel === 'tools' && (
+            <div className="hall-editor-mobile-tools">
+              {editorTools.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-pressed={tool === item.id}
+                  disabled={readonly && item.id !== 'select' && item.id !== 'pan'}
+                  onClick={() => {
+                    model.toolChanged(item.id);
+                    setMobilePanel(null);
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
           <h3>Этажи</h3>
           <label>
             Активный этаж
@@ -782,29 +804,51 @@ export function HallEditor(props: HallEditorProps) {
           )}
         </aside>
 
-        <PdfHallViewer
-          draft={draft}
-          focusedFloorId={activeFloorId}
-          previewSeats={previewSeats}
-          onError={report}
-          activeTool={tool}
-          selectedTargets={selection}
-          onCanvasClick={handleCanvasClick}
-          {...(!readonly ? { onObjectsMove: handleMove } : {})}
-          onSelectionChange={(next) => {
-            model.selectionChanged(next);
-            if (next.length > 0) model.backgroundChanged('');
-          }}
-          onFloorChange={(nextFloorId) => {
-            setFloorId(nextFloorId);
-            model.selectionChanged([]);
-            model.zoneChanged('');
-            model.backgroundChanged('');
-          }}
-        />
+        <div className="hall-editor-canvas" ref={setCanvasElement}>
+          <PdfHallViewer
+            height={canvasHeight}
+            draft={draft}
+            focusedFloorId={activeFloorId}
+            previewSeats={previewSeats}
+            onError={report}
+            activeTool={tool}
+            selectedTargets={selection}
+            onCanvasClick={handleCanvasClick}
+            {...(!readonly ? { onObjectsMove: handleMove } : {})}
+            onSelectionChange={(next) => {
+              model.selectionChanged(next);
+              if (next.length > 0) model.backgroundChanged('');
+            }}
+            onFloorChange={(nextFloorId) => {
+              setFloorId(nextFloorId);
+              model.selectionChanged([]);
+              model.zoneChanged('');
+              model.backgroundChanged('');
+            }}
+          />
+        </div>
 
-        <aside className="hall-editor-properties" aria-label="Свойства объекта">
-          <h3>Свойства</h3>
+        <aside
+          className="hall-editor-properties"
+          aria-label="Свойства объекта"
+          data-mobile-open={mobilePanel === 'properties'}
+        >
+          <div className="hall-editor-panel-heading">
+            <h3>Свойства</h3>
+            <button
+              type="button"
+              className="hall-editor-panel-close"
+              aria-label="Закрыть панель"
+              onClick={() => setMobilePanel(null)}
+            >
+              ×
+            </button>
+          </div>
+          {(target || background) && (
+            <p className="hall-editor-selection-path">
+              {target ? `${target.kind} · ${target.id}` : 'PDF-подложка'}
+            </p>
+          )}
           {!target && !background && (
             <p>Выберите объект на схеме или подложку в списке.</p>
           )}
@@ -1590,6 +1634,65 @@ export function HallEditor(props: HallEditorProps) {
             </section>
           )}
         </aside>
+        {mobilePanel && (
+          <button
+            type="button"
+            className="hall-editor-drawer-scrim"
+            aria-label="Закрыть панель"
+            onClick={() => setMobilePanel(null)}
+          />
+        )}
+        <nav className="hall-editor-mobile-nav" aria-label="Панели редактора">
+          <button
+            type="button"
+            aria-pressed={tool === 'select'}
+            onClick={() => {
+              model.toolChanged('select');
+              setMobilePanel(null);
+            }}
+          >
+            ↖ <span>Выбор</span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={tool === 'row-line'}
+            onClick={() => {
+              model.toolChanged('row-line');
+              setMobilePanel(null);
+            }}
+          >
+            ▤ <span>Ряд</span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={mobilePanel === 'tools'}
+            onClick={() =>
+              setMobilePanel((current) => toggleEditorPanel(current, 'tools'))
+            }
+          >
+            ✥ <span>Инструменты</span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={mobilePanel === 'layers'}
+            onClick={() =>
+              setMobilePanel((current) => toggleEditorPanel(current, 'layers'))
+            }
+          >
+            ▦ <span>Слои</span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={mobilePanel === 'properties'}
+            onClick={() =>
+              setMobilePanel((current) =>
+                toggleEditorPanel(current, 'properties'),
+              )
+            }
+          >
+            ☷ <span>Свойства</span>
+          </button>
+        </nav>
       </div>
       <footer className="hall-editor-footer">
         {errorMessage ? (

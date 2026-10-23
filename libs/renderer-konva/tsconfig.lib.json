@@ -18,6 +18,9 @@
       "path": "../domain/tsconfig.lib.json"
     },
     {
+      "path": "../design-tokens/tsconfig.lib.json"
+    },
+    {
       "path": "../fixtures/tsconfig.lib.json"
     }
   ],

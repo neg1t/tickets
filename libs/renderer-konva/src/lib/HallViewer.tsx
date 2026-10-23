@@ -8,6 +8,10 @@ import {
   type ReactNode,
 } from 'react';
 import type { LayoutSnapshot } from '@hall-platform/domain';
+import {
+  defaultHallCanvasPalette,
+  readHallCanvasPalette,
+} from '@hall-platform/design-tokens';
 import type { SpatialBounds, Vector2 } from '@hall-platform/geometry';
 import type Konva from 'konva';
 import {
@@ -99,16 +103,6 @@ type PointerIntent = {
   modifiers: { shift: boolean; ctrl: boolean; meta: boolean };
 };
 
-const palette = {
-  ink: '#193047',
-  seat: '#2079a8',
-  seatStroke: '#145577',
-  zone: '#e7f2f8',
-  zoneStroke: '#91b4ca',
-  row: '#65869b',
-  table: '#c3dbe6',
-  selected: '#ed8936',
-};
 const farZoomTargets = new Set<HallTarget['kind']>(['zone']);
 const defaultLabels: HallViewerLabels = {
   hall: 'Схема зала',
@@ -153,6 +147,7 @@ export function HallViewer(props: HallViewerProps) {
   const ui = { ...defaultLabels, ...labels };
   const [floorId, setFloorId] = useState(snapshot.floors[0]?.id ?? '');
   const [width, setWidth] = useState(900);
+  const [palette, setPalette] = useState(defaultHallCanvasPalette);
   const requestedFloorId = focusedFloorId ?? floorId;
   const activeFloorId = snapshot.floors.some(
     (floor) => floor.id === requestedFloorId,
@@ -176,6 +171,16 @@ export function HallViewer(props: HallViewerProps) {
         ? 'pan'
         : 'select';
   const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const update = () => setPalette(readHallCanvasPalette(container));
+    update();
+    const observer = new MutationObserver(update);
+    for (let node: Element | null = container; node; node = node.parentElement)
+      observer.observe(node, { attributes: true, attributeFilter: ['class', 'style'] });
+    return () => observer.disconnect();
+  }, []);
   const observedWidth = useRef(width);
   const sceneRef = useRef(scene);
   const previousFitKey = useRef(fitKey);

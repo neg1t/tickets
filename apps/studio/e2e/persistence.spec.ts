@@ -1,11 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
+import { openCatalogServices, openCurrentEditor, openEditorServices } from './navigation';
+import { chooseEditorAction } from './navigation';
 
 test('renders the hall management dashboard', async ({ page }) => {
   await page.goto('/');
 
   await expect(
-    page.getByRole('heading', { name: 'Hall Studio' }),
+    page.getByText('Hall Studio', { exact: true }),
   ).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Мои залы' })).toBeVisible();
   await expect(page.locator('.hall-card')).toHaveCount(4);
@@ -40,6 +42,7 @@ test('imports a v1 draft and exports the current schema version', async ({
     assets: {},
     calibration: null,
   };
+  await openCatalogServices(page);
   await page.getByLabel('Открыть JSON').setInputFiles({
     name: 'legacy-hall.json',
     mimeType: 'application/json',
@@ -81,16 +84,15 @@ test('saves a draft in IndexedDB and restores it after reload without network ac
   await expect(page.getByText('Сохранено локально')).toBeVisible();
 
   await page.reload();
-  await page.getByRole('button', { name: 'Редактор', exact: true }).click();
+  await openCurrentEditor(page);
   await expect(
     page
       .getByRole('region', { name: 'Редактор зала Новый зал' })
       .getByText(/1 мест/),
   ).toBeVisible();
   await expect(page.getByText('Сохранено локально')).toBeVisible();
-  await expect(
-    page.locator('.hall-card', { hasText: 'Новый зал' }),
-  ).toBeVisible();
+  await page.getByRole('button', { name: 'К списку залов' }).click();
+  await expect(page.locator('.hall-card', { hasText: 'Новый зал' })).toBeVisible();
   expect(externalRequests).toEqual([]);
 });
 test('keeps a published version unchanged while the draft is edited', async ({
@@ -115,7 +117,7 @@ test('keeps a published version unchanged while the draft is edited', async ({
   ).toBeVisible();
   await page.getByRole('button', { name: 'Версия 1' }).click();
   await expect(
-    page.getByRole('heading', { name: 'Опубликованная схема' }),
+    page.getByText('Опубликованная схема', { exact: true }),
   ).toBeVisible();
   await expect(page.getByText('Опубликовано: 1 мест')).toBeVisible();
 
@@ -133,9 +135,11 @@ test('copies halls and resets local demo data to the four fixtures', async ({
   await expect(page.locator('.hall-card')).toHaveCount(4);
   await page.getByRole('button', { name: 'Новый зал' }).click();
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+  await page.getByRole('button', { name: 'К списку залов' }).click();
   await expect(page.locator('.hall-card')).toHaveCount(5);
+  await openCatalogServices(page);
   await page.getByRole('button', { name: 'Создать копию' }).click();
-  await expect(page.getByText('Текущий зал: Новый зал (копия)')).toBeVisible();
+  await expect(page.locator('.hall-card', { hasText: 'Новый зал (копия)' })).toBeVisible();
   await expect(page.locator('.hall-card')).toHaveCount(6);
 
   page.once('dialog', (dialog) => dialog.accept());
@@ -155,8 +159,8 @@ test('rejects stale save and publication from another tab', async ({
   const second = await context.newPage();
   await second.goto('/');
   await expect(second.locator('.hall-card')).toHaveCount(4);
-  await first.getByRole('button', { name: 'Редактор', exact: true }).click();
-  await second.getByRole('button', { name: 'Редактор', exact: true }).click();
+  await openCurrentEditor(first);
+  await openCurrentEditor(second);
 
   await first.getByRole('button', { name: 'Место', exact: true }).click();
   await first.locator('#hall-stage').click({ position: { x: 400, y: 250 } });
@@ -182,27 +186,30 @@ test('keeps a draft when switching halls is cancelled', async ({ page }) => {
   await page.getByRole('button', { name: 'Место', exact: true }).click();
   await page.locator('#hall-stage').click({ position: { x: 400, y: 250 } });
   page.once('dialog', (dialog) => dialog.dismiss());
-  await page.getByRole('button', { name: 'Открыть тестовый зал' }).click();
-  await expect(page.getByText('Текущий зал: Новый зал')).toBeVisible();
+  await chooseEditorAction(page, 'Открыть тестовый зал');
+  await expect(page.locator('.studio-editor-title strong')).toHaveText('Новый зал');
   await expect(page.getByText(/1 мест/)).toBeVisible();
 });
 test('restores a modified fixture and retains its older publication', async ({
   page,
 }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Редактор', exact: true }).click();
+  await openCurrentEditor(page);
   await page.getByRole('button', { name: 'Место', exact: true }).click();
   await page.locator('#hall-stage').click({ position: { x: 400, y: 250 } });
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
   await expect(page.getByText('Сохранено локально')).toBeVisible();
+  await page.getByRole('button', { name: 'К списку залов' }).click();
   const modified = await page.locator('.hall-card').first().textContent();
+  await openCatalogServices(page);
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Восстановить примеры' }).click();
-  await expect(page.getByRole('button', { name: 'Версия 2' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Версия 1' })).toBeVisible();
   await expect(page.locator('.hall-card').first()).not.toHaveText(
     modified ?? '',
   );
+  await openCurrentEditor(page);
+  await expect(page.getByRole('button', { name: 'Версия 2' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Версия 1' })).toBeVisible();
 });
 test('deleting a hall retains its published snapshot', async ({ page }) => {
   await page.goto('/');
@@ -213,8 +220,9 @@ test('deleting a hall retains its published snapshot', async ({ page }) => {
     localStorage.getItem('hall-platform-active-hall'),
   );
   expect(hallId).not.toBeNull();
+  await openEditorServices(page);
   page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: 'Удалить зал' }).click();
+  await page.getByRole('menuitem', { name: 'Удалить зал' }).click();
   await expect(page.getByText('Текущий зал: Новый зал')).toHaveCount(0);
   const versions = await page.evaluate(async (id) => {
     const request = indexedDB.open('hall-platform-studio');

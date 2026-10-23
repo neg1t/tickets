@@ -86,6 +86,7 @@ sample({
 export const newHallRequested = createEvent();
 export const draftChanged = createEvent<HallLayoutDraft>();
 export const editorOpened = createEvent();
+export const catalogOpened = createEvent();
 export const previewOpened = createEvent();
 export const demoEventsOpened = createEvent();
 export const seatSelectionChanged = createEvent<SeatSelectionItem[]>();
@@ -272,8 +273,9 @@ export const $versions = createStore<PublishedHallVersion[]>([])
 for (const event of opened) $versions.on(event, (_, result) => result.versions);
 
 export const $mode = createStore<
-  'preview' | 'editor' | 'published' | 'buyer' | 'events'
->('preview')
+  'catalog' | 'preview' | 'editor' | 'published' | 'buyer' | 'events'
+>('catalog')
+  .on(catalogOpened, () => 'catalog')
   .on(editorOpened, () => 'editor')
   .on(previewOpened, () => 'preview')
   .on(newHallRequested, () => 'editor')
@@ -281,7 +283,10 @@ export const $mode = createStore<
   .on(openBuyerFx.doneData, () => 'buyer')
   .on(openDemoEventFx.doneData, () => 'buyer')
   .on(openPublishedFx.doneData, () => 'published');
-for (const event of opened.slice(1)) $mode.on(event, () => 'editor');
+for (const event of [openHallFx.doneData, importDraftFx.doneData])
+  $mode.on(event, () => 'editor');
+for (const event of [duplicateHallFx.doneData, deleteHallFx.doneData, restoreFixturesFx.doneData, resetDemoDataFx.doneData])
+  $mode.on(event, () => 'catalog');
 
 export const $publishedDraft = createStore<HallLayoutDraft | null>(null)
   .on(openPublishedFx.doneData, (_, published) => published.layout)

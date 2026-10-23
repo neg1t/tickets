@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openBuyer } from './navigation';
 
 test('books a seat locally and persists its sold status after reload without HTTP', async ({
   page,
@@ -12,7 +13,7 @@ test('books a seat locally and persists its sold status after reload without HTT
     return route.abort();
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Покупательская схема' }).click();
+  await openBuyer(page);
   await expect(
     page.getByRole('heading', { name: 'Покупательская схема' }),
   ).toBeVisible();
@@ -28,7 +29,7 @@ test('books a seat locally and persists its sold status after reload without HTT
     page.getByRole('heading', { name: 'Покупка подтверждена' }),
   ).toBeVisible();
   await page.reload();
-  await page.getByRole('button', { name: 'Покупательская схема' }).click();
+  await openBuyer(page);
   await expect(
     page.getByRole('button', { name: /Место L1-1 — продано/ }),
   ).toBeDisabled();
@@ -58,7 +59,7 @@ test('SeatView accepts canvas selection and fits a narrow mobile screen', async 
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Покупательская схема' }).click();
+  await openBuyer(page);
   const view = page.getByRole('region', { name: /Места: Small Theater/ });
   const canvas = view.locator('.hall-viewer-canvas');
   await page.evaluate(

@@ -16,6 +16,7 @@
     }
   },
   "dependencies": {
+    "@hall-platform/design-tokens": "workspace:*",
     "@hall-platform/domain": "workspace:*",
     "@hall-platform/geometry": "workspace:*",
     "konva": "10.9.0",

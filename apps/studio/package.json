@@ -10,6 +10,7 @@
     "@hall-platform/fixtures": "workspace:*",
     "@hall-platform/local-storage": "workspace:*",
     "@hall-platform/renderer-konva": "workspace:*",
-    "@hall-platform/seat-view": "workspace:*"
+    "@hall-platform/seat-view": "workspace:*",
+    "@hall-platform/ui": "workspace:*"
   }
 }

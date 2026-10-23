@@ -132,10 +132,11 @@ test('replacing the hall during a drag cancels the old document gesture', async 
   await page.mouse.move(bounds.x + 400, bounds.y + 250);
   await page.mouse.down();
   await page.mouse.move(bounds.x + 450, bounds.y + 250, { steps: 4 });
-  await page
-    .getByRole('button', { name: 'Открыть тестовый зал' })
+  await page.getByRole('button', { name: 'Демо и обслуживание' })
     .evaluate((button) => (button as HTMLButtonElement).click());
-  await expect(page.getByText('Текущий зал: Small Theater')).toBeVisible();
+  await page.getByRole('menuitem', { name: 'Открыть тестовый зал' })
+    .evaluate((button) => (button as HTMLButtonElement).click());
+  await expect(page.locator('.studio-editor-title strong')).toHaveText('Small Theater');
   await page.mouse.up();
   await expect(page.getByText('Изменений через onChange: 0')).toBeVisible();
 });
