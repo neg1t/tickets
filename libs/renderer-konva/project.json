@@ -1,0 +1,8 @@
+{
+  "name": "renderer-konva",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/renderer-konva/src",
+  "projectType": "library",
+  "tags": ["scope:shared", "layer:widgets", "type:ui"],
+  "targets": {}
+}

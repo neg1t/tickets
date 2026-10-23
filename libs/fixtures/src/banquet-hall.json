@@ -1,0 +1,383 @@
+{
+  "document": {
+    "hall": {
+      "id": "banquet-hall-hall",
+      "venueId": "banquet-hall-venue",
+      "name": "Banquet Hall"
+    },
+    "layout": {
+      "id": "banquet-hall-layout",
+      "hallId": "banquet-hall-hall",
+      "name": "Main layout"
+    },
+    "version": {
+      "id": "banquet-hall-v1",
+      "layoutId": "banquet-hall-layout",
+      "versionNumber": 1,
+      "revision": 0,
+      "status": "published",
+      "snapshotId": "banquet-hall-snapshot-v1",
+      "calibration": null,
+      "publishedAt": "2026-10-22T08:00:00Z"
+    },
+    "snapshot": {
+      "id": "banquet-hall-snapshot-v1",
+      "layoutVersionId": "banquet-hall-v1",
+      "floors": [
+        {
+          "id": "banquet-hall-floor-main",
+          "layoutVersionId": "banquet-hall-v1",
+          "name": "Banquet floor"
+        }
+      ],
+      "zones": [
+        {
+          "id": "banquet-hall-zone-tables",
+          "floorId": "banquet-hall-floor-main",
+          "name": "Tables"
+        },
+        {
+          "id": "banquet-hall-zone-lounge",
+          "floorId": "banquet-hall-floor-main",
+          "name": "Lounge"
+        },
+        {
+          "id": "banquet-hall-zone-standing",
+          "floorId": "banquet-hall-floor-main",
+          "name": "Standing area"
+        }
+      ],
+      "rows": [],
+      "seats": [
+        {
+          "id": "banquet-hall-seat-round-1",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-tables",
+          "label": "R1-1",
+          "position": {
+            "x": 25,
+            "y": 20
+          },
+          "placement": {
+            "kind": "table",
+            "tableId": "banquet-hall-table-round"
+          }
+        },
+        {
+          "id": "banquet-hall-seat-round-2",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-tables",
+          "label": "R1-2",
+          "position": {
+            "x": 22.5,
+            "y": 24.33
+          },
+          "placement": {
+            "kind": "table",
+            "tableId": "banquet-hall-table-round"
+          }
+        },
+        {
+          "id": "banquet-hall-seat-round-3",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-tables",
+          "label": "R1-3",
+          "position": {
+            "x": 17.5,
+            "y": 24.33
+          },
+          "placement": {
+            "kind": "table",
+            "tableId": "banquet-hall-table-round"
+          }
+        },
+        {
+          "id": "banquet-hall-seat-round-4",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-tables",
+          "label": "R1-4",
+          "position": {
+            "x": 15,
+            "y": 20
+          },
+          "placement": {
+            "kind": "table",
+            "tableId": "banquet-hall-table-round"
+          }
+        },
+        {
+          "id": "banquet-hall-seat-round-5",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-tables",
+          "label": "R1-5",
+          "position": {
+            "x": 17.5,
+            "y": 15.67
+          },
+          "placement": {
+            "kind": "table",
+            "tableId": "banquet-hall-table-round"
+          }
+        },
+        {
+          "id": "banquet-hall-seat-round-6",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-tables",
+          "label": "R1-6",
+          "position": {
+            "x": 22.5,
+            "y": 15.67
+          },
+          "placement": {
+            "kind": "table",
+            "tableId": "banquet-hall-table-round"
+          }
+        },
+        {
+          "id": "banquet-hall-seat-rectangle-1",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-tables",
+          "label": "T1-1",
+          "position": {
+            "x": 47,
+            "y": 16
+          },
+          "placement": {
+            "kind": "table",
+            "tableId": "banquet-hall-table-rectangle"
+          }
+        },
+        {
+          "id": "banquet-hall-seat-rectangle-2",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-tables",
+          "label": "T1-2",
+          "position": {
+            "x": 53,
+            "y": 16
+          },
+          "placement": {
+            "kind": "table",
+            "tableId": "banquet-hall-table-rectangle"
+          }
+        },
+        {
+          "id": "banquet-hall-seat-rectangle-3",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-tables",
+          "label": "T1-3",
+          "position": {
+            "x": 56,
+            "y": 20
+          },
+          "placement": {
+            "kind": "table",
+            "tableId": "banquet-hall-table-rectangle"
+          }
+        },
+        {
+          "id": "banquet-hall-seat-rectangle-4",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-tables",
+          "label": "T1-4",
+          "position": {
+            "x": 53,
+            "y": 24
+          },
+          "placement": {
+            "kind": "table",
+            "tableId": "banquet-hall-table-rectangle"
+          }
+        },
+        {
+          "id": "banquet-hall-seat-rectangle-5",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-tables",
+          "label": "T1-5",
+          "position": {
+            "x": 47,
+            "y": 24
+          },
+          "placement": {
+            "kind": "table",
+            "tableId": "banquet-hall-table-rectangle"
+          }
+        },
+        {
+          "id": "banquet-hall-seat-rectangle-6",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-tables",
+          "label": "T1-6",
+          "position": {
+            "x": 44,
+            "y": 20
+          },
+          "placement": {
+            "kind": "table",
+            "tableId": "banquet-hall-table-rectangle"
+          }
+        },
+        {
+          "id": "banquet-hall-seat-lounge-1",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-lounge",
+          "label": "L1",
+          "position": {
+            "x": 13,
+            "y": 40
+          },
+          "placement": {
+            "kind": "standalone"
+          }
+        },
+        {
+          "id": "banquet-hall-seat-lounge-2",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-lounge",
+          "label": "L2",
+          "position": {
+            "x": 16,
+            "y": 40
+          },
+          "placement": {
+            "kind": "standalone"
+          }
+        },
+        {
+          "id": "banquet-hall-seat-lounge-3",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-lounge",
+          "label": "L3",
+          "position": {
+            "x": 19,
+            "y": 40
+          },
+          "placement": {
+            "kind": "standalone"
+          }
+        }
+      ],
+      "tables": [
+        {
+          "id": "banquet-hall-table-round",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-tables",
+          "label": "Round 1",
+          "center": {
+            "x": 20,
+            "y": 20
+          },
+          "rotationRadians": 0,
+          "shape": {
+            "kind": "circle",
+            "radius": 4,
+            "seatCount": 6
+          }
+        },
+        {
+          "id": "banquet-hall-table-rectangle",
+          "floorId": "banquet-hall-floor-main",
+          "zoneId": "banquet-hall-zone-tables",
+          "label": "Rect 1",
+          "center": {
+            "x": 50,
+            "y": 20
+          },
+          "rotationRadians": 0,
+          "shape": {
+            "kind": "rectangle",
+            "width": 10,
+            "height": 6,
+            "seatsPerSide": {
+              "top": 2,
+              "right": 1,
+              "bottom": 2,
+              "left": 1
+            }
+          }
+        }
+      ],
+      "backgrounds": []
+    }
+  },
+  "occurrence": {
+    "id": "banquet-hall-occurrence",
+    "eventId": "banquet-hall-event",
+    "layoutVersionId": "banquet-hall-v1",
+    "startsAt": "2027-01-15T19:00:00Z"
+  },
+  "inventory": {
+    "occurrenceId": "banquet-hall-occurrence",
+    "seats": [
+      {
+        "seatId": "banquet-hall-seat-round-1",
+        "status": "sold"
+      },
+      {
+        "seatId": "banquet-hall-seat-round-2",
+        "status": "held"
+      },
+      {
+        "seatId": "banquet-hall-seat-round-3",
+        "status": "blocked"
+      },
+      {
+        "seatId": "banquet-hall-seat-round-4",
+        "status": "available"
+      },
+      {
+        "seatId": "banquet-hall-seat-round-5",
+        "status": "available"
+      },
+      {
+        "seatId": "banquet-hall-seat-round-6",
+        "status": "available"
+      },
+      {
+        "seatId": "banquet-hall-seat-rectangle-1",
+        "status": "available"
+      },
+      {
+        "seatId": "banquet-hall-seat-rectangle-2",
+        "status": "available"
+      },
+      {
+        "seatId": "banquet-hall-seat-rectangle-3",
+        "status": "available"
+      },
+      {
+        "seatId": "banquet-hall-seat-rectangle-4",
+        "status": "available"
+      },
+      {
+        "seatId": "banquet-hall-seat-rectangle-5",
+        "status": "available"
+      },
+      {
+        "seatId": "banquet-hall-seat-rectangle-6",
+        "status": "available"
+      },
+      {
+        "seatId": "banquet-hall-seat-lounge-1",
+        "status": "available"
+      },
+      {
+        "seatId": "banquet-hall-seat-lounge-2",
+        "status": "available"
+      },
+      {
+        "seatId": "banquet-hall-seat-lounge-3",
+        "status": "available"
+      }
+    ],
+    "zones": [
+      {
+        "zoneId": "banquet-hall-zone-standing",
+        "capacity": 25,
+        "held": 2,
+        "sold": 3,
+        "blocked": 1
+      }
+    ]
+  }
+}

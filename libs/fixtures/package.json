@@ -1,0 +1,22 @@
+{
+  "name": "@hall-platform/fixtures",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./small-theater.json": "./src/small-theater.json",
+    "./opera-hall.json": "./src/opera-hall.json",
+    "./arena.json": "./src/arena.json",
+    "./banquet-hall.json": "./src/banquet-hall.json"
+  },
+  "devDependencies": {
+    "@hall-platform/domain": "workspace:*"
+  }
+}

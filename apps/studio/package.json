@@ -1,0 +1,15 @@
+{
+  "name": "@hall-platform/studio",
+  "version": "0.0.1",
+  "private": true,
+  "dependencies": {
+    "@hall-platform/hall-editor": "workspace:*",
+    "effector": "^23.4.4",
+    "effector-react": "^23.3.0",
+    "@hall-platform/domain": "workspace:*",
+    "@hall-platform/fixtures": "workspace:*",
+    "@hall-platform/local-storage": "workspace:*",
+    "@hall-platform/renderer-konva": "workspace:*",
+    "@hall-platform/seat-view": "workspace:*"
+  }
+}

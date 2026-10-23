@@ -1,0 +1,604 @@
+{
+  "document": {
+    "hall": {
+      "id": "small-theater-hall",
+      "venueId": "small-theater-venue",
+      "name": "Small Theater"
+    },
+    "layout": {
+      "id": "small-theater-layout",
+      "hallId": "small-theater-hall",
+      "name": "Main layout"
+    },
+    "version": {
+      "id": "small-theater-v1",
+      "layoutId": "small-theater-layout",
+      "versionNumber": 1,
+      "revision": 0,
+      "status": "published",
+      "snapshotId": "small-theater-snapshot-v1",
+      "calibration": null,
+      "publishedAt": "2026-10-22T08:00:00Z"
+    },
+    "snapshot": {
+      "id": "small-theater-snapshot-v1",
+      "layoutVersionId": "small-theater-v1",
+      "floors": [
+        {
+          "id": "small-theater-floor-main",
+          "layoutVersionId": "small-theater-v1",
+          "name": "Main floor"
+        }
+      ],
+      "zones": [
+        {
+          "id": "small-theater-zone-left",
+          "floorId": "small-theater-floor-main",
+          "name": "Left sector"
+        },
+        {
+          "id": "small-theater-zone-center",
+          "floorId": "small-theater-floor-main",
+          "name": "Center sector"
+        },
+        {
+          "id": "small-theater-zone-right",
+          "floorId": "small-theater-floor-main",
+          "name": "Right sector"
+        }
+      ],
+      "rows": [
+        {
+          "id": "small-theater-row-left-1",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-left",
+          "name": "L1",
+          "curve": {
+            "kind": "line",
+            "start": {
+              "x": 0,
+              "y": 10
+            },
+            "end": {
+              "x": 6,
+              "y": 10
+            }
+          }
+        },
+        {
+          "id": "small-theater-row-left-2",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-left",
+          "name": "L2",
+          "curve": {
+            "kind": "line",
+            "start": {
+              "x": 0,
+              "y": 15
+            },
+            "end": {
+              "x": 6,
+              "y": 15
+            }
+          }
+        },
+        {
+          "id": "small-theater-row-center-1",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-center",
+          "name": "C1",
+          "curve": {
+            "kind": "line",
+            "start": {
+              "x": 20,
+              "y": 10
+            },
+            "end": {
+              "x": 26,
+              "y": 10
+            }
+          }
+        },
+        {
+          "id": "small-theater-row-center-2",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-center",
+          "name": "C2",
+          "curve": {
+            "kind": "line",
+            "start": {
+              "x": 20,
+              "y": 15
+            },
+            "end": {
+              "x": 26,
+              "y": 15
+            }
+          }
+        },
+        {
+          "id": "small-theater-row-right-1",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-right",
+          "name": "R1",
+          "curve": {
+            "kind": "line",
+            "start": {
+              "x": 40,
+              "y": 10
+            },
+            "end": {
+              "x": 46,
+              "y": 10
+            }
+          }
+        },
+        {
+          "id": "small-theater-row-right-2",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-right",
+          "name": "R2",
+          "curve": {
+            "kind": "line",
+            "start": {
+              "x": 40,
+              "y": 15
+            },
+            "end": {
+              "x": 46,
+              "y": 15
+            }
+          }
+        }
+      ],
+      "seats": [
+        {
+          "id": "small-theater-seat-left-1-1",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-left",
+          "label": "L1-1",
+          "position": {
+            "x": 0,
+            "y": 10
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-left-1"
+          }
+        },
+        {
+          "id": "small-theater-seat-left-1-2",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-left",
+          "label": "L1-2",
+          "position": {
+            "x": 2,
+            "y": 10
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-left-1"
+          }
+        },
+        {
+          "id": "small-theater-seat-left-1-3",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-left",
+          "label": "L1-3",
+          "position": {
+            "x": 4,
+            "y": 10
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-left-1"
+          }
+        },
+        {
+          "id": "small-theater-seat-left-1-4",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-left",
+          "label": "L1-4",
+          "position": {
+            "x": 6,
+            "y": 10
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-left-1"
+          }
+        },
+        {
+          "id": "small-theater-seat-left-2-1",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-left",
+          "label": "L2-1",
+          "position": {
+            "x": 0,
+            "y": 15
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-left-2"
+          }
+        },
+        {
+          "id": "small-theater-seat-left-2-2",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-left",
+          "label": "L2-2",
+          "position": {
+            "x": 2,
+            "y": 15
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-left-2"
+          }
+        },
+        {
+          "id": "small-theater-seat-left-2-3",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-left",
+          "label": "L2-3",
+          "position": {
+            "x": 4,
+            "y": 15
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-left-2"
+          }
+        },
+        {
+          "id": "small-theater-seat-left-2-4",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-left",
+          "label": "L2-4",
+          "position": {
+            "x": 6,
+            "y": 15
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-left-2"
+          }
+        },
+        {
+          "id": "small-theater-seat-center-1-1",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-center",
+          "label": "C1-1",
+          "position": {
+            "x": 20,
+            "y": 10
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-center-1"
+          }
+        },
+        {
+          "id": "small-theater-seat-center-1-2",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-center",
+          "label": "C1-2",
+          "position": {
+            "x": 22,
+            "y": 10
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-center-1"
+          }
+        },
+        {
+          "id": "small-theater-seat-center-1-3",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-center",
+          "label": "C1-3",
+          "position": {
+            "x": 24,
+            "y": 10
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-center-1"
+          }
+        },
+        {
+          "id": "small-theater-seat-center-1-4",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-center",
+          "label": "C1-4",
+          "position": {
+            "x": 26,
+            "y": 10
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-center-1"
+          }
+        },
+        {
+          "id": "small-theater-seat-center-2-1",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-center",
+          "label": "C2-1",
+          "position": {
+            "x": 20,
+            "y": 15
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-center-2"
+          }
+        },
+        {
+          "id": "small-theater-seat-center-2-2",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-center",
+          "label": "C2-2",
+          "position": {
+            "x": 22,
+            "y": 15
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-center-2"
+          }
+        },
+        {
+          "id": "small-theater-seat-center-2-3",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-center",
+          "label": "C2-3",
+          "position": {
+            "x": 24,
+            "y": 15
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-center-2"
+          }
+        },
+        {
+          "id": "small-theater-seat-center-2-4",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-center",
+          "label": "C2-4",
+          "position": {
+            "x": 26,
+            "y": 15
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-center-2"
+          }
+        },
+        {
+          "id": "small-theater-seat-right-1-1",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-right",
+          "label": "R1-1",
+          "position": {
+            "x": 40,
+            "y": 10
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-right-1"
+          }
+        },
+        {
+          "id": "small-theater-seat-right-1-2",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-right",
+          "label": "R1-2",
+          "position": {
+            "x": 42,
+            "y": 10
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-right-1"
+          }
+        },
+        {
+          "id": "small-theater-seat-right-1-3",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-right",
+          "label": "R1-3",
+          "position": {
+            "x": 44,
+            "y": 10
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-right-1"
+          }
+        },
+        {
+          "id": "small-theater-seat-right-1-4",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-right",
+          "label": "R1-4",
+          "position": {
+            "x": 46,
+            "y": 10
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-right-1"
+          }
+        },
+        {
+          "id": "small-theater-seat-right-2-1",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-right",
+          "label": "R2-1",
+          "position": {
+            "x": 40,
+            "y": 15
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-right-2"
+          }
+        },
+        {
+          "id": "small-theater-seat-right-2-2",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-right",
+          "label": "R2-2",
+          "position": {
+            "x": 42,
+            "y": 15
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-right-2"
+          }
+        },
+        {
+          "id": "small-theater-seat-right-2-3",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-right",
+          "label": "R2-3",
+          "position": {
+            "x": 44,
+            "y": 15
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-right-2"
+          }
+        },
+        {
+          "id": "small-theater-seat-right-2-4",
+          "floorId": "small-theater-floor-main",
+          "zoneId": "small-theater-zone-right",
+          "label": "R2-4",
+          "position": {
+            "x": 46,
+            "y": 15
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "small-theater-row-right-2"
+          }
+        }
+      ],
+      "tables": [],
+      "backgrounds": []
+    }
+  },
+  "occurrence": {
+    "id": "small-theater-occurrence",
+    "eventId": "small-theater-event",
+    "layoutVersionId": "small-theater-v1",
+    "startsAt": "2027-01-15T19:00:00Z"
+  },
+  "inventory": {
+    "occurrenceId": "small-theater-occurrence",
+    "seats": [
+      {
+        "seatId": "small-theater-seat-left-1-1",
+        "status": "sold"
+      },
+      {
+        "seatId": "small-theater-seat-left-1-2",
+        "status": "held"
+      },
+      {
+        "seatId": "small-theater-seat-left-1-3",
+        "status": "blocked"
+      },
+      {
+        "seatId": "small-theater-seat-left-1-4",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-left-2-1",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-left-2-2",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-left-2-3",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-left-2-4",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-center-1-1",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-center-1-2",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-center-1-3",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-center-1-4",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-center-2-1",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-center-2-2",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-center-2-3",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-center-2-4",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-right-1-1",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-right-1-2",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-right-1-3",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-right-1-4",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-right-2-1",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-right-2-2",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-right-2-3",
+        "status": "available"
+      },
+      {
+        "seatId": "small-theater-seat-right-2-4",
+        "status": "available"
+      }
+    ],
+    "zones": []
+  }
+}

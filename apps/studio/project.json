@@ -1,0 +1,9 @@
+{
+  "name": "studio",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/studio/src",
+  "projectType": "application",
+  "tags": ["scope:studio", "layer:app"],
+  "// targets": "to see all targets run: nx show project studio --web",
+  "targets": {}
+}

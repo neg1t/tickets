@@ -1,0 +1,134 @@
+.hall-editor {
+  background: white;
+  border: 1px solid #c9d2dc;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.hall-editor-header,
+.hall-editor-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #edf4f8;
+}
+
+.hall-editor-header strong {
+  font-size: 18px;
+}
+.hall-editor-header span {
+  flex: 1;
+  color: #557184;
+}
+.hall-editor-footer {
+  font-size: 13px;
+  color: #557184;
+}
+.hall-editor-footer [role='alert'] {
+  color: #b42318;
+}
+
+.hall-editor-workspace {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) 220px;
+  min-height: 500px;
+}
+
+.hall-editor-tools,
+.hall-editor-properties {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: #f8fbfd;
+}
+.hall-editor-tools {
+  border-right: 1px solid #d9e4eb;
+}
+.hall-editor-properties {
+  border-left: 1px solid #d9e4eb;
+}
+.hall-editor-tools h3,
+.hall-editor-properties h3 {
+  margin: 0 0 8px;
+}
+.hall-editor-properties h4 {
+  margin: 8px 0 0;
+}
+
+.hall-editor button,
+.hall-editor select,
+.hall-editor input {
+  border: 1px solid #a9bdca;
+  border-radius: 5px;
+  background: white;
+  color: #193047;
+  font: inherit;
+  padding: 7px 9px;
+}
+.hall-editor button {
+  cursor: pointer;
+}
+.hall-editor button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.hall-editor button[aria-pressed='true'] {
+  background: #2079a8;
+  border-color: #2079a8;
+  color: white;
+}
+.hall-editor-tools label,
+.hall-editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+.hall-editor-field input,
+.hall-editor-tools select {
+  width: 100%;
+  box-sizing: border-box;
+}
+.hall-editor .hall-viewer {
+  border: 0;
+  border-radius: 0;
+  min-width: 0;
+}
+
+.pdf-hall-viewer {
+  min-width: 0;
+}
+.pdf-hall-viewer-status {
+  margin: 0;
+  padding: 6px 12px;
+  color: #557184;
+  font-size: 13px;
+  background: #edf4f8;
+}
+.hall-editor-file-field input[type='file'] {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .hall-editor-workspace {
+    grid-template-columns: 1fr;
+  }
+  .hall-editor-tools {
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-right: 0;
+    border-bottom: 1px solid #d9e4eb;
+  }
+  .hall-editor-tools h3 {
+    width: 100%;
+  }
+  .hall-editor-properties {
+    border-left: 0;
+    border-top: 1px solid #d9e4eb;
+  }
+}

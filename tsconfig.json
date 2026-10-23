@@ -1,0 +1,38 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compileOnSave": false,
+  "files": [],
+  "references": [
+    {
+      "path": "./apps/studio"
+    },
+    {
+      "path": "./apps/embed"
+    },
+    {
+      "path": "./libs/domain"
+    },
+    {
+      "path": "./libs/geometry"
+    },
+    {
+      "path": "./libs/renderer-konva"
+    },
+    {
+      "path": "./libs/fixtures"
+    },
+    {
+      "path": "./libs/hall-editor"
+    },
+    {
+      "path": "./libs/pdf"
+    },
+    {
+      "path": "./libs/local-storage"
+    },
+    {
+      "path": "./libs/seat-view"
+    }
+  ],
+  "compilerOptions": {}
+}

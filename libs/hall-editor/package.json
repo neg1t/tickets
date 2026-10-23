@@ -1,0 +1,28 @@
+{
+  "name": "@hall-platform/hall-editor",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./styles.css": "./styles.css"
+  },
+  "dependencies": {
+    "@hall-platform/domain": "workspace:*",
+    "@hall-platform/geometry": "workspace:*",
+    "@hall-platform/pdf": "workspace:*",
+    "@hall-platform/renderer-konva": "workspace:*",
+    "effector": "^23.4.4",
+    "effector-react": "^23.3.0",
+    "react": "19.3.1",
+    "tslib": "^2.3.0",
+    "zod": "^4.3.6"
+  }
+}

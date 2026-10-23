@@ -1,0 +1,7 @@
+{
+  "name": "local-storage",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/local-storage/src",
+  "projectType": "library",
+  "tags": ["scope:shared", "layer:features"]
+}

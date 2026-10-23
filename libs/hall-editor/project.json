@@ -1,0 +1,8 @@
+{
+  "name": "hall-editor",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/hall-editor/src",
+  "projectType": "library",
+  "tags": ["scope:shared", "layer:pages", "type:ui"],
+  "targets": {}
+}

@@ -1,0 +1,8 @@
+{
+  "name": "geometry",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/geometry/src",
+  "projectType": "library",
+  "tags": ["scope:shared", "layer:shared"],
+  "targets": {}
+}

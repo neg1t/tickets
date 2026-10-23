@@ -1,0 +1,8 @@
+{
+  "name": "fixtures",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/fixtures/src",
+  "projectType": "library",
+  "tags": ["scope:shared", "layer:shared"],
+  "targets": {}
+}

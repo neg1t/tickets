@@ -1,0 +1,9 @@
+{
+  "name": "embed",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/embed/src",
+  "projectType": "application",
+  "tags": ["scope:embed", "layer:app"],
+  "// targets": "to see all targets run: nx show project embed --web",
+  "targets": {}
+}

@@ -1,0 +1,454 @@
+{
+  "document": {
+    "hall": {
+      "id": "opera-hall-hall",
+      "venueId": "opera-hall-venue",
+      "name": "Opera Hall"
+    },
+    "layout": {
+      "id": "opera-hall-layout",
+      "hallId": "opera-hall-hall",
+      "name": "Main layout"
+    },
+    "version": {
+      "id": "opera-hall-v1",
+      "layoutId": "opera-hall-layout",
+      "versionNumber": 1,
+      "revision": 0,
+      "status": "published",
+      "snapshotId": "opera-hall-snapshot-v1",
+      "calibration": null,
+      "publishedAt": "2026-10-22T08:00:00Z"
+    },
+    "snapshot": {
+      "id": "opera-hall-snapshot-v1",
+      "layoutVersionId": "opera-hall-v1",
+      "floors": [
+        {
+          "id": "opera-hall-floor-stalls",
+          "layoutVersionId": "opera-hall-v1",
+          "name": "Stalls"
+        },
+        {
+          "id": "opera-hall-floor-upper",
+          "layoutVersionId": "opera-hall-v1",
+          "name": "Upper level"
+        }
+      ],
+      "zones": [
+        {
+          "id": "opera-hall-zone-stalls",
+          "floorId": "opera-hall-floor-stalls",
+          "name": "Stalls"
+        },
+        {
+          "id": "opera-hall-zone-balcony",
+          "floorId": "opera-hall-floor-upper",
+          "name": "Balcony"
+        },
+        {
+          "id": "opera-hall-zone-box",
+          "floorId": "opera-hall-floor-upper",
+          "name": "Royal Box"
+        }
+      ],
+      "rows": [
+        {
+          "id": "opera-hall-row-arc-1",
+          "floorId": "opera-hall-floor-stalls",
+          "zoneId": "opera-hall-zone-stalls",
+          "name": "Stalls 1",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 30,
+              "y": 20
+            },
+            "radius": 12,
+            "startAngle": 0.4,
+            "endAngle": 2.7
+          }
+        },
+        {
+          "id": "opera-hall-row-arc-2",
+          "floorId": "opera-hall-floor-stalls",
+          "zoneId": "opera-hall-zone-stalls",
+          "name": "Stalls 2",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 30,
+              "y": 20
+            },
+            "radius": 18,
+            "startAngle": 0.4,
+            "endAngle": 2.7
+          }
+        },
+        {
+          "id": "opera-hall-row-balcony",
+          "floorId": "opera-hall-floor-upper",
+          "zoneId": "opera-hall-zone-balcony",
+          "name": "Balcony A",
+          "curve": {
+            "kind": "bezier",
+            "p0": {
+              "x": 10,
+              "y": 10
+            },
+            "p1": {
+              "x": 20,
+              "y": 5
+            },
+            "p2": {
+              "x": 40,
+              "y": 5
+            },
+            "p3": {
+              "x": 50,
+              "y": 10
+            }
+          }
+        }
+      ],
+      "seats": [
+        {
+          "id": "opera-hall-seat-stalls-1-1",
+          "floorId": "opera-hall-floor-stalls",
+          "zoneId": "opera-hall-zone-stalls",
+          "label": "1-1",
+          "position": {
+            "x": 41.053,
+            "y": 24.673
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "opera-hall-row-arc-1"
+          }
+        },
+        {
+          "id": "opera-hall-seat-stalls-1-2",
+          "floorId": "opera-hall-floor-stalls",
+          "zoneId": "opera-hall-zone-stalls",
+          "label": "1-2",
+          "position": {
+            "x": 37.829,
+            "y": 29.094
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "opera-hall-row-arc-1"
+          }
+        },
+        {
+          "id": "opera-hall-seat-stalls-1-3",
+          "floorId": "opera-hall-floor-stalls",
+          "zoneId": "opera-hall-zone-stalls",
+          "label": "1-3",
+          "position": {
+            "x": 32.978,
+            "y": 31.625
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "opera-hall-row-arc-1"
+          }
+        },
+        {
+          "id": "opera-hall-seat-stalls-1-4",
+          "floorId": "opera-hall-floor-stalls",
+          "zoneId": "opera-hall-zone-stalls",
+          "label": "1-4",
+          "position": {
+            "x": 27.508,
+            "y": 31.738
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "opera-hall-row-arc-1"
+          }
+        },
+        {
+          "id": "opera-hall-seat-stalls-1-5",
+          "floorId": "opera-hall-floor-stalls",
+          "zoneId": "opera-hall-zone-stalls",
+          "label": "1-5",
+          "position": {
+            "x": 22.556,
+            "y": 29.412
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "opera-hall-row-arc-1"
+          }
+        },
+        {
+          "id": "opera-hall-seat-stalls-1-6",
+          "floorId": "opera-hall-floor-stalls",
+          "zoneId": "opera-hall-zone-stalls",
+          "label": "1-6",
+          "position": {
+            "x": 19.151,
+            "y": 25.129
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "opera-hall-row-arc-1"
+          }
+        },
+        {
+          "id": "opera-hall-seat-stalls-2-1",
+          "floorId": "opera-hall-floor-stalls",
+          "zoneId": "opera-hall-zone-stalls",
+          "label": "2-1",
+          "position": {
+            "x": 46.579,
+            "y": 27.01
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "opera-hall-row-arc-2"
+          }
+        },
+        {
+          "id": "opera-hall-seat-stalls-2-2",
+          "floorId": "opera-hall-floor-stalls",
+          "zoneId": "opera-hall-zone-stalls",
+          "label": "2-2",
+          "position": {
+            "x": 41.744,
+            "y": 33.641
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "opera-hall-row-arc-2"
+          }
+        },
+        {
+          "id": "opera-hall-seat-stalls-2-3",
+          "floorId": "opera-hall-floor-stalls",
+          "zoneId": "opera-hall-zone-stalls",
+          "label": "2-3",
+          "position": {
+            "x": 34.467,
+            "y": 37.437
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "opera-hall-row-arc-2"
+          }
+        },
+        {
+          "id": "opera-hall-seat-stalls-2-4",
+          "floorId": "opera-hall-floor-stalls",
+          "zoneId": "opera-hall-zone-stalls",
+          "label": "2-4",
+          "position": {
+            "x": 26.262,
+            "y": 37.608
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "opera-hall-row-arc-2"
+          }
+        },
+        {
+          "id": "opera-hall-seat-stalls-2-5",
+          "floorId": "opera-hall-floor-stalls",
+          "zoneId": "opera-hall-zone-stalls",
+          "label": "2-5",
+          "position": {
+            "x": 18.833,
+            "y": 34.118
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "opera-hall-row-arc-2"
+          }
+        },
+        {
+          "id": "opera-hall-seat-stalls-2-6",
+          "floorId": "opera-hall-floor-stalls",
+          "zoneId": "opera-hall-zone-stalls",
+          "label": "2-6",
+          "position": {
+            "x": 13.727,
+            "y": 27.693
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "opera-hall-row-arc-2"
+          }
+        },
+        {
+          "id": "opera-hall-seat-balcony-1",
+          "floorId": "opera-hall-floor-upper",
+          "zoneId": "opera-hall-zone-balcony",
+          "label": "B1",
+          "position": {
+            "x": 18,
+            "y": 8
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "opera-hall-row-balcony"
+          }
+        },
+        {
+          "id": "opera-hall-seat-balcony-2",
+          "floorId": "opera-hall-floor-upper",
+          "zoneId": "opera-hall-zone-balcony",
+          "label": "B2",
+          "position": {
+            "x": 26,
+            "y": 8
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "opera-hall-row-balcony"
+          }
+        },
+        {
+          "id": "opera-hall-seat-balcony-3",
+          "floorId": "opera-hall-floor-upper",
+          "zoneId": "opera-hall-zone-balcony",
+          "label": "B3",
+          "position": {
+            "x": 34,
+            "y": 8
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "opera-hall-row-balcony"
+          }
+        },
+        {
+          "id": "opera-hall-seat-balcony-4",
+          "floorId": "opera-hall-floor-upper",
+          "zoneId": "opera-hall-zone-balcony",
+          "label": "B4",
+          "position": {
+            "x": 42,
+            "y": 8
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "opera-hall-row-balcony"
+          }
+        },
+        {
+          "id": "opera-hall-seat-box-1",
+          "floorId": "opera-hall-floor-upper",
+          "zoneId": "opera-hall-zone-box",
+          "label": "Box 1",
+          "position": {
+            "x": 57,
+            "y": 10
+          },
+          "placement": {
+            "kind": "standalone"
+          }
+        },
+        {
+          "id": "opera-hall-seat-box-2",
+          "floorId": "opera-hall-floor-upper",
+          "zoneId": "opera-hall-zone-box",
+          "label": "Box 2",
+          "position": {
+            "x": 59,
+            "y": 10
+          },
+          "placement": {
+            "kind": "standalone"
+          }
+        }
+      ],
+      "tables": [],
+      "backgrounds": []
+    }
+  },
+  "occurrence": {
+    "id": "opera-hall-occurrence",
+    "eventId": "opera-hall-event",
+    "layoutVersionId": "opera-hall-v1",
+    "startsAt": "2027-01-15T19:00:00Z"
+  },
+  "inventory": {
+    "occurrenceId": "opera-hall-occurrence",
+    "seats": [
+      {
+        "seatId": "opera-hall-seat-stalls-1-1",
+        "status": "sold"
+      },
+      {
+        "seatId": "opera-hall-seat-stalls-1-2",
+        "status": "held"
+      },
+      {
+        "seatId": "opera-hall-seat-stalls-1-3",
+        "status": "blocked"
+      },
+      {
+        "seatId": "opera-hall-seat-stalls-1-4",
+        "status": "available"
+      },
+      {
+        "seatId": "opera-hall-seat-stalls-1-5",
+        "status": "available"
+      },
+      {
+        "seatId": "opera-hall-seat-stalls-1-6",
+        "status": "available"
+      },
+      {
+        "seatId": "opera-hall-seat-stalls-2-1",
+        "status": "available"
+      },
+      {
+        "seatId": "opera-hall-seat-stalls-2-2",
+        "status": "available"
+      },
+      {
+        "seatId": "opera-hall-seat-stalls-2-3",
+        "status": "available"
+      },
+      {
+        "seatId": "opera-hall-seat-stalls-2-4",
+        "status": "available"
+      },
+      {
+        "seatId": "opera-hall-seat-stalls-2-5",
+        "status": "available"
+      },
+      {
+        "seatId": "opera-hall-seat-stalls-2-6",
+        "status": "available"
+      },
+      {
+        "seatId": "opera-hall-seat-balcony-1",
+        "status": "available"
+      },
+      {
+        "seatId": "opera-hall-seat-balcony-2",
+        "status": "available"
+      },
+      {
+        "seatId": "opera-hall-seat-balcony-3",
+        "status": "available"
+      },
+      {
+        "seatId": "opera-hall-seat-balcony-4",
+        "status": "available"
+      },
+      {
+        "seatId": "opera-hall-seat-box-1",
+        "status": "available"
+      },
+      {
+        "seatId": "opera-hall-seat-box-2",
+        "status": "available"
+      }
+    ],
+    "zones": []
+  }
+}

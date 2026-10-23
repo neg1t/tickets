@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.lib.tsbuildinfo",
+    "emitDeclarationOnly": false
+  },
+  "include": ["src/index.ts"],
+  "references": [
+    {
+      "path": "../domain/tsconfig.lib.json"
+    }
+  ]
+}

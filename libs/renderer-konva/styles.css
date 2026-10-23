@@ -1,0 +1,53 @@
+.hall-viewer {
+  border: 1px solid #c9d2dc;
+  border-radius: 10px;
+  overflow: hidden;
+  background: white;
+}
+
+.hall-viewer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid #d9e4eb;
+}
+
+.hall-viewer-toolbar button,
+.hall-viewer-toolbar select {
+  padding: 7px 10px;
+  border: 1px solid #a9bdca;
+  border-radius: 5px;
+  background: white;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.hall-viewer-toolbar button[aria-pressed='true'] {
+  background: #2079a8;
+  border-color: #2079a8;
+  color: white;
+}
+
+.hall-viewer-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.hall-viewer-canvas {
+  width: 100%;
+  overflow: hidden;
+  background: #f8fbfd;
+  touch-action: none;
+}
+
+.hall-viewer-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding: 10px 12px;
+  border-top: 1px solid #d9e4eb;
+  font-size: 14px;
+}

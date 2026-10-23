@@ -1,0 +1,2655 @@
+{
+  "document": {
+    "hall": {
+      "id": "arena-hall",
+      "venueId": "arena-venue",
+      "name": "Arena"
+    },
+    "layout": {
+      "id": "arena-layout",
+      "hallId": "arena-hall",
+      "name": "Main layout"
+    },
+    "version": {
+      "id": "arena-v1",
+      "layoutId": "arena-layout",
+      "versionNumber": 1,
+      "revision": 0,
+      "status": "published",
+      "snapshotId": "arena-snapshot-v1",
+      "calibration": null,
+      "publishedAt": "2026-10-22T08:00:00Z"
+    },
+    "snapshot": {
+      "id": "arena-snapshot-v1",
+      "layoutVersionId": "arena-v1",
+      "floors": [
+        {
+          "id": "arena-floor-main",
+          "layoutVersionId": "arena-v1",
+          "name": "Arena bowl"
+        }
+      ],
+      "zones": [
+        {
+          "id": "arena-zone-1",
+          "floorId": "arena-floor-main",
+          "name": "Sector 1"
+        },
+        {
+          "id": "arena-zone-2",
+          "floorId": "arena-floor-main",
+          "name": "Sector 2"
+        },
+        {
+          "id": "arena-zone-3",
+          "floorId": "arena-floor-main",
+          "name": "Sector 3"
+        },
+        {
+          "id": "arena-zone-4",
+          "floorId": "arena-floor-main",
+          "name": "Sector 4"
+        },
+        {
+          "id": "arena-zone-5",
+          "floorId": "arena-floor-main",
+          "name": "Sector 5"
+        },
+        {
+          "id": "arena-zone-6",
+          "floorId": "arena-floor-main",
+          "name": "Sector 6"
+        },
+        {
+          "id": "arena-zone-7",
+          "floorId": "arena-floor-main",
+          "name": "Sector 7"
+        },
+        {
+          "id": "arena-zone-8",
+          "floorId": "arena-floor-main",
+          "name": "Sector 8"
+        }
+      ],
+      "rows": [
+        {
+          "id": "arena-row-1-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "name": "1-1",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 100,
+              "y": 100
+            },
+            "radius": 51,
+            "startAngle": 0.05,
+            "endAngle": 0.7353981633974482
+          }
+        },
+        {
+          "id": "arena-row-1-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "name": "1-2",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 100,
+              "y": 100
+            },
+            "radius": 57,
+            "startAngle": 0.05,
+            "endAngle": 0.7353981633974482
+          }
+        },
+        {
+          "id": "arena-row-2-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "name": "2-1",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 100,
+              "y": 100
+            },
+            "radius": 51,
+            "startAngle": 0.8353981633974483,
+            "endAngle": 1.5207963267948965
+          }
+        },
+        {
+          "id": "arena-row-2-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "name": "2-2",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 100,
+              "y": 100
+            },
+            "radius": 57,
+            "startAngle": 0.8353981633974483,
+            "endAngle": 1.5207963267948965
+          }
+        },
+        {
+          "id": "arena-row-3-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "name": "3-1",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 100,
+              "y": 100
+            },
+            "radius": 51,
+            "startAngle": 1.6207963267948966,
+            "endAngle": 2.306194490192345
+          }
+        },
+        {
+          "id": "arena-row-3-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "name": "3-2",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 100,
+              "y": 100
+            },
+            "radius": 57,
+            "startAngle": 1.6207963267948966,
+            "endAngle": 2.306194490192345
+          }
+        },
+        {
+          "id": "arena-row-4-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "name": "4-1",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 100,
+              "y": 100
+            },
+            "radius": 51,
+            "startAngle": 2.4061944901923447,
+            "endAngle": 3.0915926535897933
+          }
+        },
+        {
+          "id": "arena-row-4-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "name": "4-2",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 100,
+              "y": 100
+            },
+            "radius": 57,
+            "startAngle": 2.4061944901923447,
+            "endAngle": 3.0915926535897933
+          }
+        },
+        {
+          "id": "arena-row-5-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "name": "5-1",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 100,
+              "y": 100
+            },
+            "radius": 51,
+            "startAngle": 3.191592653589793,
+            "endAngle": 3.8769908169872416
+          }
+        },
+        {
+          "id": "arena-row-5-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "name": "5-2",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 100,
+              "y": 100
+            },
+            "radius": 57,
+            "startAngle": 3.191592653589793,
+            "endAngle": 3.8769908169872416
+          }
+        },
+        {
+          "id": "arena-row-6-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "name": "6-1",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 100,
+              "y": 100
+            },
+            "radius": 51,
+            "startAngle": 3.976990816987241,
+            "endAngle": 4.66238898038469
+          }
+        },
+        {
+          "id": "arena-row-6-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "name": "6-2",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 100,
+              "y": 100
+            },
+            "radius": 57,
+            "startAngle": 3.976990816987241,
+            "endAngle": 4.66238898038469
+          }
+        },
+        {
+          "id": "arena-row-7-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "name": "7-1",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 100,
+              "y": 100
+            },
+            "radius": 51,
+            "startAngle": 4.7623889803846895,
+            "endAngle": 5.447787143782138
+          }
+        },
+        {
+          "id": "arena-row-7-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "name": "7-2",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 100,
+              "y": 100
+            },
+            "radius": 57,
+            "startAngle": 4.7623889803846895,
+            "endAngle": 5.447787143782138
+          }
+        },
+        {
+          "id": "arena-row-8-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "name": "8-1",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 100,
+              "y": 100
+            },
+            "radius": 51,
+            "startAngle": 5.547787143782138,
+            "endAngle": 6.233185307179586
+          }
+        },
+        {
+          "id": "arena-row-8-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "name": "8-2",
+          "curve": {
+            "kind": "arc",
+            "center": {
+              "x": 100,
+              "y": 100
+            },
+            "radius": 57,
+            "startAngle": 5.547787143782138,
+            "endAngle": 6.233185307179586
+          }
+        }
+      ],
+      "seats": [
+        {
+          "id": "arena-seat-1-1-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "label": "1-1-1",
+          "position": {
+            "x": 150.936,
+            "y": 102.549
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-1-1"
+          }
+        },
+        {
+          "id": "arena-seat-1-1-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "label": "1-1-2",
+          "position": {
+            "x": 150.443,
+            "y": 107.516
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-1-1"
+          }
+        },
+        {
+          "id": "arena-seat-1-1-3",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "label": "1-1-3",
+          "position": {
+            "x": 149.467,
+            "y": 112.411
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-1-1"
+          }
+        },
+        {
+          "id": "arena-seat-1-1-4",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "label": "1-1-4",
+          "position": {
+            "x": 148.017,
+            "y": 117.188
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-1-1"
+          }
+        },
+        {
+          "id": "arena-seat-1-1-5",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "label": "1-1-5",
+          "position": {
+            "x": 146.106,
+            "y": 121.799
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-1-1"
+          }
+        },
+        {
+          "id": "arena-seat-1-1-6",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "label": "1-1-6",
+          "position": {
+            "x": 143.754,
+            "y": 126.202
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-1-1"
+          }
+        },
+        {
+          "id": "arena-seat-1-1-7",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "label": "1-1-7",
+          "position": {
+            "x": 140.983,
+            "y": 130.354
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-1-1"
+          }
+        },
+        {
+          "id": "arena-seat-1-1-8",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "label": "1-1-8",
+          "position": {
+            "x": 137.82,
+            "y": 134.215
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-1-1"
+          }
+        },
+        {
+          "id": "arena-seat-1-2-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "label": "1-2-1",
+          "position": {
+            "x": 156.929,
+            "y": 102.849
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-1-2"
+          }
+        },
+        {
+          "id": "arena-seat-1-2-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "label": "1-2-2",
+          "position": {
+            "x": 156.378,
+            "y": 108.4
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-1-2"
+          }
+        },
+        {
+          "id": "arena-seat-1-2-3",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "label": "1-2-3",
+          "position": {
+            "x": 155.286,
+            "y": 113.871
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-1-2"
+          }
+        },
+        {
+          "id": "arena-seat-1-2-4",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "label": "1-2-4",
+          "position": {
+            "x": 153.666,
+            "y": 119.21
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-1-2"
+          }
+        },
+        {
+          "id": "arena-seat-1-2-5",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "label": "1-2-5",
+          "position": {
+            "x": 151.531,
+            "y": 124.364
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-1-2"
+          }
+        },
+        {
+          "id": "arena-seat-1-2-6",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "label": "1-2-6",
+          "position": {
+            "x": 148.902,
+            "y": 129.285
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-1-2"
+          }
+        },
+        {
+          "id": "arena-seat-1-2-7",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "label": "1-2-7",
+          "position": {
+            "x": 145.805,
+            "y": 133.925
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-1-2"
+          }
+        },
+        {
+          "id": "arena-seat-1-2-8",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-1",
+          "label": "1-2-8",
+          "position": {
+            "x": 142.269,
+            "y": 138.24
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-1-2"
+          }
+        },
+        {
+          "id": "arena-seat-2-1-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "label": "2-1-1",
+          "position": {
+            "x": 134.215,
+            "y": 137.82
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-2-1"
+          }
+        },
+        {
+          "id": "arena-seat-2-1-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "label": "2-1-2",
+          "position": {
+            "x": 130.354,
+            "y": 140.983
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-2-1"
+          }
+        },
+        {
+          "id": "arena-seat-2-1-3",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "label": "2-1-3",
+          "position": {
+            "x": 126.202,
+            "y": 143.754
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-2-1"
+          }
+        },
+        {
+          "id": "arena-seat-2-1-4",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "label": "2-1-4",
+          "position": {
+            "x": 121.799,
+            "y": 146.106
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-2-1"
+          }
+        },
+        {
+          "id": "arena-seat-2-1-5",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "label": "2-1-5",
+          "position": {
+            "x": 117.188,
+            "y": 148.017
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-2-1"
+          }
+        },
+        {
+          "id": "arena-seat-2-1-6",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "label": "2-1-6",
+          "position": {
+            "x": 112.411,
+            "y": 149.467
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-2-1"
+          }
+        },
+        {
+          "id": "arena-seat-2-1-7",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "label": "2-1-7",
+          "position": {
+            "x": 107.516,
+            "y": 150.443
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-2-1"
+          }
+        },
+        {
+          "id": "arena-seat-2-1-8",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "label": "2-1-8",
+          "position": {
+            "x": 102.549,
+            "y": 150.936
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-2-1"
+          }
+        },
+        {
+          "id": "arena-seat-2-2-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "label": "2-2-1",
+          "position": {
+            "x": 138.24,
+            "y": 142.269
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-2-2"
+          }
+        },
+        {
+          "id": "arena-seat-2-2-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "label": "2-2-2",
+          "position": {
+            "x": 133.925,
+            "y": 145.805
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-2-2"
+          }
+        },
+        {
+          "id": "arena-seat-2-2-3",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "label": "2-2-3",
+          "position": {
+            "x": 129.285,
+            "y": 148.902
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-2-2"
+          }
+        },
+        {
+          "id": "arena-seat-2-2-4",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "label": "2-2-4",
+          "position": {
+            "x": 124.364,
+            "y": 151.531
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-2-2"
+          }
+        },
+        {
+          "id": "arena-seat-2-2-5",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "label": "2-2-5",
+          "position": {
+            "x": 119.21,
+            "y": 153.666
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-2-2"
+          }
+        },
+        {
+          "id": "arena-seat-2-2-6",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "label": "2-2-6",
+          "position": {
+            "x": 113.871,
+            "y": 155.286
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-2-2"
+          }
+        },
+        {
+          "id": "arena-seat-2-2-7",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "label": "2-2-7",
+          "position": {
+            "x": 108.4,
+            "y": 156.378
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-2-2"
+          }
+        },
+        {
+          "id": "arena-seat-2-2-8",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-2",
+          "label": "2-2-8",
+          "position": {
+            "x": 102.849,
+            "y": 156.929
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-2-2"
+          }
+        },
+        {
+          "id": "arena-seat-3-1-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "label": "3-1-1",
+          "position": {
+            "x": 97.451,
+            "y": 150.936
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-3-1"
+          }
+        },
+        {
+          "id": "arena-seat-3-1-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "label": "3-1-2",
+          "position": {
+            "x": 92.484,
+            "y": 150.443
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-3-1"
+          }
+        },
+        {
+          "id": "arena-seat-3-1-3",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "label": "3-1-3",
+          "position": {
+            "x": 87.589,
+            "y": 149.467
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-3-1"
+          }
+        },
+        {
+          "id": "arena-seat-3-1-4",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "label": "3-1-4",
+          "position": {
+            "x": 82.812,
+            "y": 148.017
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-3-1"
+          }
+        },
+        {
+          "id": "arena-seat-3-1-5",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "label": "3-1-5",
+          "position": {
+            "x": 78.201,
+            "y": 146.106
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-3-1"
+          }
+        },
+        {
+          "id": "arena-seat-3-1-6",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "label": "3-1-6",
+          "position": {
+            "x": 73.798,
+            "y": 143.754
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-3-1"
+          }
+        },
+        {
+          "id": "arena-seat-3-1-7",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "label": "3-1-7",
+          "position": {
+            "x": 69.646,
+            "y": 140.983
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-3-1"
+          }
+        },
+        {
+          "id": "arena-seat-3-1-8",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "label": "3-1-8",
+          "position": {
+            "x": 65.785,
+            "y": 137.82
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-3-1"
+          }
+        },
+        {
+          "id": "arena-seat-3-2-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "label": "3-2-1",
+          "position": {
+            "x": 97.151,
+            "y": 156.929
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-3-2"
+          }
+        },
+        {
+          "id": "arena-seat-3-2-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "label": "3-2-2",
+          "position": {
+            "x": 91.6,
+            "y": 156.378
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-3-2"
+          }
+        },
+        {
+          "id": "arena-seat-3-2-3",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "label": "3-2-3",
+          "position": {
+            "x": 86.129,
+            "y": 155.286
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-3-2"
+          }
+        },
+        {
+          "id": "arena-seat-3-2-4",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "label": "3-2-4",
+          "position": {
+            "x": 80.79,
+            "y": 153.666
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-3-2"
+          }
+        },
+        {
+          "id": "arena-seat-3-2-5",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "label": "3-2-5",
+          "position": {
+            "x": 75.636,
+            "y": 151.531
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-3-2"
+          }
+        },
+        {
+          "id": "arena-seat-3-2-6",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "label": "3-2-6",
+          "position": {
+            "x": 70.715,
+            "y": 148.902
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-3-2"
+          }
+        },
+        {
+          "id": "arena-seat-3-2-7",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "label": "3-2-7",
+          "position": {
+            "x": 66.075,
+            "y": 145.805
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-3-2"
+          }
+        },
+        {
+          "id": "arena-seat-3-2-8",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-3",
+          "label": "3-2-8",
+          "position": {
+            "x": 61.76,
+            "y": 142.269
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-3-2"
+          }
+        },
+        {
+          "id": "arena-seat-4-1-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "label": "4-1-1",
+          "position": {
+            "x": 62.18,
+            "y": 134.215
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-4-1"
+          }
+        },
+        {
+          "id": "arena-seat-4-1-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "label": "4-1-2",
+          "position": {
+            "x": 59.017,
+            "y": 130.354
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-4-1"
+          }
+        },
+        {
+          "id": "arena-seat-4-1-3",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "label": "4-1-3",
+          "position": {
+            "x": 56.246,
+            "y": 126.202
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-4-1"
+          }
+        },
+        {
+          "id": "arena-seat-4-1-4",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "label": "4-1-4",
+          "position": {
+            "x": 53.894,
+            "y": 121.799
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-4-1"
+          }
+        },
+        {
+          "id": "arena-seat-4-1-5",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "label": "4-1-5",
+          "position": {
+            "x": 51.983,
+            "y": 117.188
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-4-1"
+          }
+        },
+        {
+          "id": "arena-seat-4-1-6",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "label": "4-1-6",
+          "position": {
+            "x": 50.533,
+            "y": 112.411
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-4-1"
+          }
+        },
+        {
+          "id": "arena-seat-4-1-7",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "label": "4-1-7",
+          "position": {
+            "x": 49.557,
+            "y": 107.516
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-4-1"
+          }
+        },
+        {
+          "id": "arena-seat-4-1-8",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "label": "4-1-8",
+          "position": {
+            "x": 49.064,
+            "y": 102.549
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-4-1"
+          }
+        },
+        {
+          "id": "arena-seat-4-2-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "label": "4-2-1",
+          "position": {
+            "x": 57.731,
+            "y": 138.24
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-4-2"
+          }
+        },
+        {
+          "id": "arena-seat-4-2-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "label": "4-2-2",
+          "position": {
+            "x": 54.195,
+            "y": 133.925
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-4-2"
+          }
+        },
+        {
+          "id": "arena-seat-4-2-3",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "label": "4-2-3",
+          "position": {
+            "x": 51.098,
+            "y": 129.285
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-4-2"
+          }
+        },
+        {
+          "id": "arena-seat-4-2-4",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "label": "4-2-4",
+          "position": {
+            "x": 48.469,
+            "y": 124.364
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-4-2"
+          }
+        },
+        {
+          "id": "arena-seat-4-2-5",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "label": "4-2-5",
+          "position": {
+            "x": 46.334,
+            "y": 119.21
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-4-2"
+          }
+        },
+        {
+          "id": "arena-seat-4-2-6",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "label": "4-2-6",
+          "position": {
+            "x": 44.714,
+            "y": 113.871
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-4-2"
+          }
+        },
+        {
+          "id": "arena-seat-4-2-7",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "label": "4-2-7",
+          "position": {
+            "x": 43.622,
+            "y": 108.4
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-4-2"
+          }
+        },
+        {
+          "id": "arena-seat-4-2-8",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-4",
+          "label": "4-2-8",
+          "position": {
+            "x": 43.071,
+            "y": 102.849
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-4-2"
+          }
+        },
+        {
+          "id": "arena-seat-5-1-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "label": "5-1-1",
+          "position": {
+            "x": 49.064,
+            "y": 97.451
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-5-1"
+          }
+        },
+        {
+          "id": "arena-seat-5-1-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "label": "5-1-2",
+          "position": {
+            "x": 49.557,
+            "y": 92.484
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-5-1"
+          }
+        },
+        {
+          "id": "arena-seat-5-1-3",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "label": "5-1-3",
+          "position": {
+            "x": 50.533,
+            "y": 87.589
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-5-1"
+          }
+        },
+        {
+          "id": "arena-seat-5-1-4",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "label": "5-1-4",
+          "position": {
+            "x": 51.983,
+            "y": 82.812
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-5-1"
+          }
+        },
+        {
+          "id": "arena-seat-5-1-5",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "label": "5-1-5",
+          "position": {
+            "x": 53.894,
+            "y": 78.201
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-5-1"
+          }
+        },
+        {
+          "id": "arena-seat-5-1-6",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "label": "5-1-6",
+          "position": {
+            "x": 56.246,
+            "y": 73.798
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-5-1"
+          }
+        },
+        {
+          "id": "arena-seat-5-1-7",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "label": "5-1-7",
+          "position": {
+            "x": 59.017,
+            "y": 69.646
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-5-1"
+          }
+        },
+        {
+          "id": "arena-seat-5-1-8",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "label": "5-1-8",
+          "position": {
+            "x": 62.18,
+            "y": 65.785
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-5-1"
+          }
+        },
+        {
+          "id": "arena-seat-5-2-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "label": "5-2-1",
+          "position": {
+            "x": 43.071,
+            "y": 97.151
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-5-2"
+          }
+        },
+        {
+          "id": "arena-seat-5-2-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "label": "5-2-2",
+          "position": {
+            "x": 43.622,
+            "y": 91.6
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-5-2"
+          }
+        },
+        {
+          "id": "arena-seat-5-2-3",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "label": "5-2-3",
+          "position": {
+            "x": 44.714,
+            "y": 86.129
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-5-2"
+          }
+        },
+        {
+          "id": "arena-seat-5-2-4",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "label": "5-2-4",
+          "position": {
+            "x": 46.334,
+            "y": 80.79
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-5-2"
+          }
+        },
+        {
+          "id": "arena-seat-5-2-5",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "label": "5-2-5",
+          "position": {
+            "x": 48.469,
+            "y": 75.636
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-5-2"
+          }
+        },
+        {
+          "id": "arena-seat-5-2-6",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "label": "5-2-6",
+          "position": {
+            "x": 51.098,
+            "y": 70.715
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-5-2"
+          }
+        },
+        {
+          "id": "arena-seat-5-2-7",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "label": "5-2-7",
+          "position": {
+            "x": 54.195,
+            "y": 66.075
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-5-2"
+          }
+        },
+        {
+          "id": "arena-seat-5-2-8",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-5",
+          "label": "5-2-8",
+          "position": {
+            "x": 57.731,
+            "y": 61.76
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-5-2"
+          }
+        },
+        {
+          "id": "arena-seat-6-1-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "label": "6-1-1",
+          "position": {
+            "x": 65.785,
+            "y": 62.18
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-6-1"
+          }
+        },
+        {
+          "id": "arena-seat-6-1-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "label": "6-1-2",
+          "position": {
+            "x": 69.646,
+            "y": 59.017
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-6-1"
+          }
+        },
+        {
+          "id": "arena-seat-6-1-3",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "label": "6-1-3",
+          "position": {
+            "x": 73.798,
+            "y": 56.246
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-6-1"
+          }
+        },
+        {
+          "id": "arena-seat-6-1-4",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "label": "6-1-4",
+          "position": {
+            "x": 78.201,
+            "y": 53.894
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-6-1"
+          }
+        },
+        {
+          "id": "arena-seat-6-1-5",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "label": "6-1-5",
+          "position": {
+            "x": 82.812,
+            "y": 51.983
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-6-1"
+          }
+        },
+        {
+          "id": "arena-seat-6-1-6",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "label": "6-1-6",
+          "position": {
+            "x": 87.589,
+            "y": 50.533
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-6-1"
+          }
+        },
+        {
+          "id": "arena-seat-6-1-7",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "label": "6-1-7",
+          "position": {
+            "x": 92.484,
+            "y": 49.557
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-6-1"
+          }
+        },
+        {
+          "id": "arena-seat-6-1-8",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "label": "6-1-8",
+          "position": {
+            "x": 97.451,
+            "y": 49.064
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-6-1"
+          }
+        },
+        {
+          "id": "arena-seat-6-2-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "label": "6-2-1",
+          "position": {
+            "x": 61.76,
+            "y": 57.731
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-6-2"
+          }
+        },
+        {
+          "id": "arena-seat-6-2-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "label": "6-2-2",
+          "position": {
+            "x": 66.075,
+            "y": 54.195
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-6-2"
+          }
+        },
+        {
+          "id": "arena-seat-6-2-3",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "label": "6-2-3",
+          "position": {
+            "x": 70.715,
+            "y": 51.098
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-6-2"
+          }
+        },
+        {
+          "id": "arena-seat-6-2-4",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "label": "6-2-4",
+          "position": {
+            "x": 75.636,
+            "y": 48.469
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-6-2"
+          }
+        },
+        {
+          "id": "arena-seat-6-2-5",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "label": "6-2-5",
+          "position": {
+            "x": 80.79,
+            "y": 46.334
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-6-2"
+          }
+        },
+        {
+          "id": "arena-seat-6-2-6",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "label": "6-2-6",
+          "position": {
+            "x": 86.129,
+            "y": 44.714
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-6-2"
+          }
+        },
+        {
+          "id": "arena-seat-6-2-7",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "label": "6-2-7",
+          "position": {
+            "x": 91.6,
+            "y": 43.622
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-6-2"
+          }
+        },
+        {
+          "id": "arena-seat-6-2-8",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-6",
+          "label": "6-2-8",
+          "position": {
+            "x": 97.151,
+            "y": 43.071
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-6-2"
+          }
+        },
+        {
+          "id": "arena-seat-7-1-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "label": "7-1-1",
+          "position": {
+            "x": 102.549,
+            "y": 49.064
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-7-1"
+          }
+        },
+        {
+          "id": "arena-seat-7-1-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "label": "7-1-2",
+          "position": {
+            "x": 107.516,
+            "y": 49.557
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-7-1"
+          }
+        },
+        {
+          "id": "arena-seat-7-1-3",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "label": "7-1-3",
+          "position": {
+            "x": 112.411,
+            "y": 50.533
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-7-1"
+          }
+        },
+        {
+          "id": "arena-seat-7-1-4",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "label": "7-1-4",
+          "position": {
+            "x": 117.188,
+            "y": 51.983
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-7-1"
+          }
+        },
+        {
+          "id": "arena-seat-7-1-5",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "label": "7-1-5",
+          "position": {
+            "x": 121.799,
+            "y": 53.894
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-7-1"
+          }
+        },
+        {
+          "id": "arena-seat-7-1-6",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "label": "7-1-6",
+          "position": {
+            "x": 126.202,
+            "y": 56.246
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-7-1"
+          }
+        },
+        {
+          "id": "arena-seat-7-1-7",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "label": "7-1-7",
+          "position": {
+            "x": 130.354,
+            "y": 59.017
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-7-1"
+          }
+        },
+        {
+          "id": "arena-seat-7-1-8",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "label": "7-1-8",
+          "position": {
+            "x": 134.215,
+            "y": 62.18
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-7-1"
+          }
+        },
+        {
+          "id": "arena-seat-7-2-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "label": "7-2-1",
+          "position": {
+            "x": 102.849,
+            "y": 43.071
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-7-2"
+          }
+        },
+        {
+          "id": "arena-seat-7-2-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "label": "7-2-2",
+          "position": {
+            "x": 108.4,
+            "y": 43.622
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-7-2"
+          }
+        },
+        {
+          "id": "arena-seat-7-2-3",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "label": "7-2-3",
+          "position": {
+            "x": 113.871,
+            "y": 44.714
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-7-2"
+          }
+        },
+        {
+          "id": "arena-seat-7-2-4",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "label": "7-2-4",
+          "position": {
+            "x": 119.21,
+            "y": 46.334
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-7-2"
+          }
+        },
+        {
+          "id": "arena-seat-7-2-5",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "label": "7-2-5",
+          "position": {
+            "x": 124.364,
+            "y": 48.469
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-7-2"
+          }
+        },
+        {
+          "id": "arena-seat-7-2-6",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "label": "7-2-6",
+          "position": {
+            "x": 129.285,
+            "y": 51.098
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-7-2"
+          }
+        },
+        {
+          "id": "arena-seat-7-2-7",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "label": "7-2-7",
+          "position": {
+            "x": 133.925,
+            "y": 54.195
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-7-2"
+          }
+        },
+        {
+          "id": "arena-seat-7-2-8",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-7",
+          "label": "7-2-8",
+          "position": {
+            "x": 138.24,
+            "y": 57.731
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-7-2"
+          }
+        },
+        {
+          "id": "arena-seat-8-1-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "label": "8-1-1",
+          "position": {
+            "x": 137.82,
+            "y": 65.785
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-8-1"
+          }
+        },
+        {
+          "id": "arena-seat-8-1-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "label": "8-1-2",
+          "position": {
+            "x": 140.983,
+            "y": 69.646
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-8-1"
+          }
+        },
+        {
+          "id": "arena-seat-8-1-3",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "label": "8-1-3",
+          "position": {
+            "x": 143.754,
+            "y": 73.798
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-8-1"
+          }
+        },
+        {
+          "id": "arena-seat-8-1-4",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "label": "8-1-4",
+          "position": {
+            "x": 146.106,
+            "y": 78.201
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-8-1"
+          }
+        },
+        {
+          "id": "arena-seat-8-1-5",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "label": "8-1-5",
+          "position": {
+            "x": 148.017,
+            "y": 82.812
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-8-1"
+          }
+        },
+        {
+          "id": "arena-seat-8-1-6",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "label": "8-1-6",
+          "position": {
+            "x": 149.467,
+            "y": 87.589
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-8-1"
+          }
+        },
+        {
+          "id": "arena-seat-8-1-7",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "label": "8-1-7",
+          "position": {
+            "x": 150.443,
+            "y": 92.484
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-8-1"
+          }
+        },
+        {
+          "id": "arena-seat-8-1-8",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "label": "8-1-8",
+          "position": {
+            "x": 150.936,
+            "y": 97.451
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-8-1"
+          }
+        },
+        {
+          "id": "arena-seat-8-2-1",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "label": "8-2-1",
+          "position": {
+            "x": 142.269,
+            "y": 61.76
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-8-2"
+          }
+        },
+        {
+          "id": "arena-seat-8-2-2",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "label": "8-2-2",
+          "position": {
+            "x": 145.805,
+            "y": 66.075
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-8-2"
+          }
+        },
+        {
+          "id": "arena-seat-8-2-3",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "label": "8-2-3",
+          "position": {
+            "x": 148.902,
+            "y": 70.715
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-8-2"
+          }
+        },
+        {
+          "id": "arena-seat-8-2-4",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "label": "8-2-4",
+          "position": {
+            "x": 151.531,
+            "y": 75.636
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-8-2"
+          }
+        },
+        {
+          "id": "arena-seat-8-2-5",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "label": "8-2-5",
+          "position": {
+            "x": 153.666,
+            "y": 80.79
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-8-2"
+          }
+        },
+        {
+          "id": "arena-seat-8-2-6",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "label": "8-2-6",
+          "position": {
+            "x": 155.286,
+            "y": 86.129
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-8-2"
+          }
+        },
+        {
+          "id": "arena-seat-8-2-7",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "label": "8-2-7",
+          "position": {
+            "x": 156.378,
+            "y": 91.6
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-8-2"
+          }
+        },
+        {
+          "id": "arena-seat-8-2-8",
+          "floorId": "arena-floor-main",
+          "zoneId": "arena-zone-8",
+          "label": "8-2-8",
+          "position": {
+            "x": 156.929,
+            "y": 97.151
+          },
+          "placement": {
+            "kind": "row",
+            "rowId": "arena-row-8-2"
+          }
+        }
+      ],
+      "tables": [],
+      "backgrounds": []
+    }
+  },
+  "occurrence": {
+    "id": "arena-occurrence",
+    "eventId": "arena-event",
+    "layoutVersionId": "arena-v1",
+    "startsAt": "2027-01-15T19:00:00Z"
+  },
+  "inventory": {
+    "occurrenceId": "arena-occurrence",
+    "seats": [
+      {
+        "seatId": "arena-seat-1-1-1",
+        "status": "sold"
+      },
+      {
+        "seatId": "arena-seat-1-1-2",
+        "status": "held"
+      },
+      {
+        "seatId": "arena-seat-1-1-3",
+        "status": "blocked"
+      },
+      {
+        "seatId": "arena-seat-1-1-4",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-1-1-5",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-1-1-6",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-1-1-7",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-1-1-8",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-1-2-1",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-1-2-2",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-1-2-3",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-1-2-4",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-1-2-5",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-1-2-6",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-1-2-7",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-1-2-8",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-2-1-1",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-2-1-2",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-2-1-3",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-2-1-4",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-2-1-5",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-2-1-6",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-2-1-7",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-2-1-8",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-2-2-1",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-2-2-2",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-2-2-3",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-2-2-4",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-2-2-5",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-2-2-6",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-2-2-7",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-2-2-8",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-3-1-1",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-3-1-2",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-3-1-3",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-3-1-4",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-3-1-5",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-3-1-6",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-3-1-7",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-3-1-8",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-3-2-1",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-3-2-2",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-3-2-3",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-3-2-4",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-3-2-5",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-3-2-6",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-3-2-7",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-3-2-8",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-4-1-1",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-4-1-2",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-4-1-3",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-4-1-4",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-4-1-5",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-4-1-6",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-4-1-7",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-4-1-8",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-4-2-1",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-4-2-2",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-4-2-3",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-4-2-4",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-4-2-5",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-4-2-6",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-4-2-7",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-4-2-8",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-5-1-1",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-5-1-2",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-5-1-3",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-5-1-4",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-5-1-5",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-5-1-6",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-5-1-7",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-5-1-8",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-5-2-1",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-5-2-2",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-5-2-3",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-5-2-4",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-5-2-5",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-5-2-6",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-5-2-7",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-5-2-8",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-6-1-1",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-6-1-2",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-6-1-3",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-6-1-4",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-6-1-5",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-6-1-6",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-6-1-7",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-6-1-8",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-6-2-1",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-6-2-2",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-6-2-3",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-6-2-4",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-6-2-5",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-6-2-6",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-6-2-7",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-6-2-8",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-7-1-1",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-7-1-2",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-7-1-3",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-7-1-4",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-7-1-5",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-7-1-6",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-7-1-7",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-7-1-8",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-7-2-1",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-7-2-2",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-7-2-3",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-7-2-4",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-7-2-5",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-7-2-6",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-7-2-7",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-7-2-8",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-8-1-1",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-8-1-2",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-8-1-3",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-8-1-4",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-8-1-5",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-8-1-6",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-8-1-7",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-8-1-8",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-8-2-1",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-8-2-2",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-8-2-3",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-8-2-4",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-8-2-5",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-8-2-6",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-8-2-7",
+        "status": "available"
+      },
+      {
+        "seatId": "arena-seat-8-2-8",
+        "status": "available"
+      }
+    ],
+    "zones": []
+  }
+}
