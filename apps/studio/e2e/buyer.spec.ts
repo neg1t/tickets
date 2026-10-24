@@ -54,6 +54,65 @@ test('shows four demo events and releases a cancelled hold', async ({
     view.getByRole('button', { name: /^Место L1-1 — доступно/ }),
   ).toBeEnabled();
 });
+
+test('restores an active hold after reload and shows its countdown', async ({ page }) => {
+  await page.goto('/');
+  await openBuyer(page);
+  const view = page.getByRole('region', { name: /Места: Small Theater/ });
+  await view.getByRole('button', { name: /^Место L1-1/ }).click();
+  await view.getByRole('button', { name: 'Купить' }).click();
+  await expect(page.getByRole('timer')).toContainText('04:');
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Подтверждение покупки' })).toBeVisible();
+  await expect(page.getByRole('timer')).toBeVisible();
+  await page.getByRole('button', { name: 'Отменить' }).click();
+  await expect(page.getByRole('region', { name: /Места: Small Theater/ })).toBeVisible();
+});
+
+test('returns to selection when the hold expires', async ({ page }) => {
+  await page.clock.install();
+  await page.goto('/');
+  await openBuyer(page);
+  const view = page.getByRole('region', { name: /Места: Small Theater/ });
+  await view.getByRole('button', { name: /^Место L1-1/ }).click();
+  await view.getByRole('button', { name: 'Купить' }).click();
+  await expect(page.getByRole('heading', { name: 'Подтверждение покупки' })).toBeVisible();
+  await page.clock.fastForward(5 * 60 * 1000 + 1000);
+  await expect(page.getByText('Время удержания истекло. Выберите билеты заново.')).toBeVisible();
+  await expect(view.getByRole('button', { name: /^Место L1-1 — доступно/ })).toBeEnabled();
+});
+
+test('updates seat availability when another tab holds and cancels it', async ({ page, context }) => {
+  await page.goto('/');
+  await openBuyer(page);
+  const other = await context.newPage();
+  await other.goto('/');
+  await openBuyer(other);
+  const otherView = other.getByRole('region', { name: /Места: Small Theater/ });
+  await otherView.getByRole('button', { name: /^Место L1-1/ }).click();
+  await otherView.getByRole('button', { name: 'Купить' }).click();
+  await expect(page.getByRole('button', { name: /^Место L1-1 — удерживается/ })).toBeDisabled();
+  await other.getByRole('button', { name: 'Отменить' }).click();
+  await expect(page.getByRole('button', { name: /^Место L1-1 — доступно/ })).toBeEnabled();
+});
+
+test('releases another tab hold at expiry after the owner tab closes', async ({ page, context }) => {
+  await page.clock.install();
+  await page.goto('/');
+  await openBuyer(page);
+  const other = await context.newPage();
+  await other.goto('/');
+  await openBuyer(other);
+  const otherView = other.getByRole('region', { name: /Места: Small Theater/ });
+  await otherView.getByRole('button', { name: /^Место L1-1/ }).click();
+  await otherView.getByRole('button', { name: 'Купить' }).click();
+  const seat = page.getByRole('button', { name: /^Место L1-1/ });
+  await expect(seat).toHaveAccessibleName(/^Место L1-1 — удерживается/);
+  await other.close();
+  await page.clock.fastForward(5 * 60 * 1000 + 1000);
+  await expect(seat).toHaveAccessibleName(/^Место L1-1 — доступно/);
+  await expect(seat).toBeEnabled();
+});
 test('SeatView accepts canvas selection and fits a narrow mobile screen', async ({
   page,
 }) => {

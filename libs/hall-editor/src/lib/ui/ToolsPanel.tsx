@@ -1,4 +1,5 @@
 import type { EditorTool } from '../editorOperations.js';
+import { editorText } from './editorI18n.js';
 
 export const editorTools: readonly {
   id: EditorTool;
@@ -25,19 +26,24 @@ export function ToolsPanel({
   activeTool,
   readonly,
   onSelect,
+  locale,
 }: {
   activeTool: EditorTool;
   readonly: boolean;
   onSelect: (tool: EditorTool) => void;
+  locale?: string | undefined;
 }) {
   return (
-    <nav className="hall-editor-tool-rail" aria-label="Инструменты холста">
+    <nav
+      className="hall-editor-tool-rail"
+      aria-label={editorText(locale, 'Инструменты холста')}
+    >
       {editorTools.map((item) => (
         <button
           key={item.id}
           type="button"
-          title={item.label}
-          aria-label={item.label}
+          title={editorText(locale, item.label)}
+          aria-label={editorText(locale, item.label)}
           aria-pressed={activeTool === item.id}
           disabled={readonly && item.id !== 'select' && item.id !== 'pan'}
           onClick={() => onSelect(item.id)}

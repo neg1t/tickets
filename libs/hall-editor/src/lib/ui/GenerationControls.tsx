@@ -1,10 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { Row, Table } from '@hall-platform/domain';
 import {
   generateRowSeatSlots,
   generateTableSeatSlots,
   type Vector2,
 } from '@hall-platform/geometry';
+import {
+  EditorLocaleContext,
+  editorText,
+  translateEditorError,
+} from './editorI18n.js';
 
 type SharedProps = {
   readonly readonly: boolean;
@@ -81,16 +86,24 @@ export function RowGenerationControls({
   readonly seatCount: number;
   readonly onApply: (row: Row) => void;
 }) {
+  const locale = useContext(EditorLocaleContext);
+  const tr = useCallback(
+    (russian: string) => editorText(locale, russian),
+    [locale],
+  );
   const [form, setForm] = useState(() => rowForm(row, seatCount));
   const preview = useMemo(() => {
     try {
-      const requestedCount = count(form.count, 'Мест в ряду');
+      const requestedCount = count(form.count, tr('Мест в ряду'));
       const step = Number(form.step);
-      const start = count(form.start, 'Начальный номер');
-      const skippedSlots = numbers(form.skipped, 'Пропуски').map(
+      const start = count(form.start, tr('Начальный номер'));
+      const skippedSlots = numbers(form.skipped, tr('Пропуски')).map(
         (number) => number - 1,
       );
-      const skippedNumbers = numbers(form.skippedNumbers, 'Пропущенные номера');
+      const skippedNumbers = numbers(
+        form.skippedNumbers,
+        tr('Пропущенные номера'),
+      );
       const gaps = form.gaps.trim()
         ? form.gaps.split(',').map((part) => {
             const [after, length] = part.trim().split(':');
@@ -103,7 +116,7 @@ export function RowGenerationControls({
               gapLength <= 0
             )
               throw new RangeError(
-                'Проходы: формат место:ширина через запятую',
+                tr('Проходы: формат место:ширина через запятую'),
               );
             return { afterSlot, length: gapLength };
           })
@@ -138,7 +151,7 @@ export function RowGenerationControls({
         error: error instanceof Error ? error.message : String(error),
       };
     }
-  }, [form, row, seatCount]);
+  }, [form, row, seatCount, tr]);
   useEffect(
     () => onPreview(preview.changed ? preview.positions : []),
     [onPreview, preview],
@@ -146,11 +159,11 @@ export function RowGenerationControls({
 
   return (
     <fieldset disabled={readonly} className="hall-editor-generation">
-      <legend>Генерация мест</legend>
+      <legend>{tr('Генерация мест')}</legend>
       <label>
-        Мест в ряду{' '}
+        {tr('Мест в ряду')}{' '}
         <input
-          aria-label="Мест в ряду"
+          aria-label={tr('Мест в ряду')}
           type="number"
           min={1}
           max={500}
@@ -159,23 +172,23 @@ export function RowGenerationControls({
         />
       </label>
       <label>
-        Распределение{' '}
+        {tr('Распределение')}{' '}
         <select
-          aria-label="Распределение мест"
+          aria-label={tr('Распределение мест')}
           value={form.mode}
           onChange={(event) =>
             setForm({ ...form, mode: event.target.value as RowForm['mode'] })
           }
         >
-          <option value="even">Равномерно</option>
-          <option value="fixed">С шагом</option>
+          <option value="even">{tr('Равномерно')}</option>
+          <option value="fixed">{tr('С шагом')}</option>
         </select>
       </label>
       {form.mode === 'fixed' && (
         <label>
-          Шаг{' '}
+          {tr('Шаг')}{' '}
           <input
-            aria-label="Шаг мест"
+            aria-label={tr('Шаг мест')}
             type="number"
             min="0.1"
             step="0.1"
@@ -185,9 +198,9 @@ export function RowGenerationControls({
         </label>
       )}
       <label>
-        Начальный номер{' '}
+        {tr('Начальный номер')}{' '}
         <input
-          aria-label="Начальный номер ряда"
+          aria-label={tr('Начальный номер ряда')}
           type="number"
           min={1}
           value={form.start}
@@ -195,9 +208,9 @@ export function RowGenerationControls({
         />
       </label>
       <label>
-        Нумерация обратно{' '}
+        {tr('Нумерация обратно')}{' '}
         <input
-          aria-label="Обратная нумерация ряда"
+          aria-label={tr('Обратная нумерация ряда')}
           type="checkbox"
           checked={form.reverse}
           onChange={(event) =>
@@ -206,9 +219,9 @@ export function RowGenerationControls({
         />
       </label>
       <label>
-        Пропустить позиции{' '}
+        {tr('Пропустить позиции')}{' '}
         <input
-          aria-label="Пропустить позиции"
+          aria-label={tr('Пропустить позиции')}
           type="text"
           placeholder="3, 7"
           value={form.skipped}
@@ -218,9 +231,9 @@ export function RowGenerationControls({
         />
       </label>
       <label>
-        Пропустить номера{' '}
+        {tr('Пропустить номера')}{' '}
         <input
-          aria-label="Пропустить номера"
+          aria-label={tr('Пропустить номера')}
           type="text"
           placeholder="13"
           value={form.skippedNumbers}
@@ -230,9 +243,9 @@ export function RowGenerationControls({
         />
       </label>
       <label>
-        Проходы (место:ширина){' '}
+        {tr('Проходы (место:ширина)')}{' '}
         <input
-          aria-label="Проходы в ряду"
+          aria-label={tr('Проходы в ряду')}
           type="text"
           placeholder="4:1.5"
           value={form.gaps}
@@ -240,9 +253,11 @@ export function RowGenerationControls({
         />
       </label>
       {preview.error ? (
-        <p role="alert">{preview.error}</p>
+        <p role="alert">{translateEditorError(locale, preview.error)}</p>
       ) : preview.changed ? (
-        <p role="status">Предпросмотр: {preview.positions.length} мест</p>
+        <p role="status">
+          {tr('Предпросмотр:')} {preview.positions.length} {tr('мест')}
+        </p>
       ) : null}
       <button
         type="button"
@@ -251,7 +266,7 @@ export function RowGenerationControls({
           if (preview.next) onApply(preview.next);
         }}
       >
-        Применить места
+        {tr('Применить места')}
       </button>
     </fieldset>
   );
@@ -293,29 +308,37 @@ export function TableGenerationControls({
   readonly table: Table;
   readonly onApply: (table: Table) => void;
 }) {
+  const locale = useContext(EditorLocaleContext);
+  const tr = useCallback(
+    (russian: string) => editorText(locale, russian),
+    [locale],
+  );
   const [form, setForm] = useState(() => tableForm(table));
   const preview = useMemo(() => {
     try {
       const shape: Table['shape'] =
         table.shape.kind === 'circle'
-          ? { ...table.shape, seatCount: count(form.count, 'Гостей за столом') }
+          ? {
+              ...table.shape,
+              seatCount: count(form.count, tr('Гостей за столом')),
+            }
           : {
               ...table.shape,
               seatsPerSide: {
-                top: sideCount(form.top, 'Сверху'),
-                right: sideCount(form.right, 'Справа'),
-                bottom: sideCount(form.bottom, 'Снизу'),
-                left: sideCount(form.left, 'Слева'),
+                top: sideCount(form.top, tr('Сверху')),
+                right: sideCount(form.right, tr('Справа')),
+                bottom: sideCount(form.bottom, tr('Снизу')),
+                left: sideCount(form.left, tr('Слева')),
               },
             };
       if (
         shape.kind === 'rectangle' &&
         Object.values(shape.seatsPerSide).every((value) => value === 0)
       )
-        throw new RangeError('Нужно хотя бы одно место за столом');
+        throw new RangeError(tr('Нужно хотя бы одно место за столом'));
       const offset = Number(form.offset);
       if (!Number.isFinite(offset) || offset < 0)
-        throw new RangeError('Отступ стула должен быть неотрицательным');
+        throw new RangeError(tr('Отступ стула должен быть неотрицательным'));
       const generation: NonNullable<Table['generation']> = {
         ...table.generation,
         seatOffset: offset,
@@ -327,7 +350,7 @@ export function TableGenerationControls({
           : [],
         numbering: {
           ...table.generation?.numbering,
-          start: count(form.start, 'Начальный номер'),
+          start: count(form.start, tr('Начальный номер')),
           direction: form.reverse ? 'reverse' : 'forward',
         },
       };
@@ -345,7 +368,7 @@ export function TableGenerationControls({
         error: error instanceof Error ? error.message : String(error),
       };
     }
-  }, [form, table]);
+  }, [form, table, tr]);
   useEffect(
     () => onPreview(preview.changed ? preview.positions : []),
     [onPreview, preview],
@@ -353,12 +376,12 @@ export function TableGenerationControls({
 
   return (
     <fieldset disabled={readonly} className="hall-editor-generation">
-      <legend>Места за столом</legend>
+      <legend>{tr('Места за столом')}</legend>
       {table.shape.kind === 'circle' ? (
         <label>
-          Гостей за столом{' '}
+          {tr('Гостей за столом')}{' '}
           <input
-            aria-label="Гостей за столом"
+            aria-label={tr('Гостей за столом')}
             type="number"
             min={1}
             max={500}
@@ -373,14 +396,14 @@ export function TableGenerationControls({
           <label key={side}>
             {
               {
-                top: 'Сверху',
-                right: 'Справа',
-                bottom: 'Снизу',
-                left: 'Слева',
+                top: tr('Сверху'),
+                right: tr('Справа'),
+                bottom: tr('Снизу'),
+                left: tr('Слева'),
               }[side]
             }{' '}
             <input
-              aria-label={`Мест ${side}`}
+              aria-label={tr(`Мест ${side}`)}
               type="number"
               min={0}
               max={500}
@@ -393,9 +416,9 @@ export function TableGenerationControls({
         ))
       )}
       <label>
-        Отступ стула{' '}
+        {tr('Отступ стула')}{' '}
         <input
-          aria-label="Отступ стула"
+          aria-label={tr('Отступ стула')}
           type="number"
           min={0}
           step="0.1"
@@ -404,9 +427,9 @@ export function TableGenerationControls({
         />
       </label>
       <label>
-        Начальный номер{' '}
+        {tr('Начальный номер')}{' '}
         <input
-          aria-label="Начальный номер стола"
+          aria-label={tr('Начальный номер стола')}
           type="number"
           min={1}
           value={form.start}
@@ -414,9 +437,9 @@ export function TableGenerationControls({
         />
       </label>
       <label>
-        Пропущенные места стола
+        {tr('Пропущенные места стола')}
         <input
-          aria-label="Пропущенные места стола"
+          aria-label={tr('Пропущенные места стола')}
           type="text"
           value={form.skipped}
           placeholder={
@@ -428,9 +451,9 @@ export function TableGenerationControls({
         />
       </label>
       <label>
-        Нумерация обратно{' '}
+        {tr('Нумерация обратно')}{' '}
         <input
-          aria-label="Обратная нумерация стола"
+          aria-label={tr('Обратная нумерация стола')}
           type="checkbox"
           checked={form.reverse}
           onChange={(event) =>
@@ -439,9 +462,11 @@ export function TableGenerationControls({
         />
       </label>
       {preview.error ? (
-        <p role="alert">{preview.error}</p>
+        <p role="alert">{translateEditorError(locale, preview.error)}</p>
       ) : preview.changed ? (
-        <p role="status">Предпросмотр: {preview.positions.length} мест</p>
+        <p role="status">
+          {tr('Предпросмотр:')} {preview.positions.length} {tr('мест')}
+        </p>
       ) : null}
       <button
         type="button"
@@ -450,7 +475,7 @@ export function TableGenerationControls({
           if (preview.next) onApply(preview.next);
         }}
       >
-        Применить места
+        {tr('Применить места')}
       </button>
     </fieldset>
   );

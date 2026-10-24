@@ -112,6 +112,7 @@ export type HallViewerProps = {
     worldPoint: Vector2,
   ) => void;
   readonly onPointerWorldMove?: (point: Vector2 | null) => void;
+  readonly onHoverTarget?: (target: HallTarget | null) => void;
   readonly calibrationGuide?: Readonly<{ first: Vector2; second: Vector2 }>;
 };
 
@@ -169,6 +170,7 @@ export function HallViewer(props: HallViewerProps) {
     onFloorChange,
     onHandleCommit,
     onPointerWorldMove,
+    onHoverTarget,
     calibrationGuide,
   } = props;
   const ui = { ...defaultLabels, ...labels };
@@ -589,6 +591,15 @@ export function HallViewer(props: HallViewerProps) {
   function handlePointerMove(native: PointerEvent) {
     const point = pointerPoint(native);
     if (point) onPointerWorldMove?.(screenToWorld(viewportRef.current, point));
+    if (point && !pointersRef.current.has(native.pointerId) && onHoverTarget) {
+      onHoverTarget(
+        hitTestHallScene(
+          scene,
+          screenToWorld(viewportRef.current, point),
+          3 / viewportRef.current.scale,
+        ),
+      );
+    }
     if (
       point &&
       !pointersRef.current.has(native.pointerId) &&
@@ -937,6 +948,7 @@ export function HallViewer(props: HallViewerProps) {
         onLostPointerCapture={(event) => handlePointerCancel(event.nativeEvent)}
         onPointerLeave={() => {
           onPointerWorldMove?.(null);
+          onHoverTarget?.(null);
           setHoverTarget(null);
         }}
         data-visible-seats={showSeats}

@@ -9,6 +9,8 @@ import {
   confirmDemoHold,
   cancelDemoHold,
   getDemoTotal,
+  findOwnActiveHold,
+  preferLatestDemoOccurrence,
 } from './demoBooking.js';
 
 const snapshot = layoutDocumentSchema.parse(smallTheater.document).snapshot;
@@ -46,6 +48,157 @@ describe('demo booking', () => {
     expect(getDemoAvailability(cancelled, 1001).seats[seatId]).toBe(
       'available',
     );
+  });
+
+  it('restores only the current owner active hold', () => {
+    const occurrence = createDemoOccurrence('demo-small', layout);
+    const held = holdDemoSelection(
+      occurrence,
+      [{ kind: 'seat', seatId }],
+      1000,
+      'tab-a',
+    );
+    const holdId = held.holds[0]?.id;
+    expect(findOwnActiveHold(held, 'tab-a', 1001)?.id).toBe(holdId);
+    expect(findOwnActiveHold(held, 'tab-b', 1001)).toBeNull();
+    expect(findOwnActiveHold(held, 'tab-a', 1000 + 5 * 60_000)).toBeNull();
+  });
+
+  it('does not let another owner confirm or cancel a hold', () => {
+    const held = holdDemoSelection(
+      createDemoOccurrence('demo-small', layout),
+      [{ kind: 'seat', seatId }],
+      1000,
+      'tab-a',
+    );
+    const holdId = held.holds[0]?.id ?? '';
+    expect(() => confirmDemoHold(held, holdId, 1001, 'tab-b')).toThrow(
+      'недоступно',
+    );
+    expect(() => cancelDemoHold(held, holdId, 'tab-b')).toThrow('недоступно');
+  });
+
+  it('treats a repeated cancel as a no-op after a hold is gone', () => {
+    const initial = createDemoOccurrence('demo-small', layout);
+    const held = holdDemoSelection(
+      initial,
+      [{ kind: 'seat', seatId }],
+      1000,
+      'tab-a',
+    );
+    const cancelled = cancelDemoHold(held, held.holds[0]?.id ?? '', 'tab-a');
+    expect(cancelDemoHold(cancelled, held.holds[0]?.id ?? '', 'tab-a')).toBe(
+      cancelled,
+    );
+  });
+
+  it('rejects missing or malformed prices before creating a hold', () => {
+    const occurrence = createDemoOccurrence('demo-small', layout);
+    const selection = [{ kind: 'seat' as const, seatId }];
+    const withoutPrice = {
+      ...occurrence,
+      prices: {
+        ...occurrence.prices,
+        seats: Object.fromEntries(
+          Object.entries(occurrence.prices.seats).filter(
+            ([id]) => id !== seatId,
+          ),
+        ),
+      },
+    };
+    expect(() => holdDemoSelection(withoutPrice, selection, 1000)).toThrow(
+      'Цена',
+    );
+    const malformed = {
+      ...occurrence,
+      prices: {
+        ...occurrence.prices,
+        seats: {
+          ...occurrence.prices.seats,
+          [seatId]: { amount: Number.NaN, currency: 'RUB' },
+        },
+      },
+    };
+    expect(() => holdDemoSelection(malformed, selection, 1000)).toThrow('Цена');
+  });
+
+  it('totals fractional RUB prices exactly in minor units', () => {
+    const occurrence = createDemoOccurrence('demo-small', layout);
+    const nextSeatId = snapshot.seats[1]?.id ?? '';
+    const priced = {
+      ...occurrence,
+      prices: {
+        ...occurrence.prices,
+        seats: {
+          ...occurrence.prices.seats,
+          [seatId]: { amount: 0.1, currency: 'RUB' },
+          [nextSeatId]: { amount: 0.2, currency: 'RUB' },
+        },
+      },
+    };
+    expect(
+      getDemoTotal(priced, [
+        { kind: 'seat', seatId },
+        { kind: 'seat', seatId: nextSeatId },
+      ]),
+    ).toBe(0.3);
+  });
+
+  it('rejects mixed currencies, duplicate tickets, invalid quantity and overflow in totals', () => {
+    const occurrence = createDemoOccurrence('demo-small', layout);
+    const nextSeatId = snapshot.seats[1]?.id ?? '';
+    const pair = [
+      { kind: 'seat' as const, seatId },
+      { kind: 'seat' as const, seatId: nextSeatId },
+    ];
+    const mixed = {
+      ...occurrence,
+      prices: {
+        ...occurrence.prices,
+        seats: {
+          ...occurrence.prices.seats,
+          [nextSeatId]: { amount: 1, currency: 'EUR' },
+        },
+      },
+    };
+    expect(() => getDemoTotal(mixed, pair)).toThrow('валют');
+    expect(() => getDemoTotal(occurrence, [pair[0]!, pair[0]!])).toThrow(
+      'Повтор',
+    );
+    const zoneId = snapshot.zones[0]?.id ?? '';
+    expect(() =>
+      getDemoTotal(occurrence, [
+        { kind: 'generalAdmission', zoneId, quantity: 1.5 },
+      ]),
+    ).toThrow('количество');
+    const overflow = {
+      ...occurrence,
+      prices: {
+        ...occurrence.prices,
+        seats: {
+          ...occurrence.prices.seats,
+          [seatId]: { amount: 50_000_000_000_000, currency: 'RUB' },
+          [nextSeatId]: { amount: 50_000_000_000_000, currency: 'RUB' },
+        },
+      },
+    };
+    expect(() => getDemoTotal(overflow, pair)).toThrow('стоимость');
+  });
+
+  it('keeps the newest occurrence when a delayed refresh returns', () => {
+    const initial = createDemoOccurrence('demo-small', layout);
+    const held = holdDemoSelection(
+      initial,
+      [{ kind: 'seat', seatId }],
+      1000,
+      'tab-a',
+    );
+    expect(held.revision).toBeGreaterThan(initial.revision);
+    expect(preferLatestDemoOccurrence(held, initial)).toBe(held);
+    expect(preferLatestDemoOccurrence(initial, held)).toBe(held);
+    expect(
+      preferLatestDemoOccurrence(held, createDemoOccurrence('other', layout)),
+    ).toBe(held);
   });
 
   it('reserves general admission capacity and prevents overselling', () => {

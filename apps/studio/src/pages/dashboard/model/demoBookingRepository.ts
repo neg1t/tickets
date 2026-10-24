@@ -7,6 +7,52 @@ import {
 } from './demoBooking.js';
 
 const databaseName = 'hall-platform-demo-booking';
+const ownerKey = 'hall-platform-demo-booking-owner';
+const changeKey = 'hall-platform-demo-booking-change';
+let fallbackOwnerId: string | null = null;
+
+export function getDemoOwnerId(): string {
+  if (typeof sessionStorage === 'undefined')
+    return fallbackOwnerId ??= crypto.randomUUID();
+  let ownerId = sessionStorage.getItem(ownerKey);
+  if (!ownerId) {
+    ownerId = crypto.randomUUID();
+    sessionStorage.setItem(ownerKey, ownerId);
+  }
+  return ownerId;
+}
+
+function announceChange(id: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const channel = new BroadcastChannel(changeKey);
+    channel.postMessage(id);
+    channel.close();
+  } catch { /* storage event is the fallback */ }
+  localStorage.setItem(changeKey, JSON.stringify({ id, nonce: crypto.randomUUID() }));
+}
+
+export function subscribeToDemoChanges(onChange: (id: string | null) => void): () => void {
+  if (typeof window === 'undefined') return () => undefined;
+  let channel: BroadcastChannel | null = null;
+  try {
+    channel = new BroadcastChannel(changeKey);
+    channel.onmessage = (event: MessageEvent<string>) => onChange(event.data);
+  } catch { /* storage event is the fallback */ }
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== changeKey || !event.newValue) return;
+    try { onChange((JSON.parse(event.newValue) as { id: string }).id); }
+    catch { onChange(null); }
+  };
+  const onFocus = () => onChange(null);
+  window.addEventListener('storage', onStorage);
+  window.addEventListener('focus', onFocus);
+  return () => {
+    channel?.close();
+    window.removeEventListener('storage', onStorage);
+    window.removeEventListener('focus', onFocus);
+  };
+}
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -87,8 +133,8 @@ export const demoBookingRepository = {
         resolveValue(result);
       };
     }),
-  update: (id: string, mutate: (current: DemoOccurrence) => DemoOccurrence) =>
-    transactionResult<DemoOccurrence>(
+  update: async (id: string, mutate: (current: DemoOccurrence) => DemoOccurrence) => {
+    const occurrence = await transactionResult<DemoOccurrence>(
       'readwrite',
       (store, resolveValue, rejectValue) => {
         const request = store.get(id);
@@ -109,22 +155,27 @@ export const demoBookingRepository = {
           }
         };
       },
-    ),
+    );
+    announceChange(id);
+    return occurrence;
+  },
   hold: (id: string, selection: readonly SeatSelectionItem[]) =>
     demoBookingRepository.update(id, (current) =>
-      holdDemoSelection(current, selection),
+      holdDemoSelection(current, selection, Date.now(), getDemoOwnerId()),
     ),
   confirm: (id: string, holdId: string) =>
     demoBookingRepository.update(id, (current) =>
-      confirmDemoHold(current, holdId),
+      confirmDemoHold(current, holdId, Date.now(), getDemoOwnerId()),
     ),
   cancel: (id: string, holdId: string) =>
     demoBookingRepository.update(id, (current) =>
-      cancelDemoHold(current, holdId),
+      cancelDemoHold(current, holdId, getDemoOwnerId()),
     ),
-  clear: () =>
-    transactionResult<void>('readwrite', (store, resolveValue) => {
+  clear: async () => {
+    await transactionResult<void>('readwrite', (store, resolveValue) => {
       store.clear();
       resolveValue();
-    }),
+    });
+    announceChange('*');
+  },
 };

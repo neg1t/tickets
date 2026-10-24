@@ -5,17 +5,19 @@ import {
   type HallViewerProps,
 } from '@hall-platform/renderer-konva';
 import type { HallLayoutDraft } from './editorDraft.js';
+import { editorText } from './ui/editorI18n.js';
 
 export type PdfHallViewerProps = Omit<
   HallViewerProps,
   'hallName' | 'snapshot' | 'zoneBounds' | 'backgroundPages'
 > & {
   readonly draft: HallLayoutDraft;
+  readonly locale?: string;
   readonly onError?: (error: Error) => void;
 };
 
 export function PdfHallViewer(props: PdfHallViewerProps) {
-  const { draft, onError, ...viewerProps } = props;
+  const { draft, locale, onError, ...viewerProps } = props;
   type RenderedPage = { dataUrl: string; canvas: HTMLCanvasElement };
   const cache = useRef(new Map<string, RenderedPage>());
   const pending = useRef(
@@ -152,8 +154,10 @@ export function PdfHallViewer(props: PdfHallViewerProps) {
     <div className="pdf-hall-viewer">
       {requiredPages.length > 0 && (
         <p className="pdf-hall-viewer-status" role="status">
-          Подложка:{' '}
-          {readyCount === requiredPages.length ? 'отображается' : 'загрузка…'}
+          {editorText(locale, 'Подложка:')}{' '}
+          {readyCount === requiredPages.length
+            ? editorText(locale, 'отображается')
+            : editorText(locale, 'загрузка…')}
         </p>
       )}
 

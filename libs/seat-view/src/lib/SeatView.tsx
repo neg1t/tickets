@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useUnit } from 'effector-react';
 import type { LayoutSnapshot, SeatStatus } from '@hall-platform/domain';
 import type { SpatialBounds } from '@hall-platform/geometry';
@@ -8,6 +8,15 @@ import {
   type HallViewerLabels,
 } from '@hall-platform/renderer-konva';
 import { createSeatViewModel } from './seatView.model.js';
+import {
+  validateSeatPrice,
+  validateSelection,
+  type SelectionValidationIssueCode,
+} from './selectionValidation.js';
+import { SeatDetails, type PlaceDetails } from './ui/SeatDetails.js';
+import { SeatFilters } from './ui/SeatFilters.js';
+import { AccessibleSeatList } from './ui/AccessibleSeatList.js';
+import { SelectionBasket } from './ui/SelectionBasket.js';
 
 export type PublishedHallLayout = {
   readonly hallName: string;
@@ -89,6 +98,17 @@ const translations = {
     invalidSelection: 'Выбранные места больше недоступны',
     remove: 'Убрать',
     legend: 'Легенда мест',
+    priceLegend: 'Ценовые категории',
+    details: 'Информация о месте',
+    row: 'Ряд',
+    status: 'Статус',
+    price: 'Цена',
+    availableOnly: 'Только доступные',
+    noSeats: 'По фильтру мест не найдено',
+    invalidPrice: 'Некорректная цена билета',
+    duplicate: 'Место выбрано повторно',
+    mixedCurrencies: 'В заказе разные валюты',
+    invalidQuantity: 'Проверьте количество билетов',
     statuses: {
       available: 'доступно',
       held: 'удерживается',
@@ -114,6 +134,17 @@ const translations = {
     invalidSelection: 'Selected places are no longer available',
     remove: 'Remove',
     legend: 'Seat legend',
+    priceLegend: 'Price categories',
+    details: 'Seat details',
+    row: 'Row',
+    status: 'Status',
+    price: 'Price',
+    availableOnly: 'Available only',
+    noSeats: 'No seats match the filter',
+    invalidPrice: 'Invalid ticket price',
+    duplicate: 'Seat selected twice',
+    mixedCurrencies: 'Mixed currencies in basket',
+    invalidQuantity: 'Check ticket quantity',
     statuses: {
       available: 'available',
       held: 'held',
@@ -184,8 +215,32 @@ export function SeatView(props: SeatViewProps) {
     model.zoneSelected,
   ]);
   const [search, setSearch] = useState('');
+  const [availableOnly, setAvailableOnly] = useState(false);
+  const [inspectedSeatId, setInspectedSeatId] = useState<string | null>(null);
+  const [hoveredSeatId, setHoveredSeatId] = useState<string | null>(null);
+  const [compact, setCompact] = useState(false);
   const [pending, setPending] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const contextKey = `${occurrenceId}:${layout.snapshot.id}`;
+  const previousContext = useRef(contextKey);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia('(max-width: 760px)');
+    const update = () => setCompact(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  useEffect(() => {
+    if (previousContext.current === contextKey) return;
+    previousContext.current = contextKey;
+    setSearch('');
+    setAvailableOnly(false);
+    setInspectedSeatId(null);
+    setLocalError(null);
+    setPending(false);
+    model.floorSelected(layout.snapshot.floors[0]?.id ?? '');
+  }, [contextKey, layout.snapshot.floors, model]);
   const instanceId = useId().replace(/:/g, '');
   const activeFloorId = layout.snapshot.floors.some(
     (floor) => floor.id === floorId,
@@ -204,7 +259,10 @@ export function SeatView(props: SeatViewProps) {
     (seat) =>
       seat.floorId === activeFloorId &&
       (!activeZoneId || seat.zoneId === activeZoneId) &&
-      seat.label.toLowerCase().includes(search.trim().toLowerCase()),
+      (!availableOnly || availability.seats[seat.id] === 'available') &&
+      `${seat.label} ${layout.snapshot.zones.find((zone) => zone.id === seat.zoneId)?.name ?? ''} ${layout.snapshot.rows.find((row) => row.id === (seat.placement.kind === 'row' ? seat.placement.rowId : ''))?.name ?? ''}`
+        .toLowerCase()
+        .includes(search.trim().toLowerCase()),
   );
   const seatById = new Map<string, (typeof layout.snapshot.seats)[number]>(
     layout.snapshot.seats.map((seat) => [seat.id, seat]),
@@ -212,9 +270,24 @@ export function SeatView(props: SeatViewProps) {
   const zoneById = new Map<string, (typeof layout.snapshot.zones)[number]>(
     layout.snapshot.zones.map((zone) => [zone.id, zone]),
   );
-  const selectedSeatIds = new Set(
-    selection.flatMap((item) => (item.kind === 'seat' ? [item.seatId] : [])),
+  const safeSelection = selection.filter(
+    (item): item is SeatSelectionItem =>
+      Boolean(item) &&
+      (item.kind === 'seat'
+        ? typeof item.seatId === 'string'
+        : item.kind === 'generalAdmission' &&
+          typeof item.zoneId === 'string' &&
+          typeof item.quantity === 'number'),
   );
+  const selectedSeatIds = new Set(
+    safeSelection.flatMap((item) =>
+      item.kind === 'seat' ? [item.seatId] : [],
+    ),
+  );
+  const selectedZoneForMobile = compact
+    ? [...selectedSeatIds].map((id) => seatById.get(id)?.zoneId).find(Boolean)
+    : null;
+  const focusedZoneId = activeZoneId ?? selectedZoneForMobile ?? null;
   const seatAppearance = Object.fromEntries(
     layout.snapshot.seats.map((seat) => [
       seat.id,
@@ -227,65 +300,95 @@ export function SeatView(props: SeatViewProps) {
     kind: 'seat',
     id,
   }));
+  const priceLegend = [
+    ...new Map(
+      layout.snapshot.seats
+        .filter((seat) => seat.floorId === activeFloorId)
+        .flatMap((seat) => {
+          const price = prices.seats[seat.id];
+          return price && validateSeatPrice(price).valid
+            ? [
+                [
+                  `${price.category ?? labels.seat}:${price.amount}:${price.currency}`,
+                  price,
+                ] as const,
+              ]
+            : [];
+        }),
+    ).values(),
+  ];
   const locked = loading || buying || pending;
-  const selectedCount = selection.reduce(
-    (count, item) =>
-      count + (item.kind === 'seat' ? 1 : Math.max(0, item.quantity)),
-    0,
-  );
-  const selectedPrices = selection.flatMap((item) => {
-    const price =
-      item.kind === 'seat'
-        ? prices.seats[item.seatId]
-        : prices.zones?.[item.zoneId];
-    return price
-      ? [{ price, quantity: item.kind === 'seat' ? 1 : item.quantity }]
-      : [];
+  const validation = validateSelection({
+    layout,
+    selection,
+    availability,
+    prices,
   });
-  const currencies = new Set(selectedPrices.map(({ price }) => price.currency));
-  const total =
-    selectedPrices.length === selection.length && currencies.size === 1
-      ? {
-          amount: selectedPrices.reduce(
-            (sum, { price, quantity }) => sum + price.amount * quantity,
-            0,
-          ),
-          currency: selectedPrices[0]?.price.currency ?? 'RUB',
-        }
-      : null;
-  const selectionValid = selection.every((item) => {
-    if (item.kind === 'seat')
-      return (
-        seatById.has(item.seatId) &&
-        availability.seats[item.seatId] === 'available' &&
-        Boolean(prices.seats[item.seatId])
-      );
-    const zone = availability.zones?.[item.zoneId];
-    return (
-      zoneById.has(item.zoneId) &&
-      Boolean(prices.zones?.[item.zoneId]) &&
-      Boolean(
-        zone &&
-        item.quantity > 0 &&
-        item.quantity <= zone.available &&
-        item.quantity <= (zone.maxPerOrder ?? zone.available),
-      )
+  const selectedCount = validation.count;
+  const total = validation.total;
+  const selectionValid = validation.valid;
+  const inspectedSeat = inspectedSeatId ? seatById.get(inspectedSeatId) : null;
+  const hoveredSeat = hoveredSeatId ? seatById.get(hoveredSeatId) : null;
+  const selectedDetailSeat = safeSelection
+    .flatMap((item) =>
+      item.kind === 'seat' ? [seatById.get(item.seatId)] : [],
+    )
+    .find(Boolean);
+  const detailSeat = inspectedSeat ?? selectedDetailSeat;
+  const tooltipSeat =
+    hoveredSeat && hoveredSeat.id !== detailSeat?.id ? hoveredSeat : null;
+  function placeDetails(seat: NonNullable<typeof detailSeat>): PlaceDetails {
+    const floor = layout.snapshot.floors.find(
+      (item) => item.id === seat.floorId,
     );
-  });
+    const zone = layout.snapshot.zones.find((item) => item.id === seat.zoneId);
+    const rowId = seat.placement.kind === 'row' ? seat.placement.rowId : null;
+    const row = rowId
+      ? layout.snapshot.rows.find((item) => item.id === rowId)
+      : undefined;
+    const price = prices.seats[seat.id];
+    const checked = validateSeatPrice(price);
+    return {
+      hall: layout.hallName,
+      floor: floor?.name ?? labels.floor,
+      zone: zone?.name ?? labels.allZones,
+      row: row?.name ?? '—',
+      seat: seat.label,
+      status: availability.seats[seat.id] ?? 'unavailable',
+      price:
+        checked.valid && price
+          ? formatPrice(price, locale)
+          : labels.missingPrice,
+      ...(price?.category ? { category: price.category } : {}),
+    };
+  }
+  function selectionIssue(code: SelectionValidationIssueCode): string {
+    if (code === 'missing_price') return labels.missingPrice;
+    if (code === 'invalid_price' || code === 'total_overflow')
+      return labels.invalidPrice;
+    if (code === 'duplicate_item') return labels.duplicate;
+    if (code === 'mixed_currencies') return labels.mixedCurrencies;
+    if (code === 'invalid_quantity' || code.startsWith('quantity_'))
+      return labels.invalidQuantity;
+    return labels.invalidSelection;
+  }
 
   function handleSeatClick(seatId: string) {
     if (locked) return;
     if (selectedSeatIds.has(seatId)) {
       onSelectionChange(
-        selection.filter(
+        safeSelection.filter(
           (item) => item.kind !== 'seat' || item.seatId !== seatId,
         ),
       );
       return;
     }
-    if (availability.seats[seatId] !== 'available' || !prices.seats[seatId])
+    if (
+      availability.seats[seatId] !== 'available' ||
+      !validateSeatPrice(prices.seats[seatId]).valid
+    )
       return;
-    onSelectionChange([...selection, { kind: 'seat', seatId }]);
+    onSelectionChange([...safeSelection, { kind: 'seat', seatId }]);
   }
 
   function handleQuantityChange(zoneId: string, rawValue: string) {
@@ -293,12 +396,14 @@ export function SeatView(props: SeatViewProps) {
     const zone = availability.zones?.[zoneId];
     if (!zone) return;
     const limit = Math.min(zone.available, zone.maxPerOrder ?? zone.available);
-    const quantity = Math.min(
-      limit,
-      Math.max(0, Math.trunc(Number(rawValue) || 0)),
-    );
+    const quantity = Number(rawValue);
+    if (!Number.isSafeInteger(quantity) || quantity < 0 || quantity > limit) {
+      setLocalError(labels.invalidQuantity);
+      return;
+    }
+    setLocalError(null);
     onSelectionChange([
-      ...selection.filter(
+      ...safeSelection.filter(
         (item) => item.kind !== 'generalAdmission' || item.zoneId !== zoneId,
       ),
       ...(quantity > 0
@@ -313,17 +418,20 @@ export function SeatView(props: SeatViewProps) {
   }
 
   async function handleBuyClick() {
-    if (locked || selectedCount === 0 || !selectionValid || !total) return;
+    if (locked || !selectionValid || !total) return;
+    const submittedContext = contextKey;
     setLocalError(null);
     setPending(true);
     try {
       await onBuyClick({ occurrenceId, selection: [...selection] });
     } catch (cause) {
       const failure = cause instanceof Error ? cause : new Error(String(cause));
-      setLocalError(failure.message);
-      onError?.(failure);
+      if (previousContext.current === submittedContext) {
+        setLocalError(failure.message);
+        onError?.(failure);
+      }
     } finally {
-      setPending(false);
+      if (previousContext.current === submittedContext) setPending(false);
     }
   }
 
@@ -349,13 +457,29 @@ export function SeatView(props: SeatViewProps) {
               : {})}
             seatAppearance={seatAppearance}
             stageId={`seat-stage-${instanceId}`}
-            fitKey={`${layout.snapshot.id}:${activeFloorId}:${activeZoneId ?? ''}`}
+            fitKey={`${layout.snapshot.id}:${activeFloorId}:${focusedZoneId ?? ''}`}
             focusedFloorId={activeFloorId}
-            {...(activeZoneId ? { focusedZoneId: activeZoneId } : {})}
-            height={400}
+            {...(focusedZoneId ? { focusedZoneId } : {})}
+            height={compact ? 300 : 400}
             onCanvasClick={handleCanvasClick}
             onFloorChange={selectFloor}
+            onHoverTarget={(target) =>
+              setHoveredSeatId(target?.kind === 'seat' ? target.id : null)
+            }
           />
+
+          {tooltipSeat && (
+            <SeatDetails
+              details={placeDetails(tooltipSeat)}
+              title={labels.details}
+              seatLabel={labels.seat}
+              rowLabel={labels.row}
+              statusLabel={labels.status}
+              priceLabel={labels.price}
+              statuses={labels.statuses}
+              tooltip
+            />
+          )}
 
           <div className="seat-view-legend" aria-label={labels.legend}>
             {(
@@ -371,76 +495,78 @@ export function SeatView(props: SeatViewProps) {
               {labels.statuses.selected}
             </span>
           </div>
+          {priceLegend.length > 0 && (
+            <div
+              className="seat-view-price-legend"
+              aria-label={labels.priceLegend}
+            >
+              <strong>{labels.priceLegend}</strong>
+              {priceLegend.map((price) => (
+                <span
+                  key={`${price.category ?? labels.seat}:${price.amount}:${price.currency}`}
+                >
+                  {price.category ?? labels.seat} · {formatPrice(price, locale)}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="seat-view-panel">
-          <div className="seat-view-filters">
-            <label>
-              {labels.floor}
-              <select
-                aria-label={labels.floor}
-                value={activeFloorId}
-                onChange={(event) => selectFloor(event.target.value)}
-              >
-                {layout.snapshot.floors.map((floor) => (
-                  <option key={floor.id} value={floor.id}>
-                    {floor.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              {labels.allZones}
-              <select
-                aria-label={labels.allZones}
-                value={activeZoneId ?? ''}
-                onChange={(event) => selectZone(event.target.value || null)}
-              >
-                <option value="">{labels.allZones}</option>
-                {zones.map((zone) => (
-                  <option key={zone.id} value={zone.id}>
-                    {zone.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+          <SeatFilters
+            floorLabel={labels.floor}
+            zoneLabel={labels.allZones}
+            searchLabel={labels.seats}
+            availableOnlyLabel={labels.availableOnly}
+            floors={layout.snapshot.floors}
+            zones={zones}
+            floorId={activeFloorId}
+            zoneId={activeZoneId ?? ''}
+            search={search}
+            availableOnly={availableOnly}
+            onFloorChange={selectFloor}
+            onZoneChange={selectZone}
+            onSearchChange={setSearch}
+            onAvailableOnlyChange={setAvailableOnly}
+          />
 
-          <label className="seat-view-search">
-            {labels.seats}
-            <input
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </label>
-
-          <div className="seat-view-seat-list" aria-label={labels.seats}>
-            {seats.map((seat) => {
-              const status = availability.seats[seat.id] ?? 'unavailable';
-              const price = prices.seats[seat.id];
-              const available = status === 'available' && Boolean(price);
-              return (
-                <button
-                  key={seat.id}
-                  type="button"
-                  aria-label={`${labels.seat} ${seat.label} — ${labels.statuses[status]}`}
-                  aria-pressed={selectedSeatIds.has(seat.id)}
-                  disabled={
-                    locked || (!available && !selectedSeatIds.has(seat.id))
-                  }
-                  onClick={() => handleSeatClick(seat.id)}
-                >
-                  <span>{seat.label}</span>
-                  <span>{labels.statuses[status]}</span>
-                  <span>
-                    {price ? formatPrice(price, locale) : labels.missingPrice}
-                  </span>
-                  {price?.category && <small>{price.category}</small>}
-                </button>
-              );
+          <AccessibleSeatList
+            label={labels.seats}
+            seatLabel={labels.seat}
+            emptyLabel={labels.noSeats}
+            seats={seats.map((seat) => {
+              const details = placeDetails(seat);
+              const selected = selectedSeatIds.has(seat.id);
+              return {
+                id: seat.id,
+                label: seat.label,
+                address: `${details.hall} · ${details.floor} · ${details.zone} · ${labels.row} ${details.row}`,
+                status: labels.statuses[details.status],
+                price: details.price,
+                ...(details.category ? { category: details.category } : {}),
+                selected,
+                disabled:
+                  locked ||
+                  (!selected &&
+                    (details.status !== 'available' ||
+                      !validateSeatPrice(prices.seats[seat.id]).valid)),
+              };
             })}
-          </div>
+            onSelect={handleSeatClick}
+            onInspect={setInspectedSeatId}
+          />
+
+          {detailSeat && (
+            <SeatDetails
+              details={placeDetails(detailSeat)}
+              title={labels.details}
+              seatLabel={labels.seat}
+              rowLabel={labels.row}
+              statusLabel={labels.status}
+              priceLabel={labels.price}
+              statuses={labels.statuses}
+            />
+          )}
 
           {zones
             .filter(
@@ -455,7 +581,7 @@ export function SeatView(props: SeatViewProps) {
                 stock.available,
                 stock.maxPerOrder ?? stock.available,
               );
-              const selectedZone = selection.find(
+              const selectedZone = safeSelection.find(
                 (item) =>
                   item.kind === 'generalAdmission' && item.zoneId === zone.id,
               );
@@ -476,75 +602,81 @@ export function SeatView(props: SeatViewProps) {
                     max={limit}
                     value={quantity}
                     disabled={
-                      locked || ((!price || limit === 0) && quantity === 0)
+                      locked ||
+                      ((!validateSeatPrice(price).valid || limit === 0) &&
+                        quantity === 0)
                     }
                     onChange={(event) =>
                       handleQuantityChange(zone.id, event.target.value)
                     }
                   />
                   <span>
-                    {price ? formatPrice(price, locale) : labels.missingPrice}
+                    {validateSeatPrice(price).valid && price
+                      ? formatPrice(price, locale)
+                      : labels.missingPrice}
                   </span>
                 </label>
               );
             })}
 
-          <div className="seat-view-basket" aria-live="polite">
-            <strong>
-              {labels.selected}: {selectedCount}
-            </strong>
-            {selection.map((item) => {
-              const name =
+          <SelectionBasket
+            selectedLabel={labels.selected}
+            totalLabel={labels.total}
+            missingPriceLabel={labels.missingPrice}
+            buyLabel={labels.buy}
+            buyingLabel={labels.buying}
+            removeLabel={labels.remove}
+            count={selectedCount}
+            total={selectionValid && total ? formatPrice(total, locale) : null}
+            items={safeSelection.map((item) => {
+              const seat =
+                item.kind === 'seat' ? seatById.get(item.seatId) : null;
+              const zone =
+                item.kind === 'generalAdmission'
+                  ? zoneById.get(item.zoneId)
+                  : null;
+              const name = seat
+                ? `${labels.seat} ${seat.label} · ${layout.snapshot.floors.find((floor) => floor.id === seat.floorId)?.name ?? ''} · ${seat.zoneId ? (zoneById.get(seat.zoneId)?.name ?? '') : ''}`
+                : `${zone?.name ?? (item.kind === 'generalAdmission' ? item.zoneId : item.seatId)} × ${item.kind === 'generalAdmission' ? item.quantity : 1}`;
+              const price =
                 item.kind === 'seat'
-                  ? `${labels.seat} ${seatById.get(item.seatId)?.label ?? item.seatId}`
-                  : `${zoneById.get(item.zoneId)?.name ?? item.zoneId} × ${item.quantity}`;
-              const key =
-                item.kind === 'seat'
-                  ? `seat:${item.seatId}`
-                  : `zone:${item.zoneId}`;
-              return (
-                <div className="seat-view-basket-item" key={key}>
-                  <span>{name}</span>
-                  <button
-                    type="button"
-                    aria-label={`${labels.remove} ${name}`}
-                    disabled={locked}
-                    onClick={() =>
-                      onSelectionChange(
-                        selection.filter((candidate) =>
-                          item.kind === 'seat'
-                            ? candidate.kind !== 'seat' ||
-                              candidate.seatId !== item.seatId
-                            : candidate.kind !== 'generalAdmission' ||
-                              candidate.zoneId !== item.zoneId,
-                        ),
-                      )
-                    }
-                  >
-                    {labels.remove}
-                  </button>
-                </div>
-              );
+                  ? prices.seats[item.seatId]
+                  : prices.zones?.[item.zoneId];
+              return {
+                key:
+                  item.kind === 'seat'
+                    ? `seat:${item.seatId}`
+                    : `zone:${item.zoneId}`,
+                name,
+                price:
+                  validateSeatPrice(price).valid && price
+                    ? formatPrice(price, locale)
+                    : null,
+              };
             })}
-            {selectedCount > 0 && (
-              <span>
-                {labels.total}:{' '}
-                {total ? formatPrice(total, locale) : labels.missingPrice}
-              </span>
-            )}
-            {selectedCount > 0 && !selectionValid && (
-              <span role="alert">{labels.invalidSelection}</span>
-            )}
-            <button
-              type="button"
-              disabled={
-                locked || selectedCount === 0 || !selectionValid || !total
-              }
-              onClick={() => void handleBuyClick()}
-            >
-              {locked && (buying || pending) ? labels.buying : labels.buy}
-            </button>
-          </div>
+            disabled={locked}
+            buyDisabled={!selectionValid}
+            buying={buying || pending}
+            issue={
+              selection.length > 0 && !selectionValid ? (
+                <span role="alert">
+                  {selectionIssue(validation.issues[0]?.code ?? 'invalid_item')}
+                </span>
+              ) : null
+            }
+            onRemove={(key) =>
+              onSelectionChange(
+                safeSelection.filter(
+                  (item) =>
+                    key !==
+                    (item.kind === 'seat'
+                      ? `seat:${item.seatId}`
+                      : `zone:${item.zoneId}`),
+                ),
+              )
+            }
+            onBuy={() => void handleBuyClick()}
+          />
         </div>
       </div>
     </section>

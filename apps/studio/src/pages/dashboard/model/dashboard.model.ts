@@ -21,13 +21,16 @@ import {
 import type { SeatSelectionItem } from '@hall-platform/seat-view';
 import {
   createDemoOccurrence,
+  findOwnActiveHold,
+  preferLatestDemoOccurrence,
   type DemoOccurrence,
   type DemoOrder,
 } from './demoBooking.js';
-import { demoBookingRepository } from './demoBookingRepository.js';
+import { demoBookingRepository, getDemoOwnerId, subscribeToDemoChanges } from './demoBookingRepository.js';
 
 const repository = createLocalHallRepository();
 const activeHallKey = 'hall-platform-active-hall';
+const activeBuyerKey = 'hall-platform-active-demo-occurrence';
 const fixtures = [smallTheater, operaHall, arena, banquetHall].map(
   (fixture) => {
     const document = layoutDocumentSchema.parse(fixture.document);
@@ -119,6 +122,10 @@ export const openDemoEventFx = createEffect(async (id: string) => {
   if (!occurrence) throw new Error('Демо-мероприятие не найдено');
   return occurrence;
 });
+export const refreshDemoOccurrenceFx = createEffect(async (id: string) =>
+  demoBookingRepository.get(id),
+);
+
 export const holdDemoFx = createEffect(
   ({ id, selection }: { id: string; selection: SeatSelectionItem[] }) =>
     demoBookingRepository.hold(id, selection),
@@ -304,27 +311,43 @@ export const $demoEvents = createStore<DemoOccurrence[]>([])
   )
   .on(confirmDemoFx.doneData, (events, occurrence) =>
     events.map((event) => (event.id === occurrence.id ? occurrence : event)),
+  )
+  .on(cancelDemoFx.doneData, (events, occurrence) =>
+    events.map((event) => (event.id === occurrence.id ? occurrence : event)),
+  )
+  .on(refreshDemoOccurrenceFx.doneData, (events, occurrence) =>
+    occurrence ? events.map((event) => event.id === occurrence.id ? preferLatestDemoOccurrence(event, occurrence) ?? event : event) : events,
   );
 
 export const $buyerOccurrence = createStore<DemoOccurrence | null>(null)
   .on(openBuyerFx.doneData, (_, occurrence) => occurrence)
   .on(openDemoEventFx.doneData, (_, occurrence) => occurrence)
-  .on(holdDemoFx.doneData, (_, occurrence) => occurrence)
-  .on(confirmDemoFx.doneData, (_, occurrence) => occurrence)
-  .on(cancelDemoFx.doneData, (_, occurrence) => occurrence)
-  .reset(newHallRequested);
+  .on(holdDemoFx.doneData, (current, occurrence) => preferLatestDemoOccurrence(current, occurrence))
+  .on(confirmDemoFx.doneData, (current, occurrence) => preferLatestDemoOccurrence(current, occurrence))
+  .on(cancelDemoFx.doneData, (current, occurrence) => preferLatestDemoOccurrence(current, occurrence))
+  .on(refreshDemoOccurrenceFx.doneData, preferLatestDemoOccurrence)
+  .reset(newHallRequested, catalogOpened, demoEventsOpened, editorOpened, previewOpened);
 for (const event of opened) $buyerOccurrence.reset(event);
 
 export const $activeHoldId = createStore<string | null>(null)
   .on(
     holdDemoFx.doneData,
-    (_, occurrence) => occurrence.holds.at(-1)?.id ?? null,
+    (_, occurrence) => findOwnActiveHold(occurrence, getDemoOwnerId())?.id ?? null,
+  )
+  .on(openBuyerFx.doneData, (_, occurrence) => findOwnActiveHold(occurrence, getDemoOwnerId())?.id ?? null)
+  .on(openDemoEventFx.doneData, (_, occurrence) => findOwnActiveHold(occurrence, getDemoOwnerId())?.id ?? null)
+  .on(refreshDemoOccurrenceFx.doneData, (current, occurrence) =>
+    occurrence && $buyerOccurrence.getState()?.id === occurrence.id
+      ? findOwnActiveHold(preferLatestDemoOccurrence($buyerOccurrence.getState(), occurrence) ?? occurrence, getDemoOwnerId())?.id ?? null
+      : current,
   )
   .reset(
-    openBuyerFx.doneData,
-    openDemoEventFx.doneData,
     confirmDemoFx.doneData,
     cancelDemoFx.doneData,
+    catalogOpened,
+    demoEventsOpened,
+    editorOpened,
+    previewOpened,
   );
 
 export const $receipt = createStore<DemoOrder | null>(null)
@@ -332,7 +355,7 @@ export const $receipt = createStore<DemoOrder | null>(null)
     confirmDemoFx.doneData,
     (_, occurrence) => occurrence.orders.at(-1) ?? null,
   )
-  .reset(openBuyerFx.doneData, openDemoEventFx.doneData);
+  .reset(openBuyerFx.doneData, openDemoEventFx.doneData, catalogOpened, demoEventsOpened, editorOpened, previewOpened);
 
 export const $seatSelection = createStore<SeatSelectionItem[]>([])
   .on(seatSelectionChanged, (_, selection) => selection)
@@ -341,6 +364,10 @@ export const $seatSelection = createStore<SeatSelectionItem[]>([])
     openDemoEventFx.doneData,
     confirmDemoFx.doneData,
     newHallRequested,
+    catalogOpened,
+    demoEventsOpened,
+    editorOpened,
+    previewOpened,
   );
 for (const event of opened) $seatSelection.reset(event);
 
@@ -409,3 +436,25 @@ for (const effect of [
     .reset(effect.doneData);
 }
 $error.reset(newHallRequested);
+
+if (typeof window !== 'undefined') {
+  subscribeToDemoChanges((id) => {
+    const activeId = $buyerOccurrence.getState()?.id;
+    if (activeId && (id === null || id === '*' || id === activeId))
+      void refreshDemoOccurrenceFx(activeId).catch(() => undefined);
+    if ($mode.getState() === 'events')
+      void seedDemoOccurrencesFx().catch(() => undefined);
+  });
+  seedDemoOccurrencesFx.doneData.watch((events) => {
+    const id = sessionStorage.getItem(activeBuyerKey);
+    if (!id) return;
+    if (events.some((event) => event.id === id && findOwnActiveHold(event, getDemoOwnerId())))
+      void openDemoEventFx(id).catch(() => undefined);
+    else sessionStorage.removeItem(activeBuyerKey);
+  });
+  holdDemoFx.doneData.watch((occurrence) => sessionStorage.setItem(activeBuyerKey, occurrence.id));
+  for (const effect of [confirmDemoFx, cancelDemoFx])
+    effect.doneData.watch(() => sessionStorage.removeItem(activeBuyerKey));
+  for (const event of [catalogOpened, editorOpened, previewOpened, demoEventsOpened])
+    event.watch(() => sessionStorage.removeItem(activeBuyerKey));
+}

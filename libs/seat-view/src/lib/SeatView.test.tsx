@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -70,7 +71,7 @@ function ControlledView(props: {
 }
 
 describe('SeatView', () => {
-  it.fails('A08: rejects duplicate seats supplied by a controlled host', () => {
+  it('A08: rejects duplicate seats supplied by a controlled host', () => {
     const onBuyClick = vi.fn();
     render(
       <SeatView
@@ -88,6 +89,72 @@ describe('SeatView', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Купить' }));
     expect(onBuyClick).not.toHaveBeenCalled();
+  });
+
+  it('shows the full place address and price when a seat is selected', () => {
+    render(
+      <SeatView
+        layout={layout}
+        occurrenceId="event-1"
+        availability={availability}
+        prices={prices}
+        selection={[{ kind: 'seat', seatId: first.id }]}
+        onSelectionChange={() => undefined}
+        onBuyClick={() => undefined}
+      />,
+    );
+    const details = screen.getByRole('region', { name: 'Информация о месте' });
+    expect(details.textContent).toContain('Малый театр');
+    expect(details.textContent).toContain('Main floor');
+    expect(details.textContent).toContain('Left sector');
+    expect(details.textContent).toContain('Ряд');
+    expect(details.textContent).toContain('L1-1');
+    expect(details.textContent).toContain('1 200');
+    expect(screen.getByLabelText('Ценовые категории').textContent).toContain(
+      'Партер',
+    );
+  });
+
+  it('disables checkout for a malformed price and names the pricing problem', () => {
+    render(
+      <SeatView
+        layout={layout}
+        occurrenceId="event-1"
+        availability={availability}
+        prices={{
+          ...prices,
+          seats: {
+            ...prices.seats,
+            [first.id]: { amount: Number.NaN, currency: 'RUB' },
+          },
+        }}
+        selection={[{ kind: 'seat', seatId: first.id }]}
+        onSelectionChange={() => undefined}
+        onBuyClick={() => undefined}
+      />,
+    );
+    expect(
+      screen.getByRole('button', { name: 'Купить' }).hasAttribute('disabled'),
+    ).toBe(true);
+    expect(screen.getByRole('alert').textContent).toContain('цена');
+  });
+
+  it('reports a malformed controlled selection without crashing the screen', () => {
+    render(
+      <SeatView
+        layout={layout}
+        occurrenceId="event-1"
+        availability={availability}
+        prices={prices}
+        selection={[null] as unknown as SeatSelectionItem[]}
+        onSelectionChange={() => undefined}
+        onBuyClick={() => undefined}
+      />,
+    );
+    expect(
+      screen.getByRole('button', { name: 'Купить' }).hasAttribute('disabled'),
+    ).toBe(true);
+    expect(screen.getByRole('alert').textContent).toContain('недоступны');
   });
 
   it('uses controlled selection and sends it to the host on buy', async () => {
@@ -172,6 +239,53 @@ describe('SeatView', () => {
     ).not.toBe(
       secondView.getByTestId('hall-viewer').getAttribute('data-stage-id'),
     );
+  });
+
+  it('moves keyboard focus through available seats in the accessible list', () => {
+    render(
+      <SeatView
+        layout={layout}
+        occurrenceId="event-1"
+        availability={{
+          ...availability,
+          seats: { [first.id]: 'available', [second.id]: 'available' },
+        }}
+        prices={prices}
+        selection={[]}
+        onSelectionChange={() => undefined}
+        onBuyClick={() => undefined}
+      />,
+    );
+    const firstButton = screen.getByRole('button', { name: /^Место L1-1/ });
+    const secondButton = screen.getByRole('button', { name: /^Место L1-2/ });
+    firstButton.focus();
+    fireEvent.keyDown(firstButton, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(secondButton);
+  });
+
+  it('shows the full address of a focused seat even when another seat is selected', () => {
+    render(
+      <SeatView
+        layout={layout}
+        occurrenceId="event-1"
+        availability={{
+          ...availability,
+          seats: { [first.id]: 'available', [second.id]: 'available' },
+        }}
+        prices={prices}
+        selection={[{ kind: 'seat', seatId: first.id }]}
+        onSelectionChange={() => undefined}
+        onBuyClick={() => undefined}
+      />,
+    );
+    const secondButton = screen.getByRole('button', { name: /^Место L1-2/ });
+    expect((secondButton as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.focus(secondButton);
+    const details = screen.getByRole('region', { name: 'Информация о месте' });
+    expect(details.textContent).toContain('L1-2');
+    expect(details.textContent).toContain('Малый театр');
+    expect(secondButton.textContent).toContain('Main floor');
+    expect(secondButton.textContent).toContain('Left sector');
   });
 
   it('does not change selection until the host updates its prop', () => {
@@ -292,6 +406,67 @@ describe('SeatView', () => {
     expect(
       screen.getByTestId('hall-viewer').getAttribute('data-zoom-in-label'),
     ).toBe('Zoom in');
+  });
+
+  it('clears local filters when the occurrence changes', () => {
+    const common = {
+      layout,
+      availability,
+      prices,
+      selection: [] as SeatSelectionItem[],
+      onSelectionChange: () => undefined,
+      onBuyClick: () => undefined,
+    };
+    const view = render(<SeatView {...common} occurrenceId="event-1" />);
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Места' }), {
+      target: { value: 'L1-1' },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Только доступные' }));
+    view.rerender(<SeatView {...common} occurrenceId="event-2" />);
+    expect(
+      (screen.getByRole('searchbox', { name: 'Места' }) as HTMLInputElement)
+        .value,
+    ).toBe('');
+    expect(
+      (
+        screen.getByRole('checkbox', {
+          name: 'Только доступные',
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(false);
+  });
+
+  it('does not show a late checkout error from a previous occurrence', async () => {
+    let rejectPrevious: (error: Error) => void = () => undefined;
+    const onError = vi.fn();
+    const previousBuy = () =>
+      new Promise<void>((_resolve, reject) => {
+        rejectPrevious = reject;
+      });
+    const common = {
+      layout,
+      availability,
+      prices,
+      selection: [{ kind: 'seat' as const, seatId: first.id }],
+      onSelectionChange: () => undefined,
+      onError,
+    };
+    const view = render(
+      <SeatView {...common} occurrenceId="event-1" onBuyClick={previousBuy} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Купить' }));
+    view.rerender(
+      <SeatView
+        {...common}
+        occurrenceId="event-2"
+        onBuyClick={() => undefined}
+      />,
+    );
+    await act(async () => {
+      rejectPrevious(new Error('Old checkout failed'));
+    });
+    expect(screen.queryByText('Old checkout failed')).toBeNull();
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it('reports a rejected buy callback without changing the controlled selection', async () => {
