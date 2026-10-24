@@ -10,6 +10,37 @@ import operaHall from '@hall-platform/fixtures/opera-hall.json' with { type: 'js
 import { buildHallScene, hitTestHallScene } from './hallScene.js';
 
 describe('hall scene', () => {
+  it('chooses the nearest seat when expanded touch targets overlap', () => {
+    const base = layoutDocumentSchema.parse(smallTheater.document).snapshot;
+    const first = base.seats[0];
+    if (!first) throw new Error('Missing seat');
+    const scene = buildHallScene(
+      {
+        ...base,
+        rows: [],
+        tables: [],
+        zones: [],
+        decorations: [],
+        seats: [
+          {
+            ...first,
+            id: 'first' as typeof first.id,
+            position: { x: 0, y: 0 } as typeof first.position,
+          },
+          {
+            ...first,
+            id: 'second' as typeof first.id,
+            position: { x: 1, y: 0 } as typeof first.position,
+          },
+        ],
+      },
+      first.floorId,
+    );
+    expect(hitTestHallScene(scene, { x: 0.7, y: 0 }, 0.4)).toEqual({
+      kind: 'seat',
+      id: 'second',
+    });
+  });
   it('hits polygon zones and decorations by their actual shapes', () => {
     const base = layoutDocumentSchema.parse(smallTheater.document).snapshot;
     const floorId = base.floors[0]?.id;

@@ -25,6 +25,10 @@ import {
 } from 'react-konva';
 
 import { HallStage } from './HallStage.js';
+import { SeatLabel } from './FurnitureSymbols.js';
+import { seatLevelOfDetail, visibleSeatLabelIds } from './furniture.js';
+import { ObjectRenderer } from './ObjectRenderer.js';
+import { SelectionOverlay } from './SelectionOverlay.js';
 import {
   buildHallScene,
   hitTestHallScene,
@@ -42,6 +46,16 @@ import {
 import { DragPreview } from './interaction/DragPreview.js';
 import { movedTargetKeys } from './interaction/movedTargetKeys.js';
 import { usePointerInteraction } from './interaction/usePointerInteraction.js';
+import {
+  boxSelectedTargets,
+  editHandleGeometry,
+  gridStepForScale,
+  handlesForTarget,
+  hitHandle,
+  shouldStartBoxSelection,
+  snapPoint,
+  snappedMoveDelta,
+} from './directManipulation.js';
 
 export type HallViewerLabels = Readonly<{
   hall: string;
@@ -59,6 +73,7 @@ export type HallViewerLabels = Readonly<{
   floor: string;
   scale: string;
   selected: string;
+  grid?: string;
 }>;
 
 export type HallViewerProps = {
@@ -91,9 +106,16 @@ export type HallViewerProps = {
   ) => void;
   readonly onSelectionChange?: (selection: readonly HallTarget[]) => void;
   readonly onFloorChange?: (floorId: string) => void;
+  readonly onHandleCommit?: (
+    target: HallTarget,
+    handleId: string,
+    worldPoint: Vector2,
+  ) => void;
+  readonly onPointerWorldMove?: (point: Vector2 | null) => void;
+  readonly calibrationGuide?: Readonly<{ first: Vector2; second: Vector2 }>;
 };
 
-type PointerMode = 'pan' | 'pick' | 'edit' | 'create';
+type PointerMode = 'pan' | 'pick' | 'edit' | 'create' | 'box' | 'handle';
 type PointerIntent = {
   mode: PointerMode;
   target: HallTarget | null;
@@ -101,6 +123,7 @@ type PointerIntent = {
   selectionReady: boolean;
   lastScreen: Vector2;
   modifiers: { shift: boolean; ctrl: boolean; meta: boolean };
+  handleId?: string | undefined;
 };
 
 const farZoomTargets = new Set<HallTarget['kind']>(['zone']);
@@ -120,6 +143,7 @@ const defaultLabels: HallViewerLabels = {
   floor: 'Этаж',
   scale: 'Масштаб',
   selected: 'Выбрано',
+  grid: 'Сетка · шаг 1',
 };
 
 export function HallViewer(props: HallViewerProps) {
@@ -143,6 +167,9 @@ export function HallViewer(props: HallViewerProps) {
     onObjectsMove,
     onSelectionChange,
     onFloorChange,
+    onHandleCommit,
+    onPointerWorldMove,
+    calibrationGuide,
   } = props;
   const ui = { ...defaultLabels, ...labels };
   const [floorId, setFloorId] = useState(snapshot.floors[0]?.id ?? '');
@@ -164,6 +191,8 @@ export function HallViewer(props: HallViewerProps) {
   const [localSelection, setLocalSelection] = useState<HallTarget[]>([]);
   const selection = selectedTargets ?? localSelection;
   const [localTool, setLocalTool] = useState<'select' | 'pan'>('select');
+  const [gridEnabled, setGridEnabled] = useState(false);
+  const [hoverTarget, setHoverTarget] = useState<HallTarget | null>(null);
   const tool =
     activeTool === undefined
       ? localTool
@@ -178,7 +207,10 @@ export function HallViewer(props: HallViewerProps) {
     update();
     const observer = new MutationObserver(update);
     for (let node: Element | null = container; node; node = node.parentElement)
-      observer.observe(node, { attributes: true, attributeFilter: ['class', 'style'] });
+      observer.observe(node, {
+        attributes: true,
+        attributeFilter: ['class', 'style'],
+      });
     return () => observer.disconnect();
   }, []);
   const observedWidth = useRef(width);
@@ -188,6 +220,7 @@ export function HallViewer(props: HallViewerProps) {
   const { preview, begin, move, finish, cancel } = usePointerInteraction();
   const [movingKeys, setMovingKeys] = useState<ReadonlySet<string>>(new Set());
   const intentRef = useRef<PointerIntent | null>(null);
+  const [renderIntent, setRenderIntent] = useState<PointerIntent | null>(null);
   const pointersRef = useRef(new Map<number, Vector2>());
   const pinchRef = useRef<{ center: Vector2; distance: number } | null>(null);
   const viewportRef = useRef(viewport);
@@ -208,6 +241,7 @@ export function HallViewer(props: HallViewerProps) {
       cancel();
       setMovingKeys(new Set());
       intentRef.current = null;
+      setRenderIntent(null);
       pinchRef.current = null;
     }
     document.addEventListener('keydown', cancelOnEscape);
@@ -287,8 +321,105 @@ export function HallViewer(props: HallViewerProps) {
     selection.map((target) => `${target.kind}:${target.id}`),
   );
   const editorMode = activeTool !== undefined;
-  const showSeats = editorMode || viewport.scale >= 4;
-  const showLabels = viewport.scale >= 17;
+  const authoringMode = editorMode && activeTool !== 'pick';
+  const handles =
+    editorMode && activeTool === 'select' && onHandleCommit
+      ? selection.flatMap((target) => handlesForTarget(scene, target))
+      : [];
+  const handlePreview =
+    preview?.dragging &&
+    renderIntent?.mode === 'handle' &&
+    renderIntent.target &&
+    renderIntent.handleId
+      ? editHandleGeometry(
+          snapshot,
+          Object.fromEntries(
+            scene.zones.map(({ zone, bounds }) => [zone.id, bounds]),
+          ),
+          renderIntent.target,
+          renderIntent.handleId,
+          snapPoint(screenToWorld(viewport, preview.screen), gridEnabled),
+        )
+      : null;
+  const displayScene = handlePreview
+    ? buildHallScene(
+        handlePreview.snapshot,
+        activeFloorId,
+        handlePreview.zoneBounds,
+        backgroundPages,
+      )
+    : scene;
+  const displayHandles =
+    handlePreview && renderIntent?.target
+      ? handlesForTarget(displayScene, renderIntent.target)
+      : handles;
+  const boxBounds =
+    preview?.dragging && renderIntent?.mode === 'box'
+      ? {
+          minX: Math.min(
+            preview.startWorld.x,
+            screenToWorld(viewport, preview.screen).x,
+          ),
+          minY: Math.min(
+            preview.startWorld.y,
+            screenToWorld(viewport, preview.screen).y,
+          ),
+          maxX: Math.max(
+            preview.startWorld.x,
+            screenToWorld(viewport, preview.screen).x,
+          ),
+          maxY: Math.max(
+            preview.startWorld.y,
+            screenToWorld(viewport, preview.screen).y,
+          ),
+        }
+      : null;
+  const visibleWorld = {
+    minX: -viewport.x / viewport.scale,
+    minY: -viewport.y / viewport.scale,
+    maxX: (width - viewport.x) / viewport.scale,
+    maxY: (height - viewport.y) / viewport.scale,
+  };
+  const gridStep = gridStepForScale(viewport.scale);
+  const gridLines =
+    authoringMode && gridEnabled
+      ? Array.from(
+          {
+            length: Math.min(
+              500,
+              Math.ceil((visibleWorld.maxX - visibleWorld.minX) / gridStep) + 2,
+            ),
+          },
+          (_, index) =>
+            Math.floor(visibleWorld.minX / gridStep) * gridStep +
+            index * gridStep,
+        )
+      : [];
+  const gridRows =
+    authoringMode && gridEnabled
+      ? Array.from(
+          {
+            length: Math.min(
+              500,
+              Math.ceil((visibleWorld.maxY - visibleWorld.minY) / gridStep) + 2,
+            ),
+          },
+          (_, index) =>
+            Math.floor(visibleWorld.minY / gridStep) * gridStep +
+            index * gridStep,
+        )
+      : [];
+  const showSeats =
+    editorMode ||
+    scene.seats.some(
+      (seat) => seatLevelOfDetail(viewport.scale, seat.visualKind) !== 'dot',
+    );
+  const visibleLabels = visibleSeatLabelIds(scene.seats, viewport.scale, {
+    x: viewport.x,
+    y: viewport.y,
+    width,
+    height,
+  });
 
   function handleFit() {
     setViewport(fitViewport(scene.bounds, width, height));
@@ -368,15 +499,41 @@ export function HallViewer(props: HallViewerProps) {
       cancel();
       setMovingKeys(new Set());
       intentRef.current = null;
+      setRenderIntent(null);
       pinchRef.current = pinchGesture();
       return;
     }
-    const target = hitTestHallScene(
+    const world = screenToWorld(viewport, point);
+    const nearbyHandle =
+      authoringMode && activeTool === 'select'
+        ? hitHandle(
+            handles,
+            world,
+            (native.pointerType === 'touch' ? 14 : 8) / viewport.scale,
+          )
+        : null;
+    const exactTarget = hitTestHallScene(
       scene,
-      screenToWorld(viewport, point),
-      3 / viewport.scale,
+      world,
+      0,
       showSeats ? undefined : farZoomTargets,
     );
+    const handle =
+      nearbyHandle &&
+      exactTarget &&
+      `${nearbyHandle.target.kind}:${nearbyHandle.target.id}` !==
+        `${exactTarget.kind}:${exactTarget.id}`
+        ? null
+        : nearbyHandle;
+    const target =
+      exactTarget ??
+      handle?.target ??
+      hitTestHallScene(
+        scene,
+        world,
+        (native.pointerType === 'touch' ? 10 : 3) / viewport.scale,
+        showSeats ? undefined : farZoomTargets,
+      );
     const pan = tool === 'pan' || native.button === 1 || native.altKey;
     const create = activeTool !== undefined && activeTool !== 'select' && !pan;
     const selected = target && selectedKeys.has(`${target.kind}:${target.id}`);
@@ -385,7 +542,14 @@ export function HallViewer(props: HallViewerProps) {
       ctrl: native.ctrlKey,
       meta: native.metaKey,
     };
+    const box =
+      activeTool === 'select' &&
+      !pan &&
+      !handle &&
+      shouldStartBoxSelection(target, Boolean(selected), modifiers.shift);
     const edit =
+      !handle &&
+      !box &&
       !pan &&
       !create &&
       activeTool === 'select' &&
@@ -400,18 +564,45 @@ export function HallViewer(props: HallViewerProps) {
       targets.length > 0 ? movedTargetKeys(snapshot, targets) : new Set(),
     );
     intentRef.current = {
-      mode: pan ? 'pan' : create ? 'create' : edit ? 'edit' : 'pick',
+      mode: pan
+        ? 'pan'
+        : create
+          ? 'create'
+          : handle
+            ? 'handle'
+            : box
+              ? 'box'
+              : edit
+                ? 'edit'
+                : 'pick',
       target,
       targets,
       selectionReady: Boolean(selected),
       lastScreen: point,
       modifiers,
+      handleId: handle?.id,
     };
+    setRenderIntent(intentRef.current);
     begin(native.pointerId, point, viewport);
   }
 
   function handlePointerMove(native: PointerEvent) {
     const point = pointerPoint(native);
+    if (point) onPointerWorldMove?.(screenToWorld(viewportRef.current, point));
+    if (
+      point &&
+      !pointersRef.current.has(native.pointerId) &&
+      editorMode &&
+      activeTool === 'select'
+    ) {
+      setHoverTarget(
+        hitTestHallScene(
+          scene,
+          screenToWorld(viewportRef.current, point),
+          3 / viewportRef.current.scale,
+        ),
+      );
+    }
     if (!point || !pointersRef.current.has(native.pointerId)) return;
     pointersRef.current.set(native.pointerId, point);
     if (pointersRef.current.size > 1) {
@@ -463,25 +654,74 @@ export function HallViewer(props: HallViewerProps) {
       cancel();
       setMovingKeys(new Set());
       intentRef.current = null;
+      setRenderIntent(null);
       return;
     }
     const intent = intentRef.current;
     const result =
       point && finish(native.pointerId, point, viewportRef.current);
     intentRef.current = null;
+    setRenderIntent(null);
     setMovingKeys(new Set());
     if (!point || !intent || !result) return;
+    if (intent.mode === 'handle') {
+      if (result.dragging && intent.target && intent.handleId)
+        onHandleCommit?.(
+          intent.target,
+          intent.handleId,
+          snapPoint(screenToWorld(viewportRef.current, point), gridEnabled),
+        );
+      return;
+    }
+    if (intent.mode === 'box') {
+      if (result.dragging) {
+        const end = screenToWorld(viewportRef.current, point);
+        const bounds = {
+          minX: Math.min(result.startWorld.x, end.x),
+          minY: Math.min(result.startWorld.y, end.y),
+          maxX: Math.max(result.startWorld.x, end.x),
+          maxY: Math.max(result.startWorld.y, end.y),
+        };
+        const picked = boxSelectedTargets(scene, bounds);
+        const additive =
+          intent.modifiers.shift ||
+          intent.modifiers.ctrl ||
+          intent.modifiers.meta;
+        const keys = new Set(
+          selection.map((target) => `${target.kind}:${target.id}`),
+        );
+        handleSelection(
+          additive
+            ? [
+                ...selection,
+                ...picked.filter(
+                  (target) => !keys.has(`${target.kind}:${target.id}`),
+                ),
+              ]
+            : picked,
+        );
+        return;
+      }
+    }
     if (intent.mode === 'edit' && result.dragging) {
       if (!intent.selectionReady && intent.target)
         handleSelection([intent.target]);
-      if (result.delta.x !== 0 || result.delta.y !== 0) {
-        if (onObjectsMove) onObjectsMove(intent.targets, result.delta);
-        else if (intent.target) onObjectMove?.(intent.target, result.delta);
+      const delta = snappedMoveDelta(
+        result.startWorld,
+        result.delta,
+        gridEnabled,
+      );
+      if (delta.x !== 0 || delta.y !== 0) {
+        if (onObjectsMove) onObjectsMove(intent.targets, delta);
+        else if (intent.target) onObjectMove?.(intent.target, delta);
       }
       return;
     }
     if (result.dragging || intent.mode === 'pan') return;
-    const worldPoint = screenToWorld(viewportRef.current, point);
+    const worldPoint = snapPoint(
+      screenToWorld(viewportRef.current, point),
+      gridEnabled && authoringMode,
+    );
     if (intent.mode === 'create') {
       onCanvasClick?.(worldPoint, intent.target);
       return;
@@ -509,10 +749,14 @@ export function HallViewer(props: HallViewerProps) {
     if (!cancel(native.pointerId)) return;
     setMovingKeys(new Set());
     intentRef.current = null;
+    setRenderIntent(null);
     pinchRef.current = null;
   }
 
-  const previewDelta = preview && movingKeys.size > 0 ? preview.delta : null;
+  const previewDelta =
+    preview && movingKeys.size > 0
+      ? snappedMoveDelta(preview.startWorld, preview.delta, gridEnabled)
+      : null;
   function previewNode(key: string, node: ReactNode): ReactNode {
     return previewDelta && movingKeys?.has(key) ? (
       <DragPreview
@@ -622,6 +866,16 @@ export function HallViewer(props: HallViewerProps) {
           {ui.zoomSelection}
         </button>
 
+        {authoringMode && (
+          <button
+            type="button"
+            aria-pressed={gridEnabled}
+            onClick={() => setGridEnabled((current) => !current)}
+          >
+            {ui.grid}
+          </button>
+        )}
+
         <label>
           {ui.zone}{' '}
           <select
@@ -681,6 +935,10 @@ export function HallViewer(props: HallViewerProps) {
         onPointerUp={(event) => handlePointerUp(event.nativeEvent)}
         onPointerCancel={(event) => handlePointerCancel(event.nativeEvent)}
         onLostPointerCapture={(event) => handlePointerCancel(event.nativeEvent)}
+        onPointerLeave={() => {
+          onPointerWorldMove?.(null);
+          setHoverTarget(null);
+        }}
         data-visible-seats={showSeats}
         data-preview-seats={previewSeats.length}
         data-viewport-x={viewport.x}
@@ -700,7 +958,7 @@ export function HallViewer(props: HallViewerProps) {
         >
           <Layer name="base" listening={false}>
             <Group name="background">
-              {scene.backgrounds.map(
+              {displayScene.backgrounds.map(
                 ({
                   background,
                   pageKey,
@@ -724,12 +982,33 @@ export function HallViewer(props: HallViewerProps) {
               )}
             </Group>
 
+            <Group name="grid">
+              {gridLines.map((x) => (
+                <Line
+                  key={`x:${x}`}
+                  points={[x, visibleWorld.minY, x, visibleWorld.maxY]}
+                  stroke={palette.zoneStroke}
+                  strokeWidth={Math.max(0.025, 0.5 / viewport.scale)}
+                  opacity={0.35}
+                />
+              ))}
+              {gridRows.map((y) => (
+                <Line
+                  key={`y:${y}`}
+                  points={[visibleWorld.minX, y, visibleWorld.maxX, y]}
+                  stroke={palette.zoneStroke}
+                  strokeWidth={Math.max(0.025, 0.5 / viewport.scale)}
+                  opacity={0.35}
+                />
+              ))}
+            </Group>
+
             <Group name="static-geometry">
               <Rect
-                x={scene.bounds.minX - 3}
-                y={scene.bounds.minY - 3}
-                width={scene.bounds.maxX - scene.bounds.minX + 6}
-                height={scene.bounds.maxY - scene.bounds.minY + 6}
+                x={displayScene.bounds.minX - 3}
+                y={displayScene.bounds.minY - 3}
+                width={displayScene.bounds.maxX - displayScene.bounds.minX + 6}
+                height={displayScene.bounds.maxY - displayScene.bounds.minY + 6}
                 stroke={palette.zoneStroke}
                 strokeWidth={0.12}
                 cornerRadius={0.8}
@@ -739,7 +1018,7 @@ export function HallViewer(props: HallViewerProps) {
 
           <Layer name="zones" listening={false}>
             <Group name="zone-geometry">
-              {scene.zones.map(({ zone, bounds }) =>
+              {displayScene.zones.map(({ zone, bounds }) =>
                 previewNode(
                   `zone:${zone.id}`,
                   zone.polygon ? (
@@ -769,7 +1048,7 @@ export function HallViewer(props: HallViewerProps) {
                   ),
                 ),
               )}
-              {scene.zones.map(({ zone, bounds }) =>
+              {displayScene.zones.map(({ zone, bounds }) =>
                 previewNode(
                   `zone:${zone.id}`,
                   <Text
@@ -787,7 +1066,7 @@ export function HallViewer(props: HallViewerProps) {
 
           <Layer name="objects" listening={false}>
             <Group name="rows-seats-tables">
-              {scene.decorations.map((decoration) =>
+              {displayScene.decorations.map((decoration) =>
                 previewNode(
                   `decoration:${decoration.id}`,
                   decoration.kind === 'label' ? (
@@ -843,7 +1122,7 @@ export function HallViewer(props: HallViewerProps) {
                 ),
               )}
               {showSeats &&
-                scene.rows.map(({ row, points }) =>
+                displayScene.rows.map(({ row, points }) =>
                   previewNode(
                     `row:${row.id}`,
                     <Line
@@ -855,71 +1134,43 @@ export function HallViewer(props: HallViewerProps) {
                   ),
                 )}
               {showSeats &&
-                scene.tables.map((table) =>
+                displayScene.tables.map((table) =>
                   previewNode(
                     `table:${table.id}`,
-                    table.shape.kind === 'circle' ? (
-                      <Circle
-                        key={table.id}
-                        x={table.center.x}
-                        y={table.center.y}
-                        radius={table.shape.radius}
-                        fill={palette.table}
-                        stroke={palette.row}
-                        strokeWidth={0.14}
-                      />
-                    ) : (
-                      <Rect
-                        key={table.id}
-                        x={table.center.x}
-                        y={table.center.y}
-                        offsetX={table.shape.width / 2}
-                        offsetY={table.shape.height / 2}
-                        width={table.shape.width}
-                        height={table.shape.height}
-                        rotation={(table.rotationRadians * 180) / Math.PI}
-                        fill={palette.table}
-                        stroke={palette.row}
-                        strokeWidth={0.14}
-                      />
-                    ),
+                    <ObjectRenderer
+                      key={table.id}
+                      object={table}
+                      colors={{ fill: palette.table, stroke: palette.row }}
+                      scale={viewport.scale}
+                    />,
                   ),
                 )}
               {showSeats &&
-                scene.seats.map((seat) =>
+                displayScene.seats.map((seat) =>
                   previewNode(
                     `seat:${seat.id}`,
-                    <Circle
+                    <ObjectRenderer
                       key={seat.id}
-                      x={seat.position.x}
-                      y={seat.position.y}
-                      radius={
-                        editorMode ? Math.max(0.65, 4 / viewport.scale) : 0.65
-                      }
-                      fill={seatAppearance?.[seat.id]?.fill ?? palette.seat}
-                      stroke={
-                        seatAppearance?.[seat.id]?.stroke ?? palette.seatStroke
-                      }
-                      strokeWidth={0.11}
+                      object={seat}
+                      colors={{
+                        fill: seatAppearance?.[seat.id]?.fill ?? palette.seat,
+                        stroke:
+                          seatAppearance?.[seat.id]?.stroke ??
+                          palette.seatStroke,
+                      }}
+                      scale={viewport.scale}
                     />,
                   ),
                 )}
-              {showLabels &&
-                scene.seats.map((seat) =>
-                  previewNode(
-                    `seat:${seat.id}`,
-                    <Text
-                      key={`label:${seat.id}`}
-                      x={seat.position.x - 1}
-                      y={seat.position.y - 0.28}
-                      width={2}
-                      align="center"
-                      text={seat.label}
-                      fill="white"
-                      fontSize={0.52}
-                    />,
-                  ),
-                )}
+              {showSeats &&
+                displayScene.seats
+                  .filter((seat) => visibleLabels.has(seat.id))
+                  .map((seat) =>
+                    previewNode(
+                      `seat:${seat.id}`,
+                      <SeatLabel key={`label:${seat.id}`} seat={seat} />,
+                    ),
+                  )}
             </Group>
           </Layer>
 
@@ -943,20 +1194,15 @@ export function HallViewer(props: HallViewerProps) {
 
             <Group name="selection">
               {selection.flatMap((target) => {
-                const bounds = targetBounds(scene, target);
+                const bounds = targetBounds(displayScene, target);
                 return bounds
                   ? [
                       previewNode(
                         `${target.kind}:${target.id}`,
-                        <Rect
+                        <SelectionOverlay
                           key={`${target.kind}:${target.id}`}
-                          x={bounds.minX - 0.2}
-                          y={bounds.minY - 0.2}
-                          width={bounds.maxX - bounds.minX + 0.4}
-                          height={bounds.maxY - bounds.minY + 0.4}
-                          stroke={palette.selected}
-                          strokeWidth={0.2}
-                          cornerRadius={0.3}
+                          bounds={bounds}
+                          color={palette.selected}
                         />,
                       ),
                     ]
@@ -964,7 +1210,89 @@ export function HallViewer(props: HallViewerProps) {
               })}
             </Group>
 
-            <Group name="guides" />
+            <Group name="guides">
+              {hoverTarget &&
+                !selectedKeys.has(`${hoverTarget.kind}:${hoverTarget.id}`) &&
+                (() => {
+                  const bounds = targetBounds(displayScene, hoverTarget);
+                  return bounds ? (
+                    <SelectionOverlay bounds={bounds} color={palette.row} />
+                  ) : null;
+                })()}
+              {boxBounds && (
+                <Rect
+                  x={boxBounds.minX}
+                  y={boxBounds.minY}
+                  width={boxBounds.maxX - boxBounds.minX}
+                  height={boxBounds.maxY - boxBounds.minY}
+                  fill={palette.selected}
+                  opacity={0.12}
+                  stroke={palette.selected}
+                  strokeWidth={0.12}
+                />
+              )}
+              {displayHandles.map((handle) => (
+                <Circle
+                  key={`${handle.target.kind}:${handle.target.id}:${handle.id}`}
+                  x={handle.point.x}
+                  y={handle.point.y}
+                  radius={Math.max(0.15, 6 / viewport.scale)}
+                  fill={palette.selected}
+                  stroke={palette.ink}
+                  strokeWidth={Math.max(0.06, 1 / viewport.scale)}
+                />
+              ))}
+              {calibrationGuide && (
+                <Line
+                  points={[
+                    calibrationGuide.first.x,
+                    calibrationGuide.first.y,
+                    calibrationGuide.second.x,
+                    calibrationGuide.second.y,
+                  ]}
+                  stroke={palette.selected}
+                  strokeWidth={Math.max(0.1, 2 / viewport.scale)}
+                  dash={[0.4, 0.3]}
+                />
+              )}
+              {gridEnabled &&
+                preview?.dragging &&
+                (renderIntent?.mode === 'edit' ||
+                  renderIntent?.mode === 'handle' ||
+                  renderIntent?.mode === 'create') &&
+                (() => {
+                  const point = snapPoint(
+                    screenToWorld(viewport, preview.screen),
+                    true,
+                  );
+                  return (
+                    <Group>
+                      <Line
+                        points={[
+                          point.x,
+                          visibleWorld.minY,
+                          point.x,
+                          visibleWorld.maxY,
+                        ]}
+                        stroke={palette.selected}
+                        strokeWidth={0.06}
+                        dash={[0.3, 0.2]}
+                      />
+                      <Line
+                        points={[
+                          visibleWorld.minX,
+                          point.y,
+                          visibleWorld.maxX,
+                          point.y,
+                        ]}
+                        stroke={palette.selected}
+                        strokeWidth={0.06}
+                        dash={[0.3, 0.2]}
+                      />
+                    </Group>
+                  );
+                })()}
+            </Group>
           </Layer>
         </HallStage>
       </div>

@@ -141,6 +141,7 @@ const englishViewerLabels: HallViewerLabels = {
   floor: 'Floor',
   scale: 'Zoom',
   selected: 'Selected',
+  grid: 'Grid',
 };
 
 function formatPrice(price: SeatPrice, locale: string): string {

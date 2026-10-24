@@ -7,12 +7,164 @@ import {
   undoEditor,
 } from './editorCommands.js';
 import {
+  alignTargets,
   createObjectAt,
+  createStarterTemplate,
   deleteTarget,
   deleteTargets,
+  distributeTargets,
+  duplicateTargets,
+  selectionCenterValue,
+  setSelectionCenter,
   moveTarget,
   moveTargets,
 } from './editorOperations.js';
+
+describe('layout actions', () => {
+  it('aligns selected seats in one undoable command', () => {
+    let state = createEditorState(createEmptyDraft('Alignment'));
+    const targets = [
+      { x: 2, y: 1 },
+      { x: 7, y: 4 },
+      { x: 12, y: 8 },
+    ].map((point) => {
+      const created = createObjectAt(state.draft, 'seat', point);
+      state = applyEditorCommand(state, created.command);
+      return created.target;
+    });
+    const before = state.past.length;
+    state = applyEditorCommand(
+      state,
+      alignTargets(state.draft, targets, 'top'),
+    );
+    expect(state.draft.snapshot.seats.map((seat) => seat.position.y)).toEqual([
+      1, 1, 1,
+    ]);
+    expect(state.past).toHaveLength(before + 1);
+    expect(
+      undoEditor(state).draft.snapshot.seats.map((seat) => seat.position.y),
+    ).toEqual([1, 4, 8]);
+  });
+
+  it('distributes selected seats evenly between outer centers', () => {
+    let state = createEditorState(createEmptyDraft('Distribution'));
+    const targets = [0, 2, 12].map((x) => {
+      const created = createObjectAt(state.draft, 'seat', { x, y: 0 });
+      state = applyEditorCommand(state, created.command);
+      return created.target;
+    });
+    state = applyEditorCommand(
+      state,
+      distributeTargets(state.draft, targets, 'horizontal'),
+    );
+    expect(state.draft.snapshot.seats.map((seat) => seat.position.x)).toEqual([
+      0, 6, 12,
+    ]);
+  });
+
+  it('duplicates a row with its seats as one undoable selection', () => {
+    let state = createEditorState(createEmptyDraft('Duplication'));
+    const row = createObjectAt(state.draft, 'row-line', { x: 5, y: 5 });
+    state = applyEditorCommand(state, row.command);
+    const originalCount = state.draft.snapshot.seats.length;
+    const copied = duplicateTargets(state.draft, [row.target], { x: 3, y: 2 });
+    state = applyEditorCommand(state, copied.command);
+    expect(state.draft.snapshot.rows).toHaveLength(2);
+    expect(state.draft.snapshot.seats).toHaveLength(originalCount * 2);
+    expect(copied.targets).toHaveLength(1);
+    expect(copied.targets[0]?.id).not.toBe(row.target.id);
+    const newRow = state.draft.snapshot.rows[1];
+    expect(newRow?.curve.kind).toBe('line');
+    if (newRow?.curve.kind === 'line')
+      expect(newRow.curve.start).toEqual({ x: 4, y: 7 });
+    expect(undoEditor(state).draft.snapshot.rows).toHaveLength(1);
+  });
+
+  it('duplicates a selected zone with dependent furniture once', () => {
+    let state = createEditorState(createEmptyDraft('Zone copy'));
+    const zone = createObjectAt(state.draft, 'zone', { x: 0, y: 0 });
+    state = applyEditorCommand(state, zone.command);
+    const row = createObjectAt(
+      state.draft,
+      'row-line',
+      { x: 0, y: 0 },
+      zone.target.id,
+    );
+    state = applyEditorCommand(state, row.command);
+    const table = createObjectAt(
+      state.draft,
+      'table-circle',
+      { x: 0, y: 3 },
+      zone.target.id,
+    );
+    state = applyEditorCommand(state, table.command);
+    const oldSeatCount = state.draft.snapshot.seats.length;
+    const copied = duplicateTargets(
+      state.draft,
+      [zone.target, row.target, table.target],
+      { x: 20, y: 0 },
+    );
+    state = applyEditorCommand(state, copied.command);
+    expect(state.draft.snapshot.zones).toHaveLength(2);
+    expect(state.draft.snapshot.rows).toHaveLength(2);
+    expect(state.draft.snapshot.tables).toHaveLength(2);
+    expect(state.draft.snapshot.seats).toHaveLength(oldSeatCount * 2);
+    expect(
+      new Set(state.draft.snapshot.seats.map((seat) => seat.id)).size,
+    ).toBe(oldSeatCount * 2);
+    expect(copied.targets).toHaveLength(1);
+  });
+
+  it('pastes copied furniture onto the active floor without a stale zone reference', () => {
+    let state = createEditorState(createEmptyDraft('Two floors'));
+    const zone = createObjectAt(state.draft, 'zone', { x: 0, y: 0 });
+    state = applyEditorCommand(state, zone.command);
+    const seat = createObjectAt(state.draft, 'seat', { x: 1, y: 2 }, zone.target.id);
+    state = applyEditorCommand(state, seat.command);
+    const source = state.draft;
+    const secondFloor = floorIdSchema.parse('floor-upper');
+    state = createEditorState({ ...state.draft, snapshot: { ...state.draft.snapshot, floors: [
+      ...state.draft.snapshot.floors,
+      { id: secondFloor, layoutVersionId: state.draft.snapshot.layoutVersionId, name: 'Балкон' },
+    ] } });
+    const copied = duplicateTargets(source, [seat.target], { x: 2, y: 2 }, secondFloor);
+    state = applyEditorCommand(state, copied.command);
+    expect(state.draft.snapshot.seats[1]?.floorId).toBe(secondFloor);
+    expect(state.draft.snapshot.seats[1]?.zoneId).toBeUndefined();
+  });
+
+  it('shows mixed coordinate and sets all selected centers in one command', () => {
+    let state = createEditorState(createEmptyDraft('Mixed'));
+    const targets = [1, 4].map((x) => {
+      const created = createObjectAt(state.draft, 'seat', { x, y: 2 });
+      state = applyEditorCommand(state, created.command);
+      return created.target;
+    });
+    expect(selectionCenterValue(state.draft, targets, 'x')).toBeNull();
+    expect(selectionCenterValue(state.draft, targets, 'y')).toBe(2);
+    const before = state.past.length;
+    state = applyEditorCommand(
+      state,
+      setSelectionCenter(state.draft, targets, 'x', 10),
+    );
+    expect(state.draft.snapshot.seats.map((seat) => seat.position.x)).toEqual([
+      10, 10,
+    ]);
+    expect(state.past).toHaveLength(before + 1);
+  });
+
+  it('starts a hall with stage, row, and table in one undoable action', () => {
+    let state = createEditorState(createEmptyDraft('Start'));
+    const template = createStarterTemplate(state.draft);
+    state = applyEditorCommand(state, template.command);
+    expect(
+      state.draft.snapshot.decorations.some((item) => item.kind === 'stage'),
+    ).toBe(true);
+    expect(state.draft.snapshot.rows).toHaveLength(1);
+    expect(state.draft.snapshot.tables).toHaveLength(1);
+    expect(undoEditor(state).draft.snapshot.rows).toHaveLength(0);
+  });
+});
 
 describe('editor tools', () => {
   it('creates a straight row with seats in one command (A03)', () => {
@@ -212,6 +364,22 @@ describe('editor tools', () => {
       x: 10,
       y: 10,
     });
+  });
+
+  it('does not add a generated-seat offset when the seat precedes its parent in selection', () => {
+    let state = createEditorState(createEmptyDraft('Move group'));
+    const row = createObjectAt(state.draft, 'row-line', { x: 0, y: 0 });
+    state = applyEditorCommand(state, row.command);
+    const seat = state.draft.snapshot.seats[0];
+    if (!seat) throw new Error('Missing generated seat');
+    const originalX = seat.position.x;
+    state = applyEditorCommand(state, moveTargets(state.draft, [
+      { kind: 'seat', id: seat.id }, row.target,
+    ], { x: 3, y: 0 }));
+    expect(state.draft.snapshot.seats[0]?.position.x).toBeCloseTo(originalX + 3);
+    expect(state.draft.snapshot.seats[0]?.manual?.offset.x ?? 0).toBe(0);
+    state = applyEditorCommand(state, moveTarget(state.draft, row.target, { x: 0, y: 0 }));
+    expect(state.draft.snapshot.seats[0]?.position.x).toBeCloseTo(originalX + 3);
   });
 
   it('deletes an entire multiselection once and undo restores it', () => {

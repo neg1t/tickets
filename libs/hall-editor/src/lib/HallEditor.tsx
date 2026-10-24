@@ -2,6 +2,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useRef,
   useState,
   type KeyboardEvent,
 } from 'react';
@@ -31,12 +32,21 @@ import {
   TableGenerationControls,
 } from './ui/GenerationControls.js';
 import { ToolsPanel, editorTools } from './ui/ToolsPanel.js';
+import { PropertiesPanel, PropertyField } from './ui/PropertiesPanel.js';
+import { LayersPanel } from './ui/LayersPanel.js';
 import { toggleEditorPanel, type EditorPanel } from './ui/editorPanels.js';
 import { useCanvasHeight } from './ui/useCanvasHeight.js';
 import {
+  alignTargets,
   createObjectAt,
+  createStarterTemplate,
   deleteTargets,
+  distributeTargets,
+  duplicateTargets,
   moveTargets,
+  selectionCenterValue,
+  setSelectionCenter,
+  type EditorTool,
 } from './editorOperations.js';
 import { preserveSeatManualAdjustment } from './commands/regenerateSeats.js';
 import {
@@ -46,6 +56,7 @@ import {
 } from './commands/structureOperations.js';
 import { validateLayout } from './validation/validateLayout.js';
 import { transformRow, transformTable } from './commands/transformSelection.js';
+import { editHandle } from './commands/handleOperations.js';
 
 export type EditorChangeMeta = Readonly<{
   kind: EditorCommand['kind'] | 'undo' | 'redo';
@@ -67,46 +78,6 @@ export type HallEditorProps = {
   readonly publishedSeatIds?: readonly Seat['id'][];
 };
 
-type PropertyFieldProps = {
-  readonly label: string;
-  readonly value: string | number;
-  readonly disabled?: boolean;
-  readonly onCommit: (value: string | number) => void;
-};
-
-function PropertyField(props: PropertyFieldProps) {
-  const { label, value, disabled, onCommit } = props;
-  return (
-    <label className="hall-editor-field">
-      <span>{label}</span>
-      <input
-        key={`${label}:${value}`}
-        aria-label={label}
-        type={typeof value === 'number' ? 'number' : 'text'}
-        step={typeof value === 'number' ? '0.1' : undefined}
-        defaultValue={value}
-        disabled={disabled}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') event.currentTarget.blur();
-        }}
-        onBlur={(event) => {
-          const next =
-            typeof value === 'number'
-              ? Number(event.currentTarget.value)
-              : event.currentTarget.value.trim();
-          if (
-            next === value ||
-            (typeof next === 'number' && !Number.isFinite(next)) ||
-            next === ''
-          )
-            return;
-          onCommit(next);
-        }}
-      />
-    </label>
-  );
-}
-
 export function HallEditor(props: HallEditorProps) {
   const {
     value,
@@ -119,6 +90,13 @@ export function HallEditor(props: HallEditorProps) {
     publishedSeatIds = [],
   } = props;
   const [model] = useState(() => createEditorModel(value));
+  const clipboardRef = useRef<{
+    draft: HallLayoutDraft;
+    targets: readonly HallTarget[];
+    pasteCount: number;
+  } | null>(null);
+  const [hasClipboard, setHasClipboard] = useState(false);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
   const [mobilePanel, setMobilePanel] = useState<EditorPanel | null>(null);
   const { setElement: setCanvasElement, height: canvasHeight } =
     useCanvasHeight();
@@ -126,6 +104,9 @@ export function HallEditor(props: HallEditorProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [knownMillimeters, setKnownMillimeters] = useState(1000);
   const [calibrationFirst, setCalibrationFirst] = useState<Vector2 | null>(
+    null,
+  );
+  const [calibrationHover, setCalibrationHover] = useState<Vector2 | null>(
     null,
   );
   const [importingPdf, setImportingPdf] = useState(false);
@@ -175,6 +156,25 @@ export function HallEditor(props: HallEditorProps) {
     const failure = error instanceof Error ? error : new Error(String(error));
     setErrorMessage(failure.message);
     onError?.(failure);
+  }
+
+  function clearCalibration() {
+    setCalibrationFirst(null);
+    setCalibrationHover(null);
+  }
+
+  function selectTool(next: EditorTool) {
+    if (next !== tool) clearCalibration();
+    model.toolChanged(next);
+    setMobilePanel(null);
+  }
+
+  function selectFloor(nextFloorId: string) {
+    setFloorId(nextFloorId);
+    model.selectionChanged([]);
+    model.zoneChanged('');
+    model.backgroundChanged('');
+    clearCalibration();
   }
 
   function commit(
@@ -266,6 +266,7 @@ export function HallEditor(props: HallEditorProps) {
           )
         ) {
           setCalibrationFirst(null);
+          setCalibrationHover(null);
           model.toolChanged('select');
         }
         return;
@@ -295,9 +296,40 @@ export function HallEditor(props: HallEditorProps) {
     );
   }
 
+  function handleEmptyAction(
+    action: 'template' | 'row-line' | 'table-circle' | 'pdf',
+  ) {
+    if (readonly) return;
+    if (action === 'pdf') {
+      pdfInputRef.current?.click();
+      return;
+    }
+    try {
+      const created =
+        action === 'template'
+          ? createStarterTemplate(draft, activeFloorId)
+          : createObjectAt(
+              draft,
+              action,
+              { x: 0, y: 0 },
+              zoneId || undefined,
+              activeFloorId,
+              publishedSeatIds,
+            );
+      if (commit(created.command, created.target)) {
+        model.selectionChanged([created.target]);
+        model.toolChanged('select');
+      }
+    } catch (error) {
+      report(error);
+    }
+  }
+
   async function handlePdfImport(file: File, replace?: Background) {
     if (readonly) return;
     if (replace?.locked) return;
+    const startingSnapshotId = model.$state.getState().draft.snapshot.id;
+    const importFloorId = activeFloorId;
     if (file.size > 20 * 1024 * 1024) {
       report(new RangeError('PDF должен быть не больше 20 МБ'));
       return;
@@ -313,8 +345,28 @@ export function HallEditor(props: HallEditorProps) {
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const pages = await inspectPdfBytes(bytes);
-      const assetId = replace?.source.assetId ?? `asset-${crypto.randomUUID()}`;
-      const beforeAsset = draft.assets[assetId] ?? null;
+      const currentDraft = model.$state.getState().draft;
+      if (currentDraft.snapshot.id !== startingSnapshotId)
+        throw new Error(
+          'План изменился во время загрузки PDF. Повторите импорт.',
+        );
+      const currentBackground = replace
+        ? currentDraft.snapshot.backgrounds.find(
+            (item) => item.id === replace.id,
+          )
+        : null;
+      if (replace && (!currentBackground || currentBackground.locked))
+        throw new Error('Подложка недоступна или заблокирована');
+      if (
+        !replace &&
+        !currentDraft.snapshot.floors.some(
+          (floor) => floor.id === importFloorId,
+        )
+      )
+        throw new Error('Этаж для PDF больше не существует');
+      const assetId =
+        currentBackground?.source.assetId ?? `asset-${crypto.randomUUID()}`;
+      const beforeAsset = currentDraft.assets[assetId] ?? null;
       const asset = {
         kind: 'pdf' as const,
         name: file.name,
@@ -324,15 +376,15 @@ export function HallEditor(props: HallEditorProps) {
       const firstPage = pages[0];
       if (!firstPage) throw new Error('PDF не содержит страниц');
       const scale = Math.min(1, 20 / firstPage.width);
-      const nextBackground = replace
+      const nextBackground = currentBackground
         ? backgroundSchema.parse({
-            ...replace,
+            ...currentBackground,
             source: { kind: 'pdf', assetId, pageNumber: 1 },
           })
         : backgroundSchema.parse({
             id: backgroundIdSchema.parse(`background-${crypto.randomUUID()}`),
-            floorId: activeFloorId,
-            order: draft.snapshot.backgrounds.length,
+            floorId: importFloorId,
+            order: currentDraft.snapshot.backgrounds.length,
             position: {
               x: (-firstPage.width * scale) / 2,
               y: (-firstPage.height * scale) / 2,
@@ -354,11 +406,13 @@ export function HallEditor(props: HallEditorProps) {
         {
           collection: 'backgrounds',
           id: nextBackground.id,
-          before: replace ?? null,
+          before: currentBackground ?? null,
           after: nextBackground,
         },
       ];
-      if (commit({ kind: replace ? 'update' : 'create', patches }, null)) {
+      if (
+        commit({ kind: currentBackground ? 'update' : 'create', patches }, null)
+      ) {
         model.backgroundChanged(nextBackground.id);
         model.selectionChanged([]);
         model.toolChanged('select');
@@ -422,10 +476,44 @@ export function HallEditor(props: HallEditorProps) {
       model.zoneChanged('');
   }
 
+  function handleDuplicate(
+    source = draft,
+    targets: readonly HallTarget[] = selection,
+    offset = 2,
+  ) {
+    if (readonly || targets.length === 0) return;
+    try {
+      const duplicated = duplicateTargets(
+        source,
+        targets,
+        { x: offset, y: offset },
+        activeFloorId,
+      );
+      if (commit(duplicated.command, duplicated.targets[0] ?? null))
+        model.selectionChanged(duplicated.targets);
+    } catch (error) {
+      report(error);
+    }
+  }
+
+  function handleCopy() {
+    if (selection.length === 0) return;
+    clipboardRef.current = { draft, targets: [...selection], pasteCount: 0 };
+    setHasClipboard(true);
+  }
+
+  function handlePaste() {
+    const copied = clipboardRef.current;
+    if (!copied) return;
+    copied.pasteCount += 1;
+    handleDuplicate(copied.draft, copied.targets, 2 * copied.pasteCount);
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.key === 'Escape') {
       setMobilePanel(null);
       if (tool !== 'select') model.toolChanged('select');
+      clearCalibration();
     }
     if (
       event.target instanceof HTMLInputElement ||
@@ -442,6 +530,24 @@ export function HallEditor(props: HallEditorProps) {
     ) {
       event.preventDefault();
       handleRedo();
+    } else if (
+      (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === 'd'
+    ) {
+      event.preventDefault();
+      handleDuplicate();
+    } else if (
+      (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === 'c'
+    ) {
+      event.preventDefault();
+      handleCopy();
+    } else if (
+      (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === 'v'
+    ) {
+      event.preventDefault();
+      handlePaste();
     } else if (event.key === 'Delete') {
       handleDelete();
     }
@@ -547,6 +653,10 @@ export function HallEditor(props: HallEditorProps) {
   const lineCurve = row?.curve.kind === 'line' ? row.curve : null;
   const arcCurve = row?.curve.kind === 'arc' ? row.curve : null;
   const bezierCurve = row?.curve.kind === 'bezier' ? row.curve : null;
+  const mixedCenterX =
+    selection.length > 1 ? selectionCenterValue(draft, selection, 'x') : null;
+  const mixedCenterY =
+    selection.length > 1 ? selectionCenterValue(draft, selection, 'y') : null;
 
   return (
     <section
@@ -610,28 +720,12 @@ export function HallEditor(props: HallEditorProps) {
         <ToolsPanel
           activeTool={tool}
           readonly={readonly}
-          onSelect={(next) => {
-            model.toolChanged(next);
-            setMobilePanel(null);
-          }}
+          onSelect={selectTool}
         />
-        <aside
-          className="hall-editor-tools"
-          aria-label="Структура и настройки"
-          data-mobile-open={mobilePanel === 'layers' || mobilePanel === 'tools'}
-          data-mobile-panel={mobilePanel ?? ''}
+        <LayersPanel
+          mobilePanel={mobilePanel}
+          onClose={() => setMobilePanel(null)}
         >
-          <div className="hall-editor-panel-heading">
-            <h3>{mobilePanel === 'tools' ? 'Инструменты' : 'Структура'}</h3>
-            <button
-              type="button"
-              className="hall-editor-panel-close"
-              aria-label="Закрыть панель"
-              onClick={() => setMobilePanel(null)}
-            >
-              ×
-            </button>
-          </div>
           {mobilePanel === 'tools' && (
             <div className="hall-editor-mobile-tools">
               {editorTools.map((item) => (
@@ -639,10 +733,11 @@ export function HallEditor(props: HallEditorProps) {
                   key={item.id}
                   type="button"
                   aria-pressed={tool === item.id}
-                  disabled={readonly && item.id !== 'select' && item.id !== 'pan'}
+                  disabled={
+                    readonly && item.id !== 'select' && item.id !== 'pan'
+                  }
                   onClick={() => {
-                    model.toolChanged(item.id);
-                    setMobilePanel(null);
+                    selectTool(item.id);
                   }}
                 >
                   {item.label}
@@ -656,11 +751,7 @@ export function HallEditor(props: HallEditorProps) {
             <select
               aria-label="Активный этаж"
               value={activeFloorId}
-              onChange={(event) => {
-                setFloorId(event.target.value);
-                model.selectionChanged([]);
-                model.zoneChanged('');
-              }}
+              onChange={(event) => selectFloor(event.target.value)}
             >
               {draft.snapshot.floors.map((floor) => (
                 <option key={floor.id} value={floor.id}>
@@ -741,6 +832,7 @@ export function HallEditor(props: HallEditorProps) {
           <label className="hall-editor-file-field">
             Загрузить PDF
             <input
+              ref={pdfInputRef}
               aria-label="Загрузить PDF"
               type="file"
               accept="application/pdf,.pdf"
@@ -769,40 +861,47 @@ export function HallEditor(props: HallEditorProps) {
                   }}
                 >
                   {asset
-                    ? `${asset.name} · ${asset.pages.length} ${asset.pages.length === 1 ? 'страница' : 'страницы'}`
+                    ? `${item.locked ? '🔒 ' : ''}${asset.name} · ${asset.pages.length} ${asset.pages.length === 1 ? 'страница' : 'страницы'}`
                     : item.id}
                 </button>
               );
             })}
 
           <h3>Калибровка</h3>
-          <label className="hall-editor-field">
-            Известное расстояние (мм)
-            <input
-              aria-label="Известное расстояние (мм)"
-              type="number"
-              min="0.1"
-              step="0.1"
-              value={knownMillimeters}
-              disabled={readonly}
-              onChange={(event) =>
-                setKnownMillimeters(Number(event.target.value))
-              }
-            />
-          </label>
+          <PropertyField
+            label="Известное расстояние (мм)"
+            value={knownMillimeters}
+            unit="мм"
+            min={0.1}
+            disabled={readonly}
+            onCommit={(value) => setKnownMillimeters(Number(value))}
+          />
           <p>
             {draft.calibration
               ? `Калибровка: ${draft.calibration.millimetersPerWorldUnit.toFixed(3)} мм/ед`
               : 'Калибровка отсутствует'}
           </p>
           {tool === 'calibrate' && (
-            <p>
-              {calibrationFirst
-                ? 'Выберите вторую точку на схеме'
-                : 'Выберите первую точку на схеме'}
-            </p>
+            <div className="hall-editor-calibration-help" role="status">
+              <strong>{calibrationFirst ? 'Шаг 2 из 2' : 'Шаг 1 из 2'}</strong>
+              <p>
+                {calibrationFirst
+                  ? 'Выберите вторую точку на известном расстоянии.'
+                  : 'Выберите первую точку на PDF или схеме.'}
+              </p>
+              {calibrationFirst && calibrationHover && (
+                <p>
+                  Предпросмотр:{' '}
+                  {Math.hypot(
+                    calibrationHover.x - calibrationFirst.x,
+                    calibrationHover.y - calibrationFirst.y,
+                  ).toFixed(2)}{' '}
+                  ед. = {knownMillimeters} мм
+                </p>
+              )}
+            </div>
           )}
-        </aside>
+        </LayersPanel>
 
         <div className="hall-editor-canvas" ref={setCanvasElement}>
           <PdfHallViewer
@@ -813,37 +912,106 @@ export function HallEditor(props: HallEditorProps) {
             onError={report}
             activeTool={tool}
             selectedTargets={selection}
+            {...(calibrationFirst && calibrationHover
+              ? {
+                  calibrationGuide: {
+                    first: calibrationFirst,
+                    second: calibrationHover,
+                  },
+                }
+              : {})}
+            onPointerWorldMove={(point) => {
+              if (tool === 'calibrate') setCalibrationHover(point);
+            }}
+            {...(!readonly
+              ? {
+                  onHandleCommit: (
+                    handled: HallTarget,
+                    handleId: string,
+                    point: Vector2,
+                  ) => {
+                    commit(
+                      editHandle(
+                        draft,
+                        handled,
+                        handleId,
+                        point,
+                        publishedSeatIds,
+                      ),
+                      handled,
+                    );
+                  },
+                }
+              : {})}
             onCanvasClick={handleCanvasClick}
             {...(!readonly ? { onObjectsMove: handleMove } : {})}
             onSelectionChange={(next) => {
               model.selectionChanged(next);
               if (next.length > 0) model.backgroundChanged('');
             }}
-            onFloorChange={(nextFloorId) => {
-              setFloorId(nextFloorId);
-              model.selectionChanged([]);
-              model.zoneChanged('');
-              model.backgroundChanged('');
-            }}
+            onFloorChange={selectFloor}
           />
+          {!readonly &&
+            tool === 'select' &&
+            !draft.snapshot.rows.some(
+              (item) => item.floorId === activeFloorId,
+            ) &&
+            !draft.snapshot.tables.some(
+              (item) => item.floorId === activeFloorId,
+            ) &&
+            !draft.snapshot.seats.some(
+              (item) => item.floorId === activeFloorId,
+            ) &&
+            !draft.snapshot.decorations.some(
+              (item) => item.floorId === activeFloorId,
+            ) &&
+            !draft.snapshot.zones.some(
+              (item) => item.floorId === activeFloorId,
+            ) &&
+            !draft.snapshot.backgrounds.some(
+              (item) => item.floorId === activeFloorId,
+            ) && (
+              <div className="hall-editor-empty-start">
+                <div>
+                  <strong>Начните схему зала</strong>
+                  <p>
+                    Выберите основу, затем двигайте объекты прямо на холсте.
+                  </p>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => handleEmptyAction('template')}
+                    >
+                      Готовый шаблон
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleEmptyAction('row-line')}
+                    >
+                      Добавить ряд
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleEmptyAction('table-circle')}
+                    >
+                      Добавить стол
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleEmptyAction('pdf')}
+                    >
+                      Импортировать PDF
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
         </div>
 
-        <aside
-          className="hall-editor-properties"
-          aria-label="Свойства объекта"
-          data-mobile-open={mobilePanel === 'properties'}
+        <PropertiesPanel
+          mobileOpen={mobilePanel === 'properties'}
+          onClose={() => setMobilePanel(null)}
         >
-          <div className="hall-editor-panel-heading">
-            <h3>Свойства</h3>
-            <button
-              type="button"
-              className="hall-editor-panel-close"
-              aria-label="Закрыть панель"
-              onClick={() => setMobilePanel(null)}
-            >
-              ×
-            </button>
-          </div>
           {(target || background) && (
             <p className="hall-editor-selection-path">
               {target ? `${target.kind} · ${target.id}` : 'PDF-подложка'}
@@ -851,6 +1019,142 @@ export function HallEditor(props: HallEditorProps) {
           )}
           {!target && !background && (
             <p>Выберите объект на схеме или подложку в списке.</p>
+          )}
+          {(selection.length > 0 || hasClipboard) && !readonly && (
+            <div
+              className="hall-editor-layout-actions"
+              aria-label="Операции с выделением"
+            >
+              {selection.length > 0 && (
+                <>
+                  <button type="button" onClick={() => handleDuplicate()}>
+                    Дублировать
+                  </button>
+                  <button type="button" onClick={handleCopy}>
+                    Копировать
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                disabled={!hasClipboard}
+                onClick={handlePaste}
+              >
+                Вставить
+              </button>
+              {selection.length > 1 && (
+                <>
+                  {(
+                    [
+                      ['left', 'По левому краю'],
+                      ['center', 'По центру X'],
+                      ['right', 'По правому краю'],
+                      ['top', 'По верхнему краю'],
+                      ['middle', 'По центру Y'],
+                      ['bottom', 'По нижнему краю'],
+                    ] as const
+                  ).map(([edge, label]) => (
+                    <button
+                      key={edge}
+                      type="button"
+                      onClick={() =>
+                        commit(
+                          alignTargets(
+                            draft,
+                            selection,
+                            edge,
+                            publishedSeatIds,
+                          ),
+                        )
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </>
+              )}
+              {selection.length > 2 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      commit(
+                        distributeTargets(
+                          draft,
+                          selection,
+                          'horizontal',
+                          publishedSeatIds,
+                        ),
+                      )
+                    }
+                  >
+                    Распределить X
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      commit(
+                        distributeTargets(
+                          draft,
+                          selection,
+                          'vertical',
+                          publishedSeatIds,
+                        ),
+                      )
+                    }
+                  >
+                    Распределить Y
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+          {selection.length > 1 && (
+            <div className="hall-editor-mixed-properties">
+              <h4>Общие координаты · {selection.length} объекта</h4>
+              <PropertyField
+                label="Центр X"
+                kind="number"
+                value={
+                  mixedCenterX === null
+                    ? null
+                    : Math.round(mixedCenterX * 1000) / 1000
+                }
+                disabled={readonly}
+                onCommit={(value) =>
+                  commit(
+                    setSelectionCenter(
+                      draft,
+                      selection,
+                      'x',
+                      Number(value),
+                      publishedSeatIds,
+                    ),
+                  )
+                }
+              />
+              <PropertyField
+                label="Центр Y"
+                kind="number"
+                value={
+                  mixedCenterY === null
+                    ? null
+                    : Math.round(mixedCenterY * 1000) / 1000
+                }
+                disabled={readonly}
+                onCommit={(value) =>
+                  commit(
+                    setSelectionCenter(
+                      draft,
+                      selection,
+                      'y',
+                      Number(value),
+                      publishedSeatIds,
+                    ),
+                  )
+                }
+              />
+            </div>
           )}
           {zone && (
             <>
@@ -880,6 +1184,8 @@ export function HallEditor(props: HallEditorProps) {
                   label="Вместимость GA"
                   value={zone.capacity ?? 20}
                   disabled={readonly}
+                  min={1}
+                  integer
                   onCommit={(capacity) =>
                     updateZone(zone, { ...zone, capacity: Number(capacity) })
                   }
@@ -1115,6 +1421,26 @@ export function HallEditor(props: HallEditorProps) {
           {seat && (
             <>
               <h4>Место</h4>
+              <label className="hall-editor-field">
+                Тип места
+                <select
+                  aria-label="Тип места"
+                  value={seat.visualKind ?? 'chair'}
+                  disabled={readonly}
+                  onChange={(event) =>
+                    updateSeat(seat, {
+                      ...seat,
+                      visualKind: event.target.value as NonNullable<
+                        Seat['visualKind']
+                      >,
+                    })
+                  }
+                >
+                  <option value="chair">Стул</option>
+                  <option value="armchair">Кресло</option>
+                  <option value="wheelchairBay">Место для коляски</option>
+                </select>
+              </label>
               <PropertyField
                 label="Номер места"
                 value={seat.label}
@@ -1446,6 +1772,15 @@ export function HallEditor(props: HallEditorProps) {
                 <>
                   <h4>PDF-подложка</h4>
                   <p>{asset?.name ?? 'Файл не найден'}</p>
+                  {background.locked && (
+                    <p className="hall-editor-lock-note" role="status">
+                      <span role="img" aria-label="Заблокировано">
+                        🔒
+                      </span>{' '}
+                      Подложка заблокирована. Снимите блокировку, чтобы изменить
+                      положение, видимость или файл.
+                    </p>
+                  )}
 
                   <label className="hall-editor-field">
                     Страница PDF
@@ -1525,6 +1860,8 @@ export function HallEditor(props: HallEditorProps) {
                     label="Прозрачность подложки"
                     value={background.opacity}
                     disabled={readonly || background.locked}
+                    min={0}
+                    max={1}
                     onCommit={(opacity) =>
                       updateBackground({
                         ...background,
@@ -1633,7 +1970,7 @@ export function HallEditor(props: HallEditorProps) {
               )}
             </section>
           )}
-        </aside>
+        </PropertiesPanel>
         {mobilePanel && (
           <button
             type="button"

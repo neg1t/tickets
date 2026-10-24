@@ -23,7 +23,9 @@ test('R03: a PDF finishing after hall switch cannot enter the new hall', async (
   });
   page.once('dialog', (dialog) => dialog.accept());
   await chooseEditorAction(page, 'Открыть тестовый зал');
-  await expect(page.locator('.studio-editor-title strong')).toHaveText('Small Theater');
+  await expect(page.locator('.studio-editor-title strong')).toHaveText(
+    'Small Theater',
+  );
   await page.waitForTimeout(1500);
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Экспорт JSON' }).click();
@@ -36,7 +38,6 @@ test('R03: a PDF finishing after hall switch cannot enter the new hall', async (
 test('R03: deleting a PDF during replacement does not restore it', async ({
   page,
 }) => {
-  test.fail(); // Remove when H06 cancels stale PDF import results.
   await page.addInitScript(() => {
     const read = File.prototype.arrayBuffer;
     File.prototype.arrayBuffer = function () {

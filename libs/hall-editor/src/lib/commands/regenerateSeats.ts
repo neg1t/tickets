@@ -126,7 +126,9 @@ function seatPatches(
       y: slot.position.y + offset.y,
     });
     const rotation =
-      'rotationRadians' in slot ? slot.rotationRadians : slot.facingRadians;
+      'rotationRadians' in slot
+        ? slot.rotationRadians
+        : slot.facingRadians - Math.PI / 2;
     const after: Seat = {
       id,
       floorId: parent.floorId,
@@ -138,6 +140,7 @@ function seatPatches(
           ? { kind: 'row', rowId: parent.id as Row['id'] }
           : { kind: 'table', tableId: parent.id as Table['id'] },
       slotKey: key,
+      ...(before?.visualKind ? { visualKind: before.visualKind } : {}),
       rotationRadians: rotation + (manual?.rotationOffsetRadians ?? 0),
       ...(manual ? { manual } : {}),
     };

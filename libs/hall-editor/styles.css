@@ -130,6 +130,49 @@
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+.hall-editor-layout-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--editor-border);
+}
+.hall-editor-layout-actions button {
+  min-width: 0;
+  padding: 6px;
+  font-size: 11px;
+}
+.hall-editor-unit {
+  color: #718096;
+  font-size: 11px;
+  font-weight: 400;
+}
+.hall-editor-field-error {
+  color: #a52d35;
+  font-size: 11px;
+}
+.hall-editor-field input[aria-invalid='true'] {
+  border-color: #bd3640;
+}
+.hall-editor-lock-note {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #e7c78b;
+  border-radius: 8px;
+  background: #fff8e9;
+  color: #6d511f;
+  line-height: 1.4;
+}
+.hall-editor-calibration-help {
+  padding: 9px 10px;
+  border: 1px solid #b9c9ee;
+  border-radius: 8px;
+  background: #f1f5ff;
+}
+.hall-editor-calibration-help p {
+  margin: 4px 0 0;
+  line-height: 1.4;
+}
 .hall-editor-tools h3 {
   margin: 12px 0 2px;
   font-size: 13px;
@@ -164,10 +207,40 @@
   display: none;
 }
 .hall-editor-canvas {
+  position: relative;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   background: #f4f7fc;
+}
+.hall-editor-empty-start {
+  position: absolute;
+  z-index: 4;
+  inset: 54px 12px 32px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.hall-editor-empty-start > div {
+  width: min(420px, 100%);
+  padding: 20px;
+  border: 1px solid var(--editor-border);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 10px 32px #233b5c24;
+  pointer-events: auto;
+}
+.hall-editor-empty-start strong {
+  font-size: 16px;
+}
+.hall-editor-empty-start p {
+  color: #64748b;
+  line-height: 1.45;
+}
+.hall-editor-empty-start > div > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
 }
 .hall-editor .pdf-hall-viewer,
 .hall-editor .hall-viewer {
@@ -176,8 +249,13 @@
   border-radius: 0;
 }
 .hall-editor .hall-viewer-toolbar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
   padding: 7px 12px;
   background: #fff;
+}
+.hall-editor .hall-viewer-toolbar > * {
+  flex: 0 0 auto;
 }
 .hall-editor .hall-viewer-canvas {
   background: #f4f7fc;

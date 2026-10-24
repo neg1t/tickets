@@ -39,6 +39,18 @@ describe('seatSchema', () => {
     ).toEqual({ kind: 'table', tableId: 'table-1' });
   });
 
+  it('accepts visual furniture kinds while legacy seats stay valid', () => {
+    expect(seatSchema.parse(standaloneSeat).visualKind).toBeUndefined();
+    for (const visualKind of ['chair', 'armchair', 'wheelchairBay']) {
+      expect(
+        seatSchema.parse({ ...standaloneSeat, visualKind }).visualKind,
+      ).toBe(visualKind);
+    }
+    expect(
+      seatSchema.safeParse({ ...standaloneSeat, visualKind: 'sofa' }).success,
+    ).toBe(false);
+  });
+
   it.each([
     { ...standaloneSeat, id: '' },
     { ...standaloneSeat, floorId: '' },

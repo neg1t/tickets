@@ -22,6 +22,7 @@ export const seatSchema = z.object({
   position: worldPointSchema,
   placement: seatPlacementSchema,
   slotKey: z.string().min(1).optional(),
+  visualKind: z.enum(['chair', 'armchair', 'wheelchairBay']).optional(),
   rotationRadians: z.number().finite().optional(),
   manual: z
     .object({

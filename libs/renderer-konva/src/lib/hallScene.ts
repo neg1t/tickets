@@ -16,6 +16,7 @@ import {
   type SpatialBounds,
   type Vector2,
 } from '@hall-platform/geometry';
+import { hitSeatSymbol, seatSymbolBounds } from './furniture.js';
 
 export type HallTarget = Readonly<{
   kind: 'seat' | 'row' | 'table' | 'zone' | 'decoration';
@@ -48,7 +49,6 @@ export type HallScene = Readonly<{
   index: SpatialIndex<HallTarget>;
 }>;
 
-const seatRadius = 0.65;
 const rowTolerance = 0.45;
 const zonePadding = 2;
 
@@ -215,7 +215,7 @@ export function buildHallScene(
     add('table', table.id, tableBounds(table), table.zoneId),
   );
   seats.forEach((seat) =>
-    add('seat', seat.id, pointBounds(seat.position, seatRadius), seat.zoneId),
+    add('seat', seat.id, seatSymbolBounds(seat), seat.zoneId),
   );
   decorations.forEach((decoration) =>
     add(
@@ -301,19 +301,28 @@ export function hitTestHallScene(
     expandBounds(pointBounds(point), tolerance),
   );
   const priority = { seat: 0, table: 1, row: 2, decoration: 3, zone: 4 };
-  candidates.sort(
-    (first, second) => priority[first.value.kind] - priority[second.value.kind],
-  );
+  candidates.sort((first, second) => {
+    const kindOrder = priority[first.value.kind] - priority[second.value.kind];
+    if (
+      kindOrder !== 0 ||
+      first.value.kind !== 'seat' ||
+      second.value.kind !== 'seat'
+    )
+      return kindOrder;
+    const a = scene.seats.find((seat) => seat.id === first.value.id);
+    const b = scene.seats.find((seat) => seat.id === second.value.id);
+    if (!a || !b) return 0;
+    return (
+      distanceBetweenVectors(a.position, point) -
+      distanceBetweenVectors(b.position, point)
+    );
+  });
   for (const { value } of candidates) {
     if (allowedKinds && !allowedKinds.has(value.kind)) continue;
     switch (value.kind) {
       case 'seat': {
         const seat = scene.seats.find((item) => item.id === value.id);
-        if (
-          seat &&
-          distanceBetweenVectors(seat.position, point) <= seatRadius + tolerance
-        )
-          return value;
+        if (seat && hitSeatSymbol(seat, point, tolerance)) return value;
         break;
       }
       case 'table': {

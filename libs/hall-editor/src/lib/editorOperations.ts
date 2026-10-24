@@ -1,4 +1,6 @@
 import {
+  decorationIdSchema,
+  floorIdSchema,
   rowIdSchema,
   seatIdSchema,
   tableIdSchema,
@@ -15,7 +17,11 @@ import {
   type Vector2,
   type SpatialBounds,
 } from '@hall-platform/geometry';
-import type { HallTarget } from '@hall-platform/renderer-konva';
+import {
+  buildHallScene,
+  targetBounds,
+  type HallTarget,
+} from '@hall-platform/renderer-konva';
 import type { EditorCommand, EditorPatch } from './editorCommands.js';
 import type { HallLayoutDraft } from './editorDraft.js';
 import {
@@ -225,6 +231,44 @@ export function createObjectAt(
     default:
       throw new Error(`Tool ${tool} cannot create an object`);
   }
+}
+
+export function createStarterTemplate(
+  draft: HallLayoutDraft,
+  activeFloorId?: string,
+): { command: EditorCommand; target: HallTarget } {
+  const stage = createObjectAt(
+    draft,
+    'stage',
+    { x: 0, y: -9 },
+    undefined,
+    activeFloorId,
+  );
+  const row = createObjectAt(
+    draft,
+    'row-line',
+    { x: -5, y: 0 },
+    undefined,
+    activeFloorId,
+  );
+  const table = createObjectAt(
+    draft,
+    'table-circle',
+    { x: 7, y: 2 },
+    undefined,
+    activeFloorId,
+  );
+  return {
+    target: row.target,
+    command: {
+      kind: 'create',
+      patches: [
+        ...stage.command.patches,
+        ...row.command.patches,
+        ...table.command.patches,
+      ],
+    },
+  };
 }
 
 export function moveTarget(
@@ -550,9 +594,371 @@ export function moveTargets(
   return {
     kind: 'move',
     patches: uniquePatches(
-      targets.map((target) =>
+      effectiveTargets(draft, targets).map((target) =>
         moveTarget(draft, target, delta, publishedSeatIds),
       ),
+    ),
+  };
+}
+
+type AlignEdge = 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom';
+type DistributionAxis = 'horizontal' | 'vertical';
+
+function effectiveTargets(
+  draft: HallLayoutDraft,
+  targets: readonly HallTarget[],
+): HallTarget[] {
+  const selected = new Set(targets.map(({ kind, id }) => `${kind}:${id}`));
+  return targets.filter((target, index) => {
+    if (
+      targets.findIndex(
+        (item) => item.kind === target.kind && item.id === target.id,
+      ) !== index
+    )
+      return false;
+    if (target.kind === 'row' || target.kind === 'table') {
+      const item = draft.snapshot[
+        target.kind === 'row' ? 'rows' : 'tables'
+      ].find((value) => value.id === target.id);
+      return !item?.zoneId || !selected.has(`zone:${item.zoneId}`);
+    }
+    if (target.kind !== 'seat') return true;
+    const seat = draft.snapshot.seats.find((item) => item.id === target.id);
+    if (!seat) return false;
+    if (seat.zoneId && selected.has(`zone:${seat.zoneId}`)) return false;
+    if (seat.placement.kind === 'row')
+      return !selected.has(`row:${seat.placement.rowId}`);
+    if (seat.placement.kind === 'table')
+      return !selected.has(`table:${seat.placement.tableId}`);
+    return true;
+  });
+}
+
+function targetGeometry(
+  draft: HallLayoutDraft,
+  targets: readonly HallTarget[],
+) {
+  const scenes = new Map<string, ReturnType<typeof buildHallScene>>();
+  return effectiveTargets(draft, targets).flatMap((target) => {
+    const collection =
+      target.kind === 'seat'
+        ? draft.snapshot.seats
+        : target.kind === 'row'
+          ? draft.snapshot.rows
+          : target.kind === 'table'
+            ? draft.snapshot.tables
+            : target.kind === 'zone'
+              ? draft.snapshot.zones
+              : draft.snapshot.decorations;
+    const entity = collection.find((item) => item.id === target.id);
+    if (!entity) return [];
+    let scene = scenes.get(entity.floorId);
+    if (!scene) {
+      scene = buildHallScene(draft.snapshot, entity.floorId, draft.zoneBounds);
+      scenes.set(entity.floorId, scene);
+    }
+    const bounds = targetBounds(scene, target);
+    return bounds ? [{ target, bounds }] : [];
+  });
+}
+
+export function alignTargets(
+  draft: HallLayoutDraft,
+  targets: readonly HallTarget[],
+  edge: AlignEdge,
+  publishedSeatIds: readonly Seat['id'][] = [],
+): EditorCommand {
+  const items = targetGeometry(draft, targets);
+  if (items.length < 2) return { kind: 'move', patches: [] };
+  const axis =
+    edge === 'left' || edge === 'center' || edge === 'right' ? 'x' : 'y';
+  const start = axis === 'x' ? 'minX' : 'minY';
+  const end = axis === 'x' ? 'maxX' : 'maxY';
+  const outerStart = Math.min(...items.map(({ bounds }) => bounds[start]));
+  const outerEnd = Math.max(...items.map(({ bounds }) => bounds[end]));
+  const position =
+    edge === 'left' || edge === 'top'
+      ? outerStart
+      : edge === 'right' || edge === 'bottom'
+        ? outerEnd
+        : (outerStart + outerEnd) / 2;
+  const commands = items.map(({ target, bounds }) => {
+    const current =
+      edge === 'left' || edge === 'top'
+        ? bounds[start]
+        : edge === 'right' || edge === 'bottom'
+          ? bounds[end]
+          : (bounds[start] + bounds[end]) / 2;
+    const distance = position - current;
+    return moveTarget(
+      draft,
+      target,
+      axis === 'x' ? { x: distance, y: 0 } : { x: 0, y: distance },
+      publishedSeatIds,
+    );
+  });
+  return { kind: 'move', patches: uniquePatches(commands) };
+}
+
+export function distributeTargets(
+  draft: HallLayoutDraft,
+  targets: readonly HallTarget[],
+  axis: DistributionAxis,
+  publishedSeatIds: readonly Seat['id'][] = [],
+): EditorCommand {
+  const items = targetGeometry(draft, targets);
+  if (items.length < 3) return { kind: 'move', patches: [] };
+  const start = axis === 'horizontal' ? 'minX' : 'minY';
+  const end = axis === 'horizontal' ? 'maxX' : 'maxY';
+  const sorted = items
+    .map((item) => ({
+      ...item,
+      center: (item.bounds[start] + item.bounds[end]) / 2,
+    }))
+    .sort((a, b) => a.center - b.center);
+  const first = sorted[0];
+  const last = sorted.at(-1);
+  if (!first || !last) return { kind: 'move', patches: [] };
+  const step = (last.center - first.center) / (sorted.length - 1);
+  return {
+    kind: 'move',
+    patches: uniquePatches(
+      sorted.slice(1, -1).map((item, index) => {
+        const distance = first.center + step * (index + 1) - item.center;
+        return moveTarget(
+          draft,
+          item.target,
+          axis === 'horizontal' ? { x: distance, y: 0 } : { x: 0, y: distance },
+          publishedSeatIds,
+        );
+      }),
+    ),
+  };
+}
+
+export function duplicateTargets(
+  draft: HallLayoutDraft,
+  targets: readonly HallTarget[],
+  offset: Vector2 = { x: 2, y: 2 },
+  targetFloorId?: string,
+): { command: EditorCommand; targets: HallTarget[] } {
+  if (!Number.isFinite(offset.x) || !Number.isFinite(offset.y))
+    throw new RangeError('Duplicate offset must be finite');
+  const selected = effectiveTargets(draft, targets);
+  const { snapshot } = draft;
+  const destinationFloor = targetFloorId ? floorIdSchema.parse(targetFloorId) : null;
+  const zoneIds = new Map<string, Zone['id']>();
+  const rowIds = new Map<string, Row['id']>();
+  const tableIds = new Map<string, Table['id']>();
+  const patches: EditorPatch[] = [];
+  const duplicated: HallTarget[] = [];
+  const nextId = () => crypto.randomUUID();
+  const zones = selected.filter((item) => item.kind === 'zone');
+  const rows = selected.filter((item) => item.kind === 'row');
+  const tables = selected.filter((item) => item.kind === 'table');
+  const seats = selected.filter((item) => item.kind === 'seat');
+  const decorations = selected.filter((item) => item.kind === 'decoration');
+
+  for (const target of zones) {
+    const zone = snapshot.zones.find((item) => item.id === target.id);
+    if (!zone) continue;
+    const id = zoneIdSchema.parse(`zone-${nextId()}`);
+    zoneIds.set(zone.id, id);
+    patches.push({
+      collection: 'zones',
+      id,
+      before: null,
+      after: {
+        ...zone,
+        id,
+        floorId: destinationFloor ?? zone.floorId,
+        name: `${zone.name} копия`,
+        ...(zone.polygon
+          ? { polygon: zone.polygon.map((point) => translated(point, offset)) }
+          : {}),
+      },
+    });
+    const bounds = draft.zoneBounds[zone.id];
+    if (bounds)
+      patches.push({
+        collection: 'zoneBounds',
+        id,
+        before: null,
+        after: {
+          minX: bounds.minX + offset.x,
+          maxX: bounds.maxX + offset.x,
+          minY: bounds.minY + offset.y,
+          maxY: bounds.maxY + offset.y,
+        },
+      });
+    duplicated.push({ kind: 'zone', id });
+  }
+  const sourceRows = snapshot.rows.filter(
+    (row) =>
+      rows.some((target) => target.id === row.id) ||
+      (row.zoneId && zoneIds.has(row.zoneId)),
+  );
+  for (const row of sourceRows) {
+    const id = rowIdSchema.parse(`row-${nextId()}`);
+    rowIds.set(row.id, id);
+    patches.push({
+      collection: 'rows',
+      id,
+      before: null,
+      after: {
+        ...translateRow(row, offset),
+        id,
+        floorId: destinationFloor ?? row.floorId,
+        name: `${row.name} копия`,
+        zoneId: row.zoneId && zoneIds.has(row.zoneId)
+          ? zoneIds.get(row.zoneId)
+          : destinationFloor && destinationFloor !== row.floorId ? undefined : row.zoneId,
+      },
+    });
+    if (rows.some((target) => target.id === row.id))
+      duplicated.push({ kind: 'row', id });
+  }
+  const sourceTables = snapshot.tables.filter(
+    (table) =>
+      tables.some((target) => target.id === table.id) ||
+      (table.zoneId && zoneIds.has(table.zoneId)),
+  );
+  for (const table of sourceTables) {
+    const id = tableIdSchema.parse(`table-${nextId()}`);
+    tableIds.set(table.id, id);
+    patches.push({
+      collection: 'tables',
+      id,
+      before: null,
+      after: {
+        ...table,
+        id,
+        floorId: destinationFloor ?? table.floorId,
+        label: `${table.label} копия`,
+        center: translated(table.center, offset),
+        zoneId: table.zoneId && zoneIds.has(table.zoneId)
+          ? zoneIds.get(table.zoneId)
+          : destinationFloor && destinationFloor !== table.floorId ? undefined : table.zoneId,
+      },
+    });
+    if (tables.some((target) => target.id === table.id))
+      duplicated.push({ kind: 'table', id });
+  }
+  const sourceSeats = snapshot.seats.filter(
+    (seat) =>
+      seats.some((target) => target.id === seat.id) ||
+      (seat.zoneId && zoneIds.has(seat.zoneId)) ||
+      (seat.placement.kind === 'row' && rowIds.has(seat.placement.rowId)) ||
+      (seat.placement.kind === 'table' && tableIds.has(seat.placement.tableId)),
+  );
+  for (const seat of sourceSeats) {
+    const id = seatIdSchema.parse(`seat-${nextId()}`);
+    const placement: Seat['placement'] =
+      seat.placement.kind === 'row' && rowIds.get(seat.placement.rowId)
+        ? { kind: 'row', rowId: rowIds.get(seat.placement.rowId) as Row['id'] }
+        : seat.placement.kind === 'table' &&
+            tableIds.get(seat.placement.tableId)
+          ? {
+              kind: 'table',
+              tableId: tableIds.get(seat.placement.tableId) as Table['id'],
+            }
+          : { kind: 'standalone' };
+    const zoneId =
+      seat.zoneId && zoneIds.has(seat.zoneId)
+        ? zoneIds.get(seat.zoneId)
+        : destinationFloor && destinationFloor !== seat.floorId ? undefined : seat.zoneId;
+    patches.push({
+      collection: 'seats',
+      id,
+      before: null,
+      after: {
+        ...seat,
+        id,
+        floorId: destinationFloor ?? seat.floorId,
+        placement,
+        position: translated(seat.position, offset),
+        zoneId,
+        ...(placement.kind === 'standalone'
+          ? { slotKey: undefined, manual: undefined }
+          : {}),
+      },
+    });
+    if (seats.some((target) => target.id === seat.id))
+      duplicated.push({ kind: 'seat', id });
+  }
+  for (const target of decorations) {
+    const decoration = snapshot.decorations.find(
+      (item) => item.id === target.id,
+    );
+    if (!decoration) continue;
+    const id = decorationIdSchema.parse(`decoration-${nextId()}`);
+    patches.push({
+      collection: 'decorations',
+      id,
+      before: null,
+      after:
+        decoration.kind === 'label'
+          ? {
+              ...decoration,
+              id,
+              floorId: destinationFloor ?? decoration.floorId,
+              position: translated(decoration.position, offset),
+            }
+          : {
+              ...decoration,
+              id,
+              floorId: destinationFloor ?? decoration.floorId,
+              polygon: decoration.polygon.map((point) =>
+                translated(point, offset),
+              ),
+            },
+    });
+    duplicated.push({ kind: 'decoration', id });
+  }
+  return { command: { kind: 'create', patches }, targets: duplicated };
+}
+
+export function selectionCenterValue(
+  draft: HallLayoutDraft,
+  targets: readonly HallTarget[],
+  axis: 'x' | 'y',
+): number | null {
+  const items = targetGeometry(draft, targets);
+  if (items.length === 0) return null;
+  const start = axis === 'x' ? 'minX' : 'minY';
+  const end = axis === 'x' ? 'maxX' : 'maxY';
+  const centers = items.map(({ bounds }) => (bounds[start] + bounds[end]) / 2);
+  const first = centers[0];
+  return first !== undefined &&
+    centers.every((value) => Math.abs(value - first) < 0.000001)
+    ? first
+    : null;
+}
+
+export function setSelectionCenter(
+  draft: HallLayoutDraft,
+  targets: readonly HallTarget[],
+  axis: 'x' | 'y',
+  coordinate: number,
+  publishedSeatIds: readonly Seat['id'][] = [],
+): EditorCommand {
+  if (!Number.isFinite(coordinate))
+    throw new RangeError('Coordinate must be finite');
+  const start = axis === 'x' ? 'minX' : 'minY';
+  const end = axis === 'x' ? 'maxX' : 'maxY';
+  return {
+    kind: 'move',
+    patches: uniquePatches(
+      targetGeometry(draft, targets).map(({ target, bounds }) => {
+        const current = (bounds[start] + bounds[end]) / 2;
+        const delta = coordinate - current;
+        return moveTarget(
+          draft,
+          target,
+          axis === 'x' ? { x: delta, y: 0 } : { x: 0, y: delta },
+          publishedSeatIds,
+        );
+      }),
     ),
   };
 }

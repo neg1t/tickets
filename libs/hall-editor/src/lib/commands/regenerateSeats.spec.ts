@@ -15,6 +15,56 @@ import {
 import { regenerateRowSeats, regenerateTableSeats } from './regenerateSeats.js';
 
 describe('regenerate generated seats', () => {
+  it.each(['row-line', 'table-circle'] as const)(
+    'retains furniture kind when %s seats regenerate',
+    (tool) => {
+      let state = createEditorState(createEmptyDraft('Hall'));
+      state = applyEditorCommand(
+        state,
+        createObjectAt(state.draft, tool, { x: 0, y: 0 }).command,
+      );
+      const first = state.draft.snapshot.seats[0];
+      if (!first) throw new Error('Missing seat');
+      const draft = {
+        ...state.draft,
+        snapshot: {
+          ...state.draft.snapshot,
+          seats: state.draft.snapshot.seats.map((seat) =>
+            seat.id === first.id
+              ? { ...seat, visualKind: 'armchair' as const }
+              : seat,
+          ),
+        },
+      };
+      const row = draft.snapshot.rows[0];
+      const table = draft.snapshot.tables[0];
+      const command =
+        tool === 'row-line'
+          ? row
+            ? regenerateRowSeats(draft, row, { ...row, name: 'Changed' })
+            : null
+          : table
+            ? regenerateTableSeats(draft, table, { ...table, label: 'Changed' })
+            : null;
+      if (!command) throw new Error('Missing parent furniture');
+      expect(
+        command.patches.find(
+          (patch) => patch.collection === 'seats' && patch.id === first.id,
+        )?.after,
+      ).toMatchObject({ visualKind: 'armchair' });
+    },
+  );
+
+  it('points a table chair front toward the table center', () => {
+    let state = createEditorState(createEmptyDraft('Hall'));
+    state = applyEditorCommand(
+      state,
+      createObjectAt(state.draft, 'table-circle', { x: 0, y: 0 }).command,
+    );
+    const seat = state.draft.snapshot.seats[0];
+    expect(seat?.position.x).toBeGreaterThan(0);
+    expect(seat?.rotationRadians).toBeCloseTo(Math.PI / 2);
+  });
   it('keeps row slot IDs, updates coordinates and undoes parent and seats together', () => {
     let state = createEditorState(createEmptyDraft('Theater'));
     state = applyEditorCommand(
