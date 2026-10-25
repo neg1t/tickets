@@ -188,7 +188,7 @@ export function handlesForTarget(
     target,
   });
   if (target.kind === 'seat') {
-    const seat = scene.seats.find((item) => item.id === target.id);
+    const seat = scene.seatsById.get(target.id);
     return seat
       ? [
           handle(
@@ -199,7 +199,7 @@ export function handlesForTarget(
       : [];
   }
   if (target.kind === 'row') {
-    const curve = scene.rows.find(({ row }) => row.id === target.id)?.row.curve;
+    const curve = scene.rowsById.get(target.id)?.row.curve;
     if (!curve) return [];
     switch (curve.kind) {
       case 'line':
@@ -239,7 +239,7 @@ export function handlesForTarget(
     }
   }
   if (target.kind === 'table') {
-    const table = scene.tables.find((item) => item.id === target.id);
+    const table = scene.tablesById.get(target.id);
     if (!table) return [];
     const extent =
       table.shape.kind === 'circle'
@@ -263,7 +263,7 @@ export function handlesForTarget(
     ];
   }
   if (target.kind === 'zone') {
-    const zone = scene.zones.find((item) => item.zone.id === target.id);
+    const zone = scene.zonesById.get(target.id);
     if (!zone) return [];
     const { minX, minY, maxX, maxY } = zone.bounds;
     return [

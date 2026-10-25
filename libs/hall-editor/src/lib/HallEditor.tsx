@@ -2,6 +2,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -141,7 +142,7 @@ export function HallEditor(props: HallEditorProps) {
     model.$backgroundId,
   ]);
   const draft = state.draft;
-  const validationIssues = validateLayout(draft);
+  const validationIssues = useMemo(() => validateLayout(draft, false), [draft]);
   const hasBlockingIssues = validationIssues.some(
     (issue) => issue.severity === 'error',
   );
@@ -632,6 +633,10 @@ export function HallEditor(props: HallEditorProps) {
   ) {
     if (!callback) return;
     try {
+      const fullIssues = validateLayout(draft);
+      if (callback === onPublish && fullIssues.some((issue) => issue.severity === 'error')) {
+        throw new Error(fullIssues.find((issue) => issue.severity === 'error')?.message ?? 'Layout validation failed');
+      }
       Promise.resolve(callback(draft, acknowledgeWarnings)).catch(report);
     } catch (error) {
       report(error);

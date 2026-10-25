@@ -45,9 +45,19 @@ export type HallScene = Readonly<{
   zones: readonly SceneZone[];
   decorations: readonly Decoration[];
   backgrounds: readonly SceneBackground[];
+  seatsById: ReadonlyMap<string, LayoutSnapshot['seats'][number]>;
+  rowsById: ReadonlyMap<string, SceneRow>;
+  tablesById: ReadonlyMap<string, Table>;
+  zonesById: ReadonlyMap<string, SceneZone>;
+  decorationsById: ReadonlyMap<string, Decoration>;
   bounds: SpatialBounds;
   index: SpatialIndex<HallTarget>;
 }>;
+
+export type VisibleHallScene = Pick<
+  HallScene,
+  'seats' | 'rows' | 'tables' | 'zones' | 'decorations' | 'backgrounds'
+>;
 
 const rowTolerance = 0.45;
 const zonePadding = 2;
@@ -271,8 +281,48 @@ export function buildHallScene(
     zones,
     decorations,
     backgrounds,
+    seatsById: new Map(seats.map((seat) => [seat.id, seat])),
+    rowsById: new Map(rows.map((row) => [row.row.id, row])),
+    tablesById: new Map(tables.map((table) => [table.id, table])),
+    zonesById: new Map(zones.map((zone) => [zone.zone.id, zone])),
+    decorationsById: new Map(decorations.map((item) => [item.id, item])),
     bounds,
     index,
+  };
+}
+
+function boundsIntersect(first: SpatialBounds, second: SpatialBounds): boolean {
+  return (
+    first.minX <= second.maxX && first.maxX >= second.minX &&
+    first.minY <= second.maxY && first.maxY >= second.minY
+  );
+}
+
+export function visibleHallScene(
+  scene: HallScene,
+  bounds: SpatialBounds,
+  movingKeys?: ReadonlySet<string>,
+  delta?: Vector2,
+): VisibleHallScene {
+  const keys = new Set(scene.index.search(bounds).map(({ id }) => id));
+  if (movingKeys && delta) {
+    const originalBounds = {
+      minX: bounds.minX - delta.x,
+      minY: bounds.minY - delta.y,
+      maxX: bounds.maxX - delta.x,
+      maxY: bounds.maxY - delta.y,
+    };
+    for (const { id } of scene.index.search(originalBounds)) {
+      if (movingKeys.has(id)) keys.add(id);
+    }
+  }
+  return {
+    seats: scene.seats.filter((seat) => keys.has(`seat:${seat.id}`)),
+    rows: scene.rows.filter(({ row }) => keys.has(`row:${row.id}`)),
+    tables: scene.tables.filter((table) => keys.has(`table:${table.id}`)),
+    zones: scene.zones.filter(({ zone }) => keys.has(`zone:${zone.id}`)),
+    decorations: scene.decorations.filter((item) => keys.has(`decoration:${item.id}`)),
+    backgrounds: scene.backgrounds.filter(({ bounds: item }) => boundsIntersect(item, bounds)),
   };
 }
 
@@ -309,8 +359,8 @@ export function hitTestHallScene(
       second.value.kind !== 'seat'
     )
       return kindOrder;
-    const a = scene.seats.find((seat) => seat.id === first.value.id);
-    const b = scene.seats.find((seat) => seat.id === second.value.id);
+    const a = scene.seatsById.get(first.value.id);
+    const b = scene.seatsById.get(second.value.id);
     if (!a || !b) return 0;
     return (
       distanceBetweenVectors(a.position, point) -
@@ -321,17 +371,17 @@ export function hitTestHallScene(
     if (allowedKinds && !allowedKinds.has(value.kind)) continue;
     switch (value.kind) {
       case 'seat': {
-        const seat = scene.seats.find((item) => item.id === value.id);
+        const seat = scene.seatsById.get(value.id);
         if (seat && hitSeatSymbol(seat, point, tolerance)) return value;
         break;
       }
       case 'table': {
-        const table = scene.tables.find((item) => item.id === value.id);
+        const table = scene.tablesById.get(value.id);
         if (table && isInsideTable(table, point)) return value;
         break;
       }
       case 'row': {
-        const row = scene.rows.find((item) => item.row.id === value.id);
+        const row = scene.rowsById.get(value.id);
         if (
           row?.points.some((start, index) => {
             const end = row.points[index + 1];
@@ -346,7 +396,7 @@ export function hitTestHallScene(
         break;
       }
       case 'zone': {
-        const zone = scene.zones.find((item) => item.zone.id === value.id);
+        const zone = scene.zonesById.get(value.id);
         if (
           zone &&
           (zone.zone.polygon
@@ -360,9 +410,7 @@ export function hitTestHallScene(
         break;
       }
       case 'decoration': {
-        const decoration = scene.decorations.find(
-          (item) => item.id === value.id,
-        );
+        const decoration = scene.decorationsById.get(value.id);
         if (
           decoration &&
           (decoration.kind === 'label'

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useUnit } from 'effector-react';
 import type { LayoutSnapshot, SeatStatus } from '@hall-platform/domain';
 import type { SpatialBounds } from '@hall-platform/geometry';
@@ -105,6 +105,10 @@ const translations = {
     price: 'Цена',
     availableOnly: 'Только доступные',
     noSeats: 'По фильтру мест не найдено',
+    previousSeats: 'Предыдущие места',
+    nextSeats: 'Следующие места',
+    seatRange: (first: number, last: number, total: number) =>
+      `${first}–${last} из ${total}`,
     invalidPrice: 'Некорректная цена билета',
     duplicate: 'Место выбрано повторно',
     mixedCurrencies: 'В заказе разные валюты',
@@ -141,6 +145,10 @@ const translations = {
     price: 'Price',
     availableOnly: 'Available only',
     noSeats: 'No seats match the filter',
+    previousSeats: 'Previous seats',
+    nextSeats: 'Next seats',
+    seatRange: (first: number, last: number, total: number) =>
+      `${first}–${last} of ${total}`,
     invalidPrice: 'Invalid ticket price',
     duplicate: 'Seat selected twice',
     mixedCurrencies: 'Mixed currencies in basket',
@@ -242,6 +250,28 @@ export function SeatView(props: SeatViewProps) {
     model.floorSelected(layout.snapshot.floors[0]?.id ?? '');
   }, [contextKey, layout.snapshot.floors, model]);
   const instanceId = useId().replace(/:/g, '');
+  const layoutIndex = useMemo(() => {
+    const snapshot = layout.snapshot;
+    const floorById = new Map<string, (typeof snapshot.floors)[number]>(
+      snapshot.floors.map((floor) => [floor.id, floor]),
+    );
+    const zoneById = new Map<string, (typeof snapshot.zones)[number]>(
+      snapshot.zones.map((zone) => [zone.id, zone]),
+    );
+    const rowById = new Map<string, (typeof snapshot.rows)[number]>(
+      snapshot.rows.map((row) => [row.id, row]),
+    );
+    const seatById = new Map<string, (typeof snapshot.seats)[number]>(
+      snapshot.seats.map((seat) => [seat.id, seat]),
+    );
+    const searchTextById = new Map(
+      snapshot.seats.map((seat) => [
+        seat.id,
+        `${seat.label} ${zoneById.get(seat.zoneId ?? '')?.name ?? ''} ${seat.placement.kind === 'row' ? (rowById.get(seat.placement.rowId)?.name ?? '') : ''}`.toLowerCase(),
+      ]),
+    );
+    return { floorById, zoneById, rowById, seatById, searchTextById };
+  }, [layout.snapshot]);
   const activeFloorId = layout.snapshot.floors.some(
     (floor) => floor.id === floorId,
   )
@@ -255,21 +285,18 @@ export function SeatView(props: SeatViewProps) {
   const zones = layout.snapshot.zones.filter(
     (zone) => zone.floorId === activeFloorId,
   );
-  const seats = layout.snapshot.seats.filter(
+  const normalizedSearch = search.trim().toLowerCase();
+  const snapshotSeats = layout.snapshot.seats;
+  const availabilitySeats = availability.seats;
+  const searchTextById = layoutIndex.searchTextById;
+  const seats = snapshotSeats.filter(
     (seat) =>
       seat.floorId === activeFloorId &&
       (!activeZoneId || seat.zoneId === activeZoneId) &&
-      (!availableOnly || availability.seats[seat.id] === 'available') &&
-      `${seat.label} ${layout.snapshot.zones.find((zone) => zone.id === seat.zoneId)?.name ?? ''} ${layout.snapshot.rows.find((row) => row.id === (seat.placement.kind === 'row' ? seat.placement.rowId : ''))?.name ?? ''}`
-        .toLowerCase()
-        .includes(search.trim().toLowerCase()),
+      (!availableOnly || availabilitySeats[seat.id] === 'available') &&
+      (searchTextById.get(seat.id)?.includes(normalizedSearch) ?? false),
   );
-  const seatById = new Map<string, (typeof layout.snapshot.seats)[number]>(
-    layout.snapshot.seats.map((seat) => [seat.id, seat]),
-  );
-  const zoneById = new Map<string, (typeof layout.snapshot.zones)[number]>(
-    layout.snapshot.zones.map((zone) => [zone.id, zone]),
-  );
+  const { seatById, zoneById } = layoutIndex;
   const safeSelection = selection.filter(
     (item): item is SeatSelectionItem =>
       Boolean(item) &&
@@ -288,42 +315,36 @@ export function SeatView(props: SeatViewProps) {
     ? [...selectedSeatIds].map((id) => seatById.get(id)?.zoneId).find(Boolean)
     : null;
   const focusedZoneId = activeZoneId ?? selectedZoneForMobile ?? null;
-  const seatAppearance = Object.fromEntries(
-    layout.snapshot.seats.map((seat) => [
-      seat.id,
-      {
-        fill: statusColors[availability.seats[seat.id] ?? 'unavailable'],
-      },
-    ]),
+  const seatAppearance = useMemo(
+    () =>
+      Object.fromEntries(
+        layout.snapshot.seats.map((seat) => [
+          seat.id,
+          { fill: statusColors[availability.seats[seat.id] ?? 'unavailable'] },
+        ]),
+      ),
+    [layout.snapshot.seats, availability.seats],
   );
   const selectedTargets: HallTarget[] = [...selectedSeatIds].map((id) => ({
     kind: 'seat',
     id,
   }));
-  const priceLegend = [
-    ...new Map(
-      layout.snapshot.seats
-        .filter((seat) => seat.floorId === activeFloorId)
-        .flatMap((seat) => {
-          const price = prices.seats[seat.id];
-          return price && validateSeatPrice(price).valid
-            ? [
-                [
-                  `${price.category ?? labels.seat}:${price.amount}:${price.currency}`,
-                  price,
-                ] as const,
-              ]
-            : [];
-        }),
-    ).values(),
-  ];
+  const priceLegend = useMemo(() => {
+    const unique = new Map<string, SeatPrice>();
+    for (const seat of layout.snapshot.seats) {
+      if (seat.floorId !== activeFloorId) continue;
+      const price = prices.seats[seat.id];
+      if (price && validateSeatPrice(price).valid) {
+        unique.set(`${price.category ?? labels.seat}:${price.amount}:${price.currency}`, price);
+      }
+    }
+    return [...unique.values()];
+  }, [layout.snapshot.seats, activeFloorId, prices.seats, labels.seat]);
   const locked = loading || buying || pending;
-  const validation = validateSelection({
-    layout,
-    selection,
-    availability,
-    prices,
-  });
+  const validation = useMemo(
+    () => validateSelection({ layout, selection, availability, prices }),
+    [layout, selection, availability, prices],
+  );
   const selectedCount = validation.count;
   const total = validation.total;
   const selectionValid = validation.valid;
@@ -338,14 +359,10 @@ export function SeatView(props: SeatViewProps) {
   const tooltipSeat =
     hoveredSeat && hoveredSeat.id !== detailSeat?.id ? hoveredSeat : null;
   function placeDetails(seat: NonNullable<typeof detailSeat>): PlaceDetails {
-    const floor = layout.snapshot.floors.find(
-      (item) => item.id === seat.floorId,
-    );
-    const zone = layout.snapshot.zones.find((item) => item.id === seat.zoneId);
+    const floor = layoutIndex.floorById.get(seat.floorId);
+    const zone = layoutIndex.zoneById.get(seat.zoneId ?? '');
     const rowId = seat.placement.kind === 'row' ? seat.placement.rowId : null;
-    const row = rowId
-      ? layout.snapshot.rows.find((item) => item.id === rowId)
-      : undefined;
+    const row = rowId ? layoutIndex.rowById.get(rowId) : undefined;
     const price = prices.seats[seat.id];
     const checked = validateSeatPrice(price);
     return {
@@ -531,10 +548,17 @@ export function SeatView(props: SeatViewProps) {
           />
 
           <AccessibleSeatList
+            key={`${contextKey}:${activeFloorId}:${activeZoneId ?? ''}:${availableOnly}:${normalizedSearch}`}
             label={labels.seats}
             seatLabel={labels.seat}
             emptyLabel={labels.noSeats}
-            seats={seats.map((seat) => {
+            previousLabel={labels.previousSeats}
+            nextLabel={labels.nextSeats}
+            rangeLabel={labels.seatRange}
+            seats={seats}
+            getItem={(id) => {
+              const seat = seatById.get(id);
+              if (!seat) throw new Error(`Unknown seat ${id}`);
               const details = placeDetails(seat);
               const selected = selectedSeatIds.has(seat.id);
               return {
@@ -551,7 +575,13 @@ export function SeatView(props: SeatViewProps) {
                     (details.status !== 'available' ||
                       !validateSeatPrice(prices.seats[seat.id]).valid)),
               };
-            })}
+            }}
+            isEnabled={(id) =>
+              !locked &&
+              (selectedSeatIds.has(id) ||
+                (availability.seats[id] === 'available' &&
+                  validateSeatPrice(prices.seats[id]).valid))
+            }
             onSelect={handleSeatClick}
             onInspect={setInspectedSeatId}
           />
@@ -636,7 +666,7 @@ export function SeatView(props: SeatViewProps) {
                   ? zoneById.get(item.zoneId)
                   : null;
               const name = seat
-                ? `${labels.seat} ${seat.label} · ${layout.snapshot.floors.find((floor) => floor.id === seat.floorId)?.name ?? ''} · ${seat.zoneId ? (zoneById.get(seat.zoneId)?.name ?? '') : ''}`
+                  ? `${labels.seat} ${seat.label} · ${layoutIndex.floorById.get(seat.floorId)?.name ?? ''} · ${seat.zoneId ? (zoneById.get(seat.zoneId)?.name ?? '') : ''}`
                 : `${zone?.name ?? (item.kind === 'generalAdmission' ? item.zoneId : item.seatId)} × ${item.kind === 'generalAdmission' ? item.quantity : 1}`;
               const price =
                 item.kind === 'seat'

@@ -1,6 +1,8 @@
 import {
   isValidElement,
+  memo,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -21,12 +23,14 @@ import {
   Layer,
   Line,
   Rect,
+  Shape,
   Text,
 } from 'react-konva';
 
 import { HallStage } from './HallStage.js';
 import { SeatLabel } from './FurnitureSymbols.js';
 import { seatLevelOfDetail, visibleSeatLabelIds } from './furniture.js';
+import { groupDotSeats, type DotSeatBatch } from './seatBatches.js';
 import { ObjectRenderer } from './ObjectRenderer.js';
 import { SelectionOverlay } from './SelectionOverlay.js';
 import {
@@ -34,6 +38,7 @@ import {
   hitTestHallScene,
   selectionBounds,
   targetBounds,
+  visibleHallScene,
   type HallTarget,
 } from './hallScene.js';
 import {
@@ -128,6 +133,55 @@ type PointerIntent = {
 };
 
 const farZoomTargets = new Set<HallTarget['kind']>(['zone']);
+const emptySeatAppearance = {};
+
+const DotSeatBatchShape = memo(function DotSeatBatchShape({ batch }: { batch: DotSeatBatch }) {
+  const ref = useRef<Konva.Shape>(null);
+  useLayoutEffect(() => {
+    const shape = ref.current;
+    if (!shape || batch.seats.length === 0) return;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const seat of batch.seats) {
+      minX = Math.min(minX, seat.position.x);
+      minY = Math.min(minY, seat.position.y);
+      maxX = Math.max(maxX, seat.position.x);
+      maxY = Math.max(maxY, seat.position.y);
+    }
+    const cachePixels = (maxX - minX + 2) * (maxY - minY + 2) * 4;
+    if (batch.seats.length < 100 || cachePixels > 8_000_000) return;
+    shape.cache({
+      x: minX - 1,
+      y: minY - 1,
+      width: maxX - minX + 2,
+      height: maxY - minY + 2,
+      pixelRatio: 2,
+    });
+    shape.getLayer()?.batchDraw();
+    return () => { shape.clearCache(); };
+  }, [batch]);
+  return (
+    <Shape
+      ref={ref}
+      fill={batch.fill}
+      perfectDrawEnabled={false}
+      sceneFunc={(context, shape) => {
+        context.beginPath();
+        for (const seat of batch.seats) {
+          const radius = seat.visualKind === 'wheelchairBay'
+            ? 0.38
+            : seat.visualKind === 'armchair' ? 0.35 : 0.3;
+          context.moveTo(seat.position.x + radius, seat.position.y);
+          context.arc(seat.position.x, seat.position.y, radius, 0, Math.PI * 2);
+          context.closePath();
+        }
+        context.fillShape(shape);
+      }}
+    />
+  );
+});
 const defaultLabels: HallViewerLabels = {
   hall: 'Схема зала',
   toolbar: 'Управление схемой',
@@ -382,6 +436,22 @@ export function HallViewer(props: HallViewerProps) {
     maxX: (width - viewport.x) / viewport.scale,
     maxY: (height - viewport.y) / viewport.scale,
   };
+  const previewDelta =
+    preview && movingKeys.size > 0
+      ? snappedMoveDelta(preview.startWorld, preview.delta, gridEnabled)
+      : null;
+  // Include a screen-space margin so symbols and labels crossing an edge stay visible.
+  const margin = Math.max(2, 100 / viewport.scale);
+  const rendered = useMemo(
+    () => visibleHallScene(displayScene, {
+      minX: visibleWorld.minX - margin,
+      minY: visibleWorld.minY - margin,
+      maxX: visibleWorld.maxX + margin,
+      maxY: visibleWorld.maxY + margin,
+    }),
+    [displayScene, visibleWorld.minX, visibleWorld.minY,
+      visibleWorld.maxX, visibleWorld.maxY, margin],
+  );
   const gridStep = gridStepForScale(viewport.scale);
   const gridLines =
     authoringMode && gridEnabled
@@ -416,12 +486,38 @@ export function HallViewer(props: HallViewerProps) {
     scene.seats.some(
       (seat) => seatLevelOfDetail(viewport.scale, seat.visualKind) !== 'dot',
     );
-  const visibleLabels = visibleSeatLabelIds(scene.seats, viewport.scale, {
+  const visibleLabels = useMemo(() => visibleSeatLabelIds(rendered.seats, viewport.scale, {
     x: viewport.x,
     y: viewport.y,
     width,
     height,
-  });
+  }), [rendered.seats, viewport.scale, viewport.x, viewport.y, width, height]);
+  const dotCachePixels = useMemo(() => {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const seat of scene.seats) {
+      minX = Math.min(minX, seat.position.x);
+      minY = Math.min(minY, seat.position.y);
+      maxX = Math.max(maxX, seat.position.x);
+      maxY = Math.max(maxY, seat.position.y);
+    }
+    return scene.seats.length
+      ? (maxX - minX + 2) * (maxY - minY + 2) * 4
+      : 0;
+  }, [scene.seats]);
+  const dotSeatSource = dotCachePixels <= 8_000_000
+    ? scene.seats
+    : rendered.seats;
+  const dotBatches = useMemo(
+    () => {
+      if (!showSeats || movingKeys.size > 0) return null;
+      return groupDotSeats(dotSeatSource, viewport.scale, seatAppearance ?? emptySeatAppearance, palette.seat);
+    },
+    [showSeats, movingKeys.size, dotSeatSource,
+      viewport.scale, seatAppearance, palette.seat],
+  );
 
   function handleFit() {
     setViewport(fitViewport(scene.bounds, width, height));
@@ -764,10 +860,6 @@ export function HallViewer(props: HallViewerProps) {
     pinchRef.current = null;
   }
 
-  const previewDelta =
-    preview && movingKeys.size > 0
-      ? snappedMoveDelta(preview.startWorld, preview.delta, gridEnabled)
-      : null;
   function previewNode(key: string, node: ReactNode): ReactNode {
     return previewDelta && movingKeys?.has(key) ? (
       <DragPreview
@@ -786,28 +878,26 @@ export function HallViewer(props: HallViewerProps) {
       switch (target.kind) {
         case 'seat':
           return (
-            scene.seats.find((seat) => seat.id === target.id)?.label ??
+            scene.seatsById.get(target.id)?.label ??
             target.id
           );
         case 'row':
           return (
-            scene.rows.find(({ row }) => row.id === target.id)?.row.name ??
+            scene.rowsById.get(target.id)?.row.name ??
             target.id
           );
         case 'table':
           return (
-            scene.tables.find((table) => table.id === target.id)?.label ??
+            scene.tablesById.get(target.id)?.label ??
             target.id
           );
         case 'zone':
           return (
-            scene.zones.find(({ zone }) => zone.id === target.id)?.zone.name ??
+            scene.zonesById.get(target.id)?.zone.name ??
             target.id
           );
         case 'decoration': {
-          const decoration = scene.decorations.find(
-            (item) => item.id === target.id,
-          );
+          const decoration = scene.decorationsById.get(target.id);
           return decoration?.kind === 'label'
             ? decoration.text
             : (decoration?.label ?? target.id);
@@ -970,7 +1060,7 @@ export function HallViewer(props: HallViewerProps) {
         >
           <Layer name="base" listening={false}>
             <Group name="background">
-              {displayScene.backgrounds.map(
+              {rendered.backgrounds.map(
                 ({
                   background,
                   pageKey,
@@ -1030,7 +1120,7 @@ export function HallViewer(props: HallViewerProps) {
 
           <Layer name="zones" listening={false}>
             <Group name="zone-geometry">
-              {displayScene.zones.map(({ zone, bounds }) =>
+              {rendered.zones.map(({ zone, bounds }) =>
                 previewNode(
                   `zone:${zone.id}`,
                   zone.polygon ? (
@@ -1060,7 +1150,7 @@ export function HallViewer(props: HallViewerProps) {
                   ),
                 ),
               )}
-              {displayScene.zones.map(({ zone, bounds }) =>
+              {rendered.zones.map(({ zone, bounds }) =>
                 previewNode(
                   `zone:${zone.id}`,
                   <Text
@@ -1078,7 +1168,7 @@ export function HallViewer(props: HallViewerProps) {
 
           <Layer name="objects" listening={false}>
             <Group name="rows-seats-tables">
-              {displayScene.decorations.map((decoration) =>
+              {rendered.decorations.map((decoration) =>
                 previewNode(
                   `decoration:${decoration.id}`,
                   decoration.kind === 'label' ? (
@@ -1134,7 +1224,7 @@ export function HallViewer(props: HallViewerProps) {
                 ),
               )}
               {showSeats &&
-                displayScene.rows.map(({ row, points }) =>
+                rendered.rows.map(({ row, points }) =>
                   previewNode(
                     `row:${row.id}`,
                     <Line
@@ -1146,7 +1236,7 @@ export function HallViewer(props: HallViewerProps) {
                   ),
                 )}
               {showSeats &&
-                displayScene.tables.map((table) =>
+                rendered.tables.map((table) =>
                   previewNode(
                     `table:${table.id}`,
                     <ObjectRenderer
@@ -1157,25 +1247,27 @@ export function HallViewer(props: HallViewerProps) {
                     />,
                   ),
                 )}
+              {dotBatches
+                ? dotBatches.map((batch, index) => (
+                    <DotSeatBatchShape key={`dots:${index}`} batch={batch} />
+                  ))
+                : showSeats &&
+                  rendered.seats.map((seat) =>
+                    previewNode(
+                      `seat:${seat.id}`,
+                      <ObjectRenderer
+                        key={seat.id}
+                        object={seat}
+                        colors={{
+                          fill: seatAppearance?.[seat.id]?.fill ?? palette.seat,
+                          stroke: seatAppearance?.[seat.id]?.stroke ?? palette.seatStroke,
+                        }}
+                        scale={viewport.scale}
+                      />,
+                    ),
+                  )}
               {showSeats &&
-                displayScene.seats.map((seat) =>
-                  previewNode(
-                    `seat:${seat.id}`,
-                    <ObjectRenderer
-                      key={seat.id}
-                      object={seat}
-                      colors={{
-                        fill: seatAppearance?.[seat.id]?.fill ?? palette.seat,
-                        stroke:
-                          seatAppearance?.[seat.id]?.stroke ??
-                          palette.seatStroke,
-                      }}
-                      scale={viewport.scale}
-                    />,
-                  ),
-                )}
-              {showSeats &&
-                displayScene.seats
+                rendered.seats
                   .filter((seat) => visibleLabels.has(seat.id))
                   .map((seat) =>
                     previewNode(

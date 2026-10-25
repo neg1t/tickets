@@ -9,6 +9,7 @@ import { editorText } from './ui/editorI18n.js';
 
 const MAX_CACHED_PAGES = 8;
 const MAX_CACHED_CANVAS_BYTES = 64 * 1024 * 1024;
+const MAX_CONCURRENT_PAGE_RENDERS = 2;
 type RenderedPage = { dataUrl: string; canvas: HTMLCanvasElement };
 type PendingPage = {
   dataUrl: string;
@@ -63,6 +64,7 @@ export function PdfHallViewer(props: PdfHallViewerProps) {
   const [canvases, setCanvases] = useState<
     Readonly<Record<string, RenderedPage>>
   >({});
+  const [renderTick, setRenderTick] = useState(0);
   const [selectedFloorId, setSelectedFloorId] = useState(
     draft.snapshot.floors[0]?.id ?? '',
   );
@@ -103,6 +105,8 @@ export function PdfHallViewer(props: PdfHallViewerProps) {
   useEffect(() => {
     let active = true;
     const required = new Set(requiredPages);
+    const maxCanvasPixels = Math.floor(MAX_CACHED_CANVAS_BYTES /
+      (4 * Math.max(1, requiredPages.length)));
     for (const [key, task] of pending.current) {
       const asset = draft.assets[key.slice(0, key.lastIndexOf(':'))];
       if (!required.has(key) || !asset || asset.dataUrl !== task.dataUrl) {
@@ -112,7 +116,8 @@ export function PdfHallViewer(props: PdfHallViewerProps) {
     }
     for (const [key, page] of cache.current) {
       const asset = draft.assets[key.slice(0, key.lastIndexOf(':'))];
-      if (!asset || asset.dataUrl !== page.dataUrl) {
+      if (!asset || asset.dataUrl !== page.dataUrl ||
+        (required.has(key) && page.canvas.width * page.canvas.height > maxCanvasPixels)) {
         cache.current.delete(key);
         releaseCanvas(page);
       }
@@ -134,10 +139,12 @@ export function PdfHallViewer(props: PdfHallViewerProps) {
       } else {
         let task = pending.current.get(key);
         if (task?.dataUrl !== asset.dataUrl) {
+          if (pending.current.size >= MAX_CONCURRENT_PAGE_RENDERS) return;
           const dataUrl = asset.dataUrl;
           const controller = new AbortController();
           const promise = renderPdfPage(dataUrl, pageNumber, {
             signal: controller.signal,
+            maxCanvasPixels,
           }).then(({ canvas }) => {
             const rendered = { dataUrl, canvas };
             if (
@@ -159,6 +166,7 @@ export function PdfHallViewer(props: PdfHallViewerProps) {
             .finally(() => {
               if (pending.current.get(key)?.promise === promise)
                 pending.current.delete(key);
+              if (!controller.signal.aborted) setRenderTick((tick) => tick + 1);
             })
             .catch(() => undefined);
         }
@@ -193,7 +201,7 @@ export function PdfHallViewer(props: PdfHallViewerProps) {
     return () => {
       active = false;
     };
-  }, [draft.assets, requiredPages, onError]);
+  }, [draft.assets, requiredPages, onError, renderTick]);
 
   useEffect(
     () => () => {

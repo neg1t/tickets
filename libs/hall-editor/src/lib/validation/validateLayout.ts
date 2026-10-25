@@ -52,11 +52,14 @@ function numberingScope(seat: Seat): string {
   return seat.zoneId ? `zone:${seat.zoneId}` : `floor:${seat.floorId}`;
 }
 
-export function validateLayout(draft: HallLayoutDraft): LayoutIssue[] {
+export function validateLayout(
+  draft: HallLayoutDraft,
+  validateSchema = true,
+): LayoutIssue[] {
   const issues: LayoutIssue[] = [];
   const snapshot = draft.snapshot;
-  const parsed = layoutSnapshotSchema.safeParse(snapshot);
-  if (!parsed.success) {
+  const parsed = validateSchema ? layoutSnapshotSchema.safeParse(snapshot) : null;
+  if (parsed && !parsed.success) {
     for (const issue of parsed.error.issues)
       issues.push({
         code: 'broken-link',
@@ -64,12 +67,17 @@ export function validateLayout(draft: HallLayoutDraft): LayoutIssue[] {
         message: `${issue.path.join('.')}: ${issue.message}`,
       });
   }
+  const occupiedRows = new Set(
+    snapshot.seats.flatMap((seat) =>
+      seat.placement.kind === 'row' ? [seat.placement.rowId] : [],
+    ),
+  );
+  const gaZoneIds = new Set(
+    snapshot.zones.filter((zone) => zone.kind === 'ga').map((zone) => zone.id),
+  );
   for (const row of snapshot.rows) {
     if (
-      !snapshot.seats.some(
-        (seat) =>
-          seat.placement.kind === 'row' && seat.placement.rowId === row.id,
-      )
+      !occupiedRows.has(row.id)
     )
       issues.push({
         code: 'empty-row',
@@ -88,9 +96,7 @@ export function validateLayout(draft: HallLayoutDraft): LayoutIssue[] {
   const numbers = new Map<string, string>();
   for (const seat of snapshot.seats) {
     if (
-      snapshot.zones.some(
-        (zone) => zone.id === seat.zoneId && zone.kind === 'ga',
-      )
+      seat.zoneId && gaZoneIds.has(seat.zoneId)
     )
       issues.push({
         code: 'ga-seat',
@@ -109,14 +115,31 @@ export function validateLayout(draft: HallLayoutDraft): LayoutIssue[] {
       });
     else numbers.set(key, seat.id);
   }
+  const cellSize = 1.1;
+  const cells = new Map<string, number[]>();
+  const cellKey = (floorId: string, x: number, y: number) => `${floorId}:${x}:${y}`;
+  snapshot.seats.forEach((seat, index) => {
+    const key = cellKey(
+      seat.floorId,
+      Math.floor(seat.position.x / cellSize),
+      Math.floor(seat.position.y / cellSize),
+    );
+    const entries = cells.get(key) ?? [];
+    entries.push(index);
+    cells.set(key, entries);
+  });
   for (let index = 0; index < snapshot.seats.length; index += 1) {
     const seat = snapshot.seats[index];
     if (!seat) continue;
-    for (
-      let otherIndex = index + 1;
-      otherIndex < snapshot.seats.length;
-      otherIndex += 1
-    ) {
+    const cellX = Math.floor(seat.position.x / cellSize);
+    const cellY = Math.floor(seat.position.y / cellSize);
+    const candidates: number[] = [];
+    for (let dx = -1; dx <= 1; dx += 1)
+      for (let dy = -1; dy <= 1; dy += 1)
+        candidates.push(...(cells.get(cellKey(seat.floorId, cellX + dx, cellY + dy)) ?? []));
+    candidates.sort((a, b) => a - b);
+    for (const otherIndex of candidates) {
+      if (otherIndex <= index) continue;
       const other = snapshot.seats[otherIndex];
       if (!other) continue;
       if (

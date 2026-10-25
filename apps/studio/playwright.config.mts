@@ -4,7 +4,10 @@ import { getReadyUrl, workspaceRoot } from '@nx/devkit';
 
 // For CI, you may want to set BASE_URL to the deployed application.
 // getReadyUrl moves the address to the port the dev server task reported.
-const baseURL = process.env['BASE_URL'] || getReadyUrl('http://localhost:4200');
+const productionPreview = process.env['HALL_PRODUCTION_PREVIEW'] === '1';
+const browserMatrix = process.env['HALL_BROWSER_MATRIX'] === '1';
+const previewUrl = productionPreview ? 'http://localhost:4300' : 'http://localhost:4200';
+const baseURL = process.env['BASE_URL'] || getReadyUrl(previewUrl);
 
 /**
  * Read environment variables from file.
@@ -31,8 +34,10 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'pnpm exec nx serve studio',
-    url: getReadyUrl('http://localhost:4200'),
+    command: productionPreview
+      ? 'pnpm exec vite preview --config apps/studio/vite.config.mts --host localhost --port 4300'
+      : 'pnpm exec nx serve studio',
+    url: getReadyUrl(previewUrl),
     reuseExistingServer: !process.env['CI'],
     cwd: workspaceRoot,
   },
@@ -41,5 +46,10 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
+    ...(browserMatrix ? [
+      { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+      { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+      { name: 'mobile-chromium', use: { ...devices['Pixel 7'] } },
+    ] : []),
   ],
 });

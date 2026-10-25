@@ -3,7 +3,8 @@ import { MAX_PDF_BYTES, MAX_PDF_PAGES } from '@hall-platform/pdf';
 export const MAX_PDF_IMPORT_BYTES = MAX_PDF_BYTES;
 export const MAX_JSON_IMPORT_BYTES = 20 * 1024 * 1024;
 export const MAX_PDF_IMPORT_PAGES = MAX_PDF_PAGES;
-export const MAX_DRAFT_OBJECTS = 50_000;
+// Leave room for floors, zones and rows in a 50k-seat performance fixture.
+export const MAX_DRAFT_OBJECTS = 60_000;
 export const MAX_DRAFT_PAGES = 2_000;
 
 export type ImportKind = 'pdf' | 'json';

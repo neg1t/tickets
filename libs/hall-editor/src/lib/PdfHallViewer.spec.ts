@@ -78,6 +78,22 @@ afterEach(() => {
 });
 
 describe('PdfHallViewer', () => {
+  it('renders at most two PDF pages concurrently', async () => {
+    const resolvePage: Array<(value: { canvas: HTMLCanvasElement }) => void> = [];
+    mocks.renderPdfPage.mockImplementation(() =>
+      new Promise<{ canvas: HTMLCanvasElement }>((resolve) => resolvePage.push(resolve)),
+    );
+    const view = render(createElement(PdfHallViewer, {
+      draft: makeVisibleDraft([1, 2, 3, 4, 5]),
+    }));
+    expect(mocks.renderPdfPage).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      resolvePage[0]?.({ canvas: { width: 100, height: 100 } as HTMLCanvasElement });
+    });
+    await waitFor(() => expect(mocks.renderPdfPage).toHaveBeenCalledTimes(3));
+    view.unmount();
+  });
+
   it('keeps every simultaneously visible page ready beyond the inactive cache limit', async () => {
     mocks.renderPdfPage.mockImplementation(async () => ({
       canvas: { width: 1024, height: 1024 } as HTMLCanvasElement,
@@ -101,6 +117,8 @@ describe('PdfHallViewer', () => {
       ).toBeDefined();
     }
     expect(mocks.renderPdfPage).toHaveBeenCalledTimes(9);
+    expect(mocks.renderPdfPage.mock.calls[0]?.[2]?.maxCanvasPixels)
+      .toBeLessThanOrEqual(Math.floor(64 * 1024 * 1024 / (4 * 9)));
     view.rerender(
       createElement(PdfHallViewer, { draft: makeDraft('source-a', 9) }),
     );

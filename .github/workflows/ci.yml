@@ -37,14 +37,26 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Playwright Chromium and system dependencies
-        run: pnpm exec playwright install --with-deps chromium
+      - name: Install Playwright browsers and system dependencies
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
 
       - name: Run checks and tests for every project
         run: pnpm nx run-many -t lint typecheck test build --all --output-style=static
 
       - name: Run Studio browser scenarios
         run: pnpm nx e2e studio --output-style=static
+
+      - name: Run cross-browser accessibility and touch scenarios
+        env:
+          HALL_BROWSER_MATRIX: '1'
+        run: pnpm exec playwright test -c apps/studio/playwright.config.mts apps/studio/e2e/accessibility.spec.ts --project=chromium --project=firefox --project=webkit --project=mobile-chromium --reporter=line
+
+      - name: Check production performance budget
+        env:
+          HALL_PRODUCTION_PREVIEW: '1'
+          HALL_MEASURE_PERFORMANCE: '1'
+          HALL_ENFORCE_BUDGET: '1'
+        run: pnpm exec playwright test -c apps/studio/playwright.config.mts apps/studio/e2e/performance.spec.ts --project=chromium --reporter=line
 
       - name: Run Embed browser scenarios
         run: pnpm nx e2e embed --output-style=static

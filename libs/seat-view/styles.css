@@ -130,6 +130,35 @@
   color: #516575;
 }
 
+.seat-view-seat-list-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 0.85rem;
+}
+
+.seat-view-seat-list-controls button {
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid #b7c6cf;
+  border-radius: 6px;
+  background: white;
+  color: inherit;
+  cursor: pointer;
+}
+
+.seat-view-seat-list-controls button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.seat-view-seat-list-controls button:focus-visible {
+  outline: 3px solid #195eac;
+  outline-offset: 2px;
+}
+
 .seat-view-legend {
   display: flex;
   flex-wrap: wrap;

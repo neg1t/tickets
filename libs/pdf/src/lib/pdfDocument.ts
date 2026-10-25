@@ -24,6 +24,7 @@ class PdfInputError extends Error {}
 export type PdfLoadOptions = Readonly<{
   signal?: AbortSignal;
   maxPages?: number;
+  maxCanvasPixels?: number;
 }>;
 
 function abortError(): Error {
@@ -171,9 +172,14 @@ export async function renderPdfPage(
     checkAborted(options.signal);
     const natural = page.getViewport({ scale: 1 });
     checkPageDimensions(natural.width, natural.height);
+    if (options.maxCanvasPixels !== undefined &&
+      (!Number.isFinite(options.maxCanvasPixels) || options.maxCanvasPixels < 1))
+      throw new PdfRangeError('PDF canvas pixel limit must be positive');
     const renderScale = Math.min(
       2,
       2048 / Math.max(natural.width, natural.height),
+      Math.sqrt((options.maxCanvasPixels ?? Number.POSITIVE_INFINITY) /
+        (natural.width * natural.height)),
     );
     const viewport = page.getViewport({ scale: renderScale });
     const canvas = globalThis.document.createElement('canvas');

@@ -7,9 +7,49 @@ import smallTheater from '@hall-platform/fixtures/small-theater.json' with { typ
 import banquetHall from '@hall-platform/fixtures/banquet-hall.json' with { type: 'json' };
 import operaHall from '@hall-platform/fixtures/opera-hall.json' with { type: 'json' };
 
-import { buildHallScene, hitTestHallScene } from './hallScene.js';
+import { buildHallScene, hitTestHallScene, visibleHallScene } from './hallScene.js';
 
 describe('hall scene', () => {
+  it('finds scene objects by ID without changing hit priority', () => {
+    const snapshot = layoutDocumentSchema.parse(smallTheater.document).snapshot;
+    const scene = buildHallScene(snapshot, snapshot.floors[0]?.id ?? '');
+    const seat = scene.seats[0];
+    const row = scene.rows[0];
+    if (!seat || !row) throw new Error('Fixture is missing geometry');
+    expect(scene.seatsById.get(seat.id)).toBe(seat);
+    expect(scene.rowsById.get(row.row.id)).toBe(row);
+    expect(hitTestHallScene(scene, seat.position)).toEqual({ kind: 'seat', id: seat.id });
+  });
+
+  it('culls drawing objects while retaining source order and full hit testing', () => {
+    const base = layoutDocumentSchema.parse(smallTheater.document).snapshot;
+    const first = base.seats[0];
+    if (!first) throw new Error('Fixture is missing a seat');
+    const snapshot = {
+      ...base,
+      rows: [],
+      tables: [],
+      zones: [],
+      decorations: [],
+      seats: [
+        { ...first, id: 'left' as typeof first.id, position: { x: 0, y: 0 } as typeof first.position },
+        { ...first, id: 'far' as typeof first.id, position: { x: 100, y: 0 } as typeof first.position },
+        { ...first, id: 'right' as typeof first.id, position: { x: 2, y: 0 } as typeof first.position },
+      ],
+    };
+    const scene = buildHallScene(snapshot, first.floorId);
+    const visible = visibleHallScene(scene, { minX: -1, minY: -1, maxX: 3, maxY: 1 });
+    expect(visible.seats.map((seat) => seat.id)).toEqual(['left', 'right']);
+    expect(hitTestHallScene(scene, { x: 100, y: 0 })).toEqual({ kind: 'seat', id: 'far' });
+    const dragged = visibleHallScene(
+      scene,
+      { minX: -1, minY: -1, maxX: 3, maxY: 1 },
+      new Set(['seat:far']),
+      { x: -99, y: 0 },
+    );
+    expect(dragged.seats.map((seat) => seat.id)).toEqual(['left', 'far', 'right']);
+  });
+
   it('chooses the nearest seat when expanded touch targets overlap', () => {
     const base = layoutDocumentSchema.parse(smallTheater.document).snapshot;
     const first = base.seats[0];

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   backgroundSchema,
   rowSchema,
+  seatIdSchema,
   seatSchema,
   worldPointSchema,
 } from '@hall-platform/domain';
@@ -14,7 +15,100 @@ import {
 } from './editorCommands.js';
 import { createObjectAt } from './editorOperations.js';
 
+function largeSeatDraft(count = 10_000) {
+  const draft = createEmptyDraft('Large hall');
+  const floorId = draft.snapshot.floors[0]?.id;
+  if (!floorId) throw new Error('Missing floor');
+  const seed = seatSchema.parse({
+    id: 'seat-seed',
+    floorId,
+    label: '1',
+    position: { x: 0, y: 0 },
+    placement: { kind: 'standalone' },
+  });
+  return {
+    ...draft,
+    snapshot: {
+      ...draft.snapshot,
+      seats: Array.from({ length: count }, (_, index) => ({
+        ...seed,
+        id: seatIdSchema.parse(`seat-${index}`),
+        position: worldPointSchema.parse({ x: index, y: 0 }),
+      })),
+    },
+  };
+}
+
 describe('editor commands', () => {
+  it('moves one seat in a 10k draft without cloning untouched entities', () => {
+    const draft = largeSeatDraft();
+    const before = draft.snapshot.seats[0];
+    if (!before) throw new Error('Missing seat');
+    const next = applyEditorCommand(createEditorState(draft), {
+      kind: 'move',
+      patches: [{
+        collection: 'seats',
+        id: before.id,
+        before,
+        after: { ...before, position: worldPointSchema.parse({ x: 4, y: 5 }) },
+      }],
+    });
+
+    expect(next.draft.snapshot.seats[0]?.position).toEqual({ x: 4, y: 5 });
+    expect(next.draft.snapshot.seats[9_999]).toBe(draft.snapshot.seats[9_999]);
+    expect(next.draft.snapshot.rows).toBe(draft.snapshot.rows);
+    expect(undoEditor(next).draft.snapshot.seats[0]).toBe(before);
+  });
+
+  it('rejects malformed geometry in an otherwise local move', () => {
+    const draft = largeSeatDraft(1);
+    const before = draft.snapshot.seats[0];
+    if (!before) throw new Error('Missing seat');
+    expect(() => applyEditorCommand(createEditorState(draft), {
+      kind: 'move',
+      patches: [{
+        collection: 'seats',
+        id: before.id,
+        before,
+        after: { ...before, position: { x: Number.POSITIVE_INFINITY, y: 0 } as typeof before.position },
+      }],
+    })).toThrow();
+  });
+
+  it('applies a group move in a 10k draft while retaining untouched seats', () => {
+    const draft = largeSeatDraft();
+    const patches = draft.snapshot.seats.slice(0, 2_048).map((before) => ({
+      collection: 'seats' as const,
+      id: before.id,
+      before,
+      after: { ...before, position: worldPointSchema.parse({ x: before.position.x + 3, y: 2 }) },
+    }));
+    const started = performance.now();
+    const next = applyEditorCommand(createEditorState(draft), {
+      kind: 'move', patches,
+    });
+    const elapsed = performance.now() - started;
+    console.info(`10k draft, 2048-seat group move: ${elapsed.toFixed(1)} ms`);
+
+    expect(next.draft.snapshot.seats[2_047]?.position.y).toBe(2);
+    expect(next.draft.snapshot.seats[9_999]).toBe(draft.snapshot.seats[9_999]);
+    expect(elapsed).toBeLessThan(500);
+  }, 20_000);
+
+  it('still rejects a move that changes a seat to a missing floor', () => {
+    const draft = largeSeatDraft(1);
+    const before = draft.snapshot.seats[0];
+    if (!before) throw new Error('Missing seat');
+    expect(() => applyEditorCommand(createEditorState(draft), {
+      kind: 'move',
+      patches: [{
+        collection: 'seats',
+        id: before.id,
+        before,
+        after: { ...before, floorId: 'missing' as typeof before.floorId },
+      }],
+    })).toThrow();
+  });
   it('undoes a PDF background import and calibration without moving a seat', () => {
     const initial = createEditorState(createEmptyDraft('Test Hall'));
     const floorId = initial.draft.snapshot.floors[0]?.id;

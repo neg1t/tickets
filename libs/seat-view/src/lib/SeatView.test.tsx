@@ -9,7 +9,7 @@ import {
   within,
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { layoutDocumentSchema } from '@hall-platform/domain';
+import { layoutDocumentSchema, seatIdSchema } from '@hall-platform/domain';
 import smallTheater from '@hall-platform/fixtures/small-theater.json' with { type: 'json' };
 import {
   SeatView,
@@ -71,6 +71,56 @@ function ControlledView(props: {
 }
 
 describe('SeatView', () => {
+  it('limits a large seat list while preserving search and keyboard navigation', () => {
+    const seatPrice = prices.seats[first.id];
+    if (!seatPrice) throw new Error('Missing seat price');
+    const manySeats = Array.from({ length: 10000 }, (_, index) => ({
+      ...first,
+      id: seatIdSchema.parse(`seat-${index}`),
+      label: `B-${index}`,
+    }));
+    const manyAvailability = Object.fromEntries(
+      manySeats.map((seat) => [seat.id, 'available' as const]),
+    );
+    const manyPrices = Object.fromEntries(
+      manySeats.map((seat) => [seat.id, seatPrice]),
+    );
+    render(
+      <SeatView
+        layout={{ ...layout, snapshot: { ...snapshot, seats: manySeats } }}
+        occurrenceId="large-event"
+        availability={{ seats: manyAvailability }}
+        prices={{ seats: manyPrices }}
+        selection={[]}
+        onSelectionChange={() => undefined}
+        onBuyClick={() => undefined}
+      />,
+    );
+
+    const list = document.querySelector('.seat-view-seat-list');
+    if (!list) throw new Error('Accessible seat list is missing');
+    expect(list.querySelectorAll('button').length).toBeLessThanOrEqual(80);
+    expect(screen.queryByRole('button', { name: /^Место B-9999 —/ })).toBeNull();
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Места' }), {
+      target: { value: 'B-9999' },
+    });
+    expect(screen.getByRole('button', { name: /^Место B-9999 —/ })).toBeTruthy();
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Места' }), {
+      target: { value: '' },
+    });
+
+    const lastOnFirstPage = screen.getByRole('button', {
+      name: /^Место B-79(?:\D|$)/,
+    });
+    lastOnFirstPage.focus();
+    fireEvent.keyDown(lastOnFirstPage, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: /^Место B-80(?:\D|$)/ }),
+    );
+    expect(list.querySelectorAll('button').length).toBeLessThanOrEqual(80);
+  });
+
   it('A08: rejects duplicate seats supplied by a controlled host', () => {
     const onBuyClick = vi.fn();
     render(
