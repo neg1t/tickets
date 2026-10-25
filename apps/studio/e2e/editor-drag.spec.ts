@@ -35,7 +35,10 @@ test('moves two selected seats in one commit and one undo step', async ({
   const bounds = (await stage.boundingBox()) as { x: number; y: number };
   await page.mouse.move(bounds.x + 400, bounds.y + 250);
   await page.mouse.down();
+  const beforePreview = await stage.screenshot();
   await page.mouse.move(bounds.x + 425, bounds.y + 250, { steps: 5 });
+  const duringPreview = await stage.screenshot();
+  expect(duringPreview.equals(beforePreview)).toBe(false);
   await expect(page.getByText('Изменений через onChange: 2')).toBeVisible();
   await page.mouse.up();
   await expect(page.getByText('Изменений через onChange: 3')).toBeVisible();

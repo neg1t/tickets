@@ -99,9 +99,13 @@ test('measures large editor open and pan', async ({ page }) => {
   const body = JSON.stringify(result, null, 2);
   await test.info().attach(`performance-${requestedSize}`, { body, contentType: 'application/json' });
   console.log(body);
-  if (process.env['HALL_ENFORCE_BUDGET'] === '1' && requestedSize === 10_000) {
-    expect(result.openMedianMs).toBeLessThanOrEqual(Number(process.env['HALL_OPEN_BUDGET_MS'] ?? '4000'));
-    expect(result.panP95Ms).toBeLessThanOrEqual(Number(process.env['HALL_PAN_BUDGET_MS'] ?? '25'));
+  if (process.env['HALL_ENFORCE_BUDGET'] === '1') {
+    if (requestedSize === 10_000) {
+      expect(result.openMedianMs).toBeLessThanOrEqual(Number(process.env['HALL_OPEN_BUDGET_MS'] ?? '4000'));
+      expect(result.panP95Ms).toBeLessThanOrEqual(Number(process.env['HALL_PAN_BUDGET_MS'] ?? '25'));
+    }
+    if (requestedSize === 50_000)
+      expect(result.openMedianMs).toBeLessThanOrEqual(Number(process.env['HALL_50K_OPEN_BUDGET_MS'] ?? '25000'));
   }
 });
 
@@ -176,11 +180,11 @@ test('measures group drag in a 10k-seat editor', async ({ page }) => {
     modifiers: ['Shift'],
   });
   await expect(page.getByText(/Выбрано: 2/).first()).toBeVisible();
-  const frameSamples = page.evaluate(() => new Promise<number[]>((resolve) => {
-    const samples: number[] = [];
+  const frameSamples = page.evaluate(() => new Promise<{ ms: number; phase: string }[]>((resolve) => {
+    const samples: { ms: number; phase: string }[] = [];
     let previous = performance.now();
     const tick = (now: number) => {
-      samples.push(now - previous);
+      samples.push({ ms: now - previous, phase: (window as typeof window & { __hallDragPhase?: string }).__hallDragPhase ?? 'setup' });
       previous = now;
       if (samples.length < 90) requestAnimationFrame(tick);
       else resolve(samples);
@@ -189,12 +193,30 @@ test('measures group drag in a 10k-seat editor', async ({ page }) => {
   }));
   await page.mouse.move(first.x, first.y);
   await page.mouse.down();
+  await page.evaluate(() => { (window as typeof window & { __hallDragPhase?: string }).__hallDragPhase = 'drag'; });
   await page.mouse.move(first.x + 80, first.y, { steps: 25 });
+  await page.evaluate(() => { (window as typeof window & { __hallDragPhase?: string }).__hallDragPhase = 'commit'; });
   await page.mouse.up();
   const frames = await frameSamples;
-  const result = { p95Ms: percentile(frames, 0.95), maxMs: Math.max(...frames), scale: viewport.scale };
+  const dragFrames = frames.filter(({ phase }) => phase === 'drag').map(({ ms }) => ms);
+  expect(dragFrames.length).toBeGreaterThanOrEqual(20);
+  const browser = await page.evaluate(() => ({ userAgent: navigator.userAgent, dpr: devicePixelRatio }));
+  const result = {
+    machine: { platform: platform(), cpu: cpus()[0]?.model },
+    browser,
+    viewport: { width: 1280, height: 800 },
+    buildMode: 'Vite production preview',
+    fixture: 'Arena grid, 10,000 seats, 250 columns, two selected seats',
+    dragP95Ms: percentile(dragFrames, 0.95),
+    dragMaxMs: Math.max(...dragFrames),
+    fullGestureP95Ms: percentile(frames.map(({ ms }) => ms), 0.95),
+    sampleCount: dragFrames.length,
+    scale: viewport.scale,
+  };
   await test.info().attach('group-drag-10k', {
     body: JSON.stringify(result, null, 2), contentType: 'application/json',
   });
   console.log(JSON.stringify(result));
+  if (process.env['HALL_ENFORCE_BUDGET'] === '1')
+    expect(result.dragP95Ms).toBeLessThanOrEqual(Number(process.env['HALL_DRAG_BUDGET_MS'] ?? '25'));
 });

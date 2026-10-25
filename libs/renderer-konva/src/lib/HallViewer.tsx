@@ -873,6 +873,143 @@ export function HallViewer(props: HallViewerProps) {
     );
   }
 
+  // Keep the static elements stable while the drag preview redraws only overlays.
+  const sceneObjectNodes = useMemo(() => {
+    const nodes: { key: string; node: ReactNode }[] = [];
+    for (const decoration of rendered.decorations) {
+      nodes.push({
+        key: `decoration:${decoration.id}`,
+        node:
+          decoration.kind === 'label' ? (
+            <Text
+              key={decoration.id}
+              x={decoration.position.x}
+              y={decoration.position.y}
+              text={decoration.text}
+              fontSize={1.2}
+              fill={palette.ink}
+            />
+          ) : (
+            <Group key={decoration.id}>
+              <Line
+                points={decoration.polygon.flatMap((point) => [
+                  point.x,
+                  point.y,
+                ])}
+                closed
+                fill={decoration.kind === 'stage' ? '#c3a288' : '#787d83'}
+                stroke={palette.ink}
+                strokeWidth={0.14}
+              />
+              {decoration.label && (
+                <Text
+                  x={
+                    decoration.polygon.reduce(
+                      (sum, point) => sum + point.x,
+                      0,
+                    ) /
+                      decoration.polygon.length -
+                    3
+                  }
+                  y={
+                    decoration.polygon.reduce(
+                      (sum, point) => sum + point.y,
+                      0,
+                    ) /
+                      decoration.polygon.length -
+                    0.5
+                  }
+                  width={6}
+                  align="center"
+                  text={decoration.label}
+                  fontSize={0.9}
+                  fill={palette.ink}
+                />
+              )}
+            </Group>
+          ),
+      });
+    }
+    if (showSeats) {
+      for (const { row, points } of rendered.rows)
+        nodes.push({
+          key: `row:${row.id}`,
+          node: (
+            <Line
+              key={row.id}
+              points={points.flatMap((point) => [point.x, point.y])}
+              stroke={palette.row}
+              strokeWidth={0.15}
+            />
+          ),
+        });
+      for (const table of rendered.tables)
+        nodes.push({
+          key: `table:${table.id}`,
+          node: (
+            <ObjectRenderer
+              key={table.id}
+              object={table}
+              colors={{ fill: palette.table, stroke: palette.row }}
+              scale={viewport.scale}
+            />
+          ),
+        });
+    }
+    if (dotBatches) {
+      for (const [index, batch] of dotBatches.entries())
+        nodes.push({
+          key: `dots:${index}`,
+          node: <DotSeatBatchShape key={`dots:${index}`} batch={batch} />,
+        });
+    } else if (showSeats) {
+      for (const seat of rendered.seats)
+        nodes.push({
+          key: `seat:${seat.id}`,
+          node: (
+            <ObjectRenderer
+              key={seat.id}
+              object={seat}
+              colors={{
+                fill: seatAppearance?.[seat.id]?.fill ?? palette.seat,
+                stroke: seatAppearance?.[seat.id]?.stroke ?? palette.seatStroke,
+              }}
+              scale={viewport.scale}
+            />
+          ),
+        });
+    }
+    if (showSeats) {
+      for (const seat of rendered.seats) {
+        if (visibleLabels.has(seat.id))
+          nodes.push({
+            key: `seat:${seat.id}`,
+            node: <SeatLabel key={`label:${seat.id}`} seat={seat} />,
+          });
+      }
+    }
+    return nodes;
+  }, [
+    rendered,
+    showSeats,
+    dotBatches,
+    visibleLabels,
+    palette,
+    seatAppearance,
+    viewport.scale,
+  ]);
+  const staticSceneObjects = useMemo(
+    () =>
+      sceneObjectNodes
+        .filter(({ key }) => !movingKeys.has(key))
+        .map(({ node }) => node),
+    [sceneObjectNodes, movingKeys],
+  );
+  const movingSceneObjects = useMemo(
+    () => sceneObjectNodes.filter(({ key }) => movingKeys.has(key)),
+    [sceneObjectNodes, movingKeys],
+  );
+
   const selectedText = selection
     .map((target) => {
       switch (target.kind) {
@@ -1167,119 +1304,14 @@ export function HallViewer(props: HallViewerProps) {
           </Layer>
 
           <Layer name="objects" listening={false}>
-            <Group name="rows-seats-tables">
-              {rendered.decorations.map((decoration) =>
-                previewNode(
-                  `decoration:${decoration.id}`,
-                  decoration.kind === 'label' ? (
-                    <Text
-                      key={decoration.id}
-                      x={decoration.position.x}
-                      y={decoration.position.y}
-                      text={decoration.text}
-                      fontSize={1.2}
-                      fill={palette.ink}
-                    />
-                  ) : (
-                    <Group key={decoration.id}>
-                      <Line
-                        points={decoration.polygon.flatMap((point) => [
-                          point.x,
-                          point.y,
-                        ])}
-                        closed
-                        fill={
-                          decoration.kind === 'stage' ? '#c3a288' : '#787d83'
-                        }
-                        stroke={palette.ink}
-                        strokeWidth={0.14}
-                      />
-                      {decoration.label && (
-                        <Text
-                          x={
-                            decoration.polygon.reduce(
-                              (sum, point) => sum + point.x,
-                              0,
-                            ) /
-                              decoration.polygon.length -
-                            3
-                          }
-                          y={
-                            decoration.polygon.reduce(
-                              (sum, point) => sum + point.y,
-                              0,
-                            ) /
-                              decoration.polygon.length -
-                            0.5
-                          }
-                          width={6}
-                          align="center"
-                          text={decoration.label}
-                          fontSize={0.9}
-                          fill={palette.ink}
-                        />
-                      )}
-                    </Group>
-                  ),
-                ),
-              )}
-              {showSeats &&
-                rendered.rows.map(({ row, points }) =>
-                  previewNode(
-                    `row:${row.id}`,
-                    <Line
-                      key={row.id}
-                      points={points.flatMap((point) => [point.x, point.y])}
-                      stroke={palette.row}
-                      strokeWidth={0.15}
-                    />,
-                  ),
-                )}
-              {showSeats &&
-                rendered.tables.map((table) =>
-                  previewNode(
-                    `table:${table.id}`,
-                    <ObjectRenderer
-                      key={table.id}
-                      object={table}
-                      colors={{ fill: palette.table, stroke: palette.row }}
-                      scale={viewport.scale}
-                    />,
-                  ),
-                )}
-              {dotBatches
-                ? dotBatches.map((batch, index) => (
-                    <DotSeatBatchShape key={`dots:${index}`} batch={batch} />
-                  ))
-                : showSeats &&
-                  rendered.seats.map((seat) =>
-                    previewNode(
-                      `seat:${seat.id}`,
-                      <ObjectRenderer
-                        key={seat.id}
-                        object={seat}
-                        colors={{
-                          fill: seatAppearance?.[seat.id]?.fill ?? palette.seat,
-                          stroke: seatAppearance?.[seat.id]?.stroke ?? palette.seatStroke,
-                        }}
-                        scale={viewport.scale}
-                      />,
-                    ),
-                  )}
-              {showSeats &&
-                rendered.seats
-                  .filter((seat) => visibleLabels.has(seat.id))
-                  .map((seat) =>
-                    previewNode(
-                      `seat:${seat.id}`,
-                      <SeatLabel key={`label:${seat.id}`} seat={seat} />,
-                    ),
-                  )}
-            </Group>
+            <Group name="rows-seats-tables">{staticSceneObjects}</Group>
           </Layer>
 
           <Layer name="overlays" listening={false}>
             <Group name="interaction" />
+            <Group name="moving-objects">
+              {movingSceneObjects.map(({ key, node }) => previewNode(key, node))}
+            </Group>
 
             <Group name="generation-preview">
               {previewSeats.map((seat, index) => (

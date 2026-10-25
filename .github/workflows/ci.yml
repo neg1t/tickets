@@ -56,6 +56,7 @@ jobs:
           HALL_PRODUCTION_PREVIEW: '1'
           HALL_MEASURE_PERFORMANCE: '1'
           HALL_ENFORCE_BUDGET: '1'
+          HALL_EXTENDED_PERFORMANCE: '1'
         run: pnpm exec playwright test -c apps/studio/playwright.config.mts apps/studio/e2e/performance.spec.ts --project=chromium --reporter=line
 
       - name: Run Embed browser scenarios
