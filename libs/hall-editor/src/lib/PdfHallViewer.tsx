@@ -7,6 +7,46 @@ import {
 import type { HallLayoutDraft } from './editorDraft.js';
 import { editorText } from './ui/editorI18n.js';
 
+const MAX_CACHED_PAGES = 8;
+const MAX_CACHED_CANVAS_BYTES = 64 * 1024 * 1024;
+type RenderedPage = { dataUrl: string; canvas: HTMLCanvasElement };
+type PendingPage = {
+  dataUrl: string;
+  controller: AbortController;
+  promise: Promise<RenderedPage>;
+};
+
+function canvasBytes(page: RenderedPage): number {
+  return page.canvas.width * page.canvas.height * 4;
+}
+
+function releaseCanvas(page: RenderedPage): void {
+  page.canvas.width = 0;
+  page.canvas.height = 0;
+}
+
+function pruneInactiveCache(
+  cache: Map<string, RenderedPage>,
+  required: ReadonlySet<string>,
+): void {
+  const inactive = [...cache].filter(([key]) => !required.has(key));
+  let inactiveBytes = inactive.reduce(
+    (total, [, page]) => total + canvasBytes(page),
+    0,
+  );
+  while (
+    inactive.length > MAX_CACHED_PAGES ||
+    inactiveBytes > MAX_CACHED_CANVAS_BYTES
+  ) {
+    const oldest = inactive.shift();
+    if (!oldest) break;
+    const [key, page] = oldest;
+    cache.delete(key);
+    inactiveBytes -= canvasBytes(page);
+    releaseCanvas(page);
+  }
+}
+
 export type PdfHallViewerProps = Omit<
   HallViewerProps,
   'hallName' | 'snapshot' | 'zoneBounds' | 'backgroundPages'
@@ -18,14 +58,20 @@ export type PdfHallViewerProps = Omit<
 
 export function PdfHallViewer(props: PdfHallViewerProps) {
   const { draft, locale, onError, ...viewerProps } = props;
-  type RenderedPage = { dataUrl: string; canvas: HTMLCanvasElement };
   const cache = useRef(new Map<string, RenderedPage>());
-  const pending = useRef(
-    new Map<string, { dataUrl: string; promise: Promise<RenderedPage> }>(),
-  );
+  const pending = useRef(new Map<string, PendingPage>());
   const [canvases, setCanvases] = useState<
     Readonly<Record<string, RenderedPage>>
   >({});
+  const [selectedFloorId, setSelectedFloorId] = useState(
+    draft.snapshot.floors[0]?.id ?? '',
+  );
+  const requestedFloorId = viewerProps.focusedFloorId ?? selectedFloorId;
+  const activeFloorId = draft.snapshot.floors.some(
+    (floor) => floor.id === requestedFloorId,
+  )
+    ? requestedFloorId
+    : (draft.snapshot.floors[0]?.id ?? '');
   const pageSizes = useMemo(
     () =>
       Object.fromEntries(
@@ -41,7 +87,9 @@ export function PdfHallViewer(props: PdfHallViewerProps) {
         draft.snapshot.backgrounds
           .filter(
             (background) =>
-              background.source.kind === 'pdf' && background.visible,
+              background.source.kind === 'pdf' &&
+              background.visible &&
+              background.floorId === activeFloorId,
           )
           .map(
             (background) =>
@@ -49,11 +97,27 @@ export function PdfHallViewer(props: PdfHallViewerProps) {
           ),
       ),
     ],
-    [draft.snapshot.backgrounds],
+    [draft.snapshot.backgrounds, activeFloorId],
   );
 
   useEffect(() => {
     let active = true;
+    const required = new Set(requiredPages);
+    for (const [key, task] of pending.current) {
+      const asset = draft.assets[key.slice(0, key.lastIndexOf(':'))];
+      if (!required.has(key) || !asset || asset.dataUrl !== task.dataUrl) {
+        task.controller.abort();
+        pending.current.delete(key);
+      }
+    }
+    for (const [key, page] of cache.current) {
+      const asset = draft.assets[key.slice(0, key.lastIndexOf(':'))];
+      if (!asset || asset.dataUrl !== page.dataUrl) {
+        cache.current.delete(key);
+        releaseCanvas(page);
+      }
+    }
+    pruneInactiveCache(cache.current, required);
     requiredPages.forEach((key) => {
       const split = key.lastIndexOf(':');
       const assetId = key.slice(0, split);
@@ -62,6 +126,8 @@ export function PdfHallViewer(props: PdfHallViewerProps) {
       if (!asset) return;
       const cached = cache.current.get(key);
       if (cached?.dataUrl === asset.dataUrl) {
+        cache.current.delete(key);
+        cache.current.set(key, cached);
         setCanvases((current) =>
           current[key] === cached ? current : { ...current, [key]: cached },
         );
@@ -69,15 +135,25 @@ export function PdfHallViewer(props: PdfHallViewerProps) {
         let task = pending.current.get(key);
         if (task?.dataUrl !== asset.dataUrl) {
           const dataUrl = asset.dataUrl;
-          const promise = renderPdfPage(dataUrl, pageNumber).then(
-            ({ canvas }) => {
-              const rendered = { dataUrl, canvas };
-              if (pending.current.get(key)?.promise === promise)
-                cache.current.set(key, rendered);
+          const controller = new AbortController();
+          const promise = renderPdfPage(dataUrl, pageNumber, {
+            signal: controller.signal,
+          }).then(({ canvas }) => {
+            const rendered = { dataUrl, canvas };
+            if (
+              controller.signal.aborted ||
+              pending.current.get(key)?.promise !== promise
+            ) {
+              releaseCanvas(rendered);
               return rendered;
-            },
-          );
-          task = { dataUrl, promise };
+            }
+            if (pending.current.get(key)?.promise === promise) {
+              cache.current.set(key, rendered);
+              pruneInactiveCache(cache.current, required);
+            }
+            return rendered;
+          });
+          task = { dataUrl, controller, promise };
           pending.current.set(key, task);
           void promise
             .finally(() => {
@@ -88,25 +164,46 @@ export function PdfHallViewer(props: PdfHallViewerProps) {
         }
         void task.promise
           .then((rendered) => {
-            if (!active) return;
-            setCanvases((current) =>
-              current[key] === rendered
-                ? current
-                : { ...current, [key]: rendered },
-            );
+            if (
+              !active ||
+              task.controller.signal.aborted ||
+              cache.current.get(key) !== rendered
+            )
+              return;
+            setCanvases(Object.fromEntries(cache.current));
           })
           .catch((error: unknown) => {
-            if (active)
+            if (active && !task.controller.signal.aborted)
               onError?.(
                 error instanceof Error ? error : new Error(String(error)),
               );
           });
       }
     });
+    setCanvases((current) => {
+      const retained = Object.fromEntries(
+        Object.entries(current).filter(
+          ([key, page]) => cache.current.get(key) === page,
+        ),
+      );
+      return Object.keys(retained).length === Object.keys(current).length
+        ? current
+        : retained;
+    });
     return () => {
       active = false;
     };
   }, [draft.assets, requiredPages, onError]);
+
+  useEffect(
+    () => () => {
+      for (const task of pending.current.values()) task.controller.abort();
+      pending.current.clear();
+      for (const page of cache.current.values()) releaseCanvas(page);
+      cache.current.clear();
+    },
+    [],
+  );
 
   const backgroundPages = useMemo(
     () =>
@@ -118,14 +215,17 @@ export function PdfHallViewer(props: PdfHallViewerProps) {
             key,
             {
               ...size,
-              ...(rendered && asset && rendered.dataUrl === asset.dataUrl
+              ...(requiredPages.includes(key) &&
+              rendered &&
+              asset &&
+              rendered.dataUrl === asset.dataUrl
                 ? { canvas: rendered.canvas }
                 : {}),
             },
           ];
         }),
       ),
-    [pageSizes, canvases, draft.assets],
+    [pageSizes, canvases, draft.assets, requiredPages],
   );
   const readyCount = requiredPages.filter((key) => {
     const asset = draft.assets[key.slice(0, key.lastIndexOf(':'))];
@@ -163,6 +263,10 @@ export function PdfHallViewer(props: PdfHallViewerProps) {
 
       <HallViewer
         {...viewerProps}
+        onFloorChange={(floorId) => {
+          setSelectedFloorId(floorId);
+          viewerProps.onFloorChange?.(floorId);
+        }}
         fitKey={fitKey}
         hallName={draft.hallName}
         snapshot={draft.snapshot}

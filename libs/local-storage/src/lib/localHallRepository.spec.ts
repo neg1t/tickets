@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createPublishedVersion,
   duplicateHallDraft,
+  parseHallExportPackage,
 } from './localHallRepository.js';
 
 describe('local hall drafts and publications', () => {
@@ -34,5 +35,33 @@ describe('local hall drafts and publications', () => {
       publication.versionId,
     );
     expect(publication.layout.snapshot.floors).not.toBe(draft.snapshot.floors);
+  });
+
+  it('validates a portable package before import', () => {
+    const draft = createEmptyDraft('Театр');
+    const published = createPublishedVersion(draft, 0);
+    const hall = {
+      id: draft.snapshot.id,
+      draft,
+      revision: 1,
+      publishedVersionNumber: 1,
+      updatedAt: new Date().toISOString(),
+    };
+    const value = {
+      format: 'hall-platform-package',
+      schemaVersion: 1,
+      hall,
+      publishedVersions: [published],
+    };
+    expect(parseHallExportPackage(value)).toEqual(value);
+    expect(() =>
+      parseHallExportPackage({ ...value, format: 'unknown' }),
+    ).toThrow();
+    expect(() =>
+      parseHallExportPackage({
+        ...value,
+        publishedVersions: [{ ...published, hallId: 'other' }],
+      }),
+    ).toThrow();
   });
 });

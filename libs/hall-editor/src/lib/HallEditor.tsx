@@ -26,6 +26,11 @@ import type { HallTarget } from '@hall-platform/renderer-konva';
 import type { EditorCommand } from './editorCommands.js';
 import type { HallLayoutDraft } from './editorDraft.js';
 import { createEditorModel } from './editorModel.js';
+import {
+  assertImportBytes,
+  assertImportFile,
+  MAX_PDF_IMPORT_PAGES,
+} from './import/importLimits.js';
 import { PdfHallViewer } from './PdfHallViewer.js';
 import {
   RowGenerationControls,
@@ -104,6 +109,10 @@ export function HallEditor(props: HallEditorProps) {
   } | null>(null);
   const [hasClipboard, setHasClipboard] = useState(false);
   const pdfInputRef = useRef<HTMLInputElement>(null);
+  const pdfImportRef = useRef<{ controller: AbortController } | null>(null);
+  const controlledValueRef = useRef(value);
+  const latestValueRef = useRef(value);
+  latestValueRef.current = value;
   const [mobilePanel, setMobilePanel] = useState<EditorPanel | null>(null);
   const { setElement: setCanvasElement, height: canvasHeight } =
     useCanvasHeight();
@@ -156,8 +165,26 @@ export function HallEditor(props: HallEditorProps) {
     draft.snapshot.backgrounds.find((item) => item.id === backgroundId) ?? null;
 
   useEffect(() => {
+    if (controlledValueRef.current !== value) {
+      cancelPdfImport();
+      controlledValueRef.current = value;
+    }
     model.replace(value);
   }, [model, value]);
+
+  useEffect(
+    () => () => {
+      pdfImportRef.current?.controller.abort();
+      pdfImportRef.current = null;
+    },
+    [],
+  );
+
+  function cancelPdfImport() {
+    pdfImportRef.current?.controller.abort();
+    pdfImportRef.current = null;
+    setImportingPdf(false);
+  }
 
   function report(error: unknown) {
     const failure = error instanceof Error ? error : new Error(String(error));
@@ -177,6 +204,7 @@ export function HallEditor(props: HallEditorProps) {
   }
 
   function selectFloor(nextFloorId: string) {
+    if (nextFloorId !== activeFloorId) cancelPdfImport();
     setFloorId(nextFloorId);
     model.selectionChanged([]);
     model.zoneChanged('');
@@ -190,6 +218,7 @@ export function HallEditor(props: HallEditorProps) {
   ) {
     if (readonly || command.patches.length === 0) return false;
     try {
+      cancelPdfImport();
       const next = model.commit(command);
       setErrorMessage(null);
       onChange(next.draft, { kind: command.kind, target: selected });
@@ -203,6 +232,7 @@ export function HallEditor(props: HallEditorProps) {
   function handleUndo() {
     if (readonly || state.past.length === 0) return;
     try {
+      cancelPdfImport();
       const next = model.undo();
       model.selectionChanged([]);
       if (
@@ -227,6 +257,7 @@ export function HallEditor(props: HallEditorProps) {
   function handleRedo() {
     if (readonly || state.future.length === 0) return;
     try {
+      cancelPdfImport();
       const next = model.redo();
       model.selectionChanged([]);
       if (
@@ -335,25 +366,45 @@ export function HallEditor(props: HallEditorProps) {
   async function handlePdfImport(file: File, replace?: Background) {
     if (readonly) return;
     if (replace?.locked) return;
-    const startingSnapshotId = model.$state.getState().draft.snapshot.id;
+    const startingDraft = model.$state.getState().draft;
+    const startingValue = latestValueRef.current;
     const importFloorId = activeFloorId;
-    if (file.size > 20 * 1024 * 1024) {
-      report(new RangeError(tr('PDF должен быть не больше 20 МБ')));
+    try {
+      assertImportFile(file, 'pdf');
+    } catch (error) {
+      report(error);
       return;
     }
-    if (
-      file.type !== 'application/pdf' &&
-      !file.name.toLowerCase().endsWith('.pdf')
-    ) {
-      report(new TypeError(tr('Выберите PDF-файл')));
-      return;
-    }
+    cancelPdfImport();
+    const request = { controller: new AbortController() };
+    pdfImportRef.current = request;
     setImportingPdf(true);
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const pages = await inspectPdfBytes(bytes);
+      if (pdfImportRef.current !== request) return;
+      assertImportBytes(bytes.byteLength, 'pdf');
+      const pages = await inspectPdfBytes(bytes, {
+        signal: request.controller.signal,
+        maxPages: MAX_PDF_IMPORT_PAGES,
+      });
+      if (pdfImportRef.current !== request) return;
+      if (pages.length < 1 || pages.length > MAX_PDF_IMPORT_PAGES)
+        throw new RangeError(tr('PDF содержит недопустимое число страниц'));
+      if (
+        pages.some(
+          (page) =>
+            !Number.isFinite(page.width) ||
+            !Number.isFinite(page.height) ||
+            page.width <= 0 ||
+            page.height <= 0,
+        )
+      )
+        throw new RangeError(tr('PDF содержит страницу неверного размера'));
       const currentDraft = model.$state.getState().draft;
-      if (currentDraft.snapshot.id !== startingSnapshotId)
+      if (
+        currentDraft !== startingDraft ||
+        latestValueRef.current !== startingValue
+      )
         throw new Error(
           tr('План изменился во время загрузки PDF. Повторите импорт.'),
         );
@@ -362,7 +413,10 @@ export function HallEditor(props: HallEditorProps) {
             (item) => item.id === replace.id,
           )
         : null;
-      if (replace && (!currentBackground || currentBackground.locked))
+      if (
+        replace &&
+        (currentBackground !== replace || currentBackground.locked)
+      )
         throw new Error(tr('Подложка недоступна или заблокирована'));
       if (
         !replace &&
@@ -417,6 +471,8 @@ export function HallEditor(props: HallEditorProps) {
           after: nextBackground,
         },
       ];
+      if (pdfImportRef.current !== request) return;
+      pdfImportRef.current = null;
       if (
         commit({ kind: currentBackground ? 'update' : 'create', patches }, null)
       ) {
@@ -425,9 +481,16 @@ export function HallEditor(props: HallEditorProps) {
         model.toolChanged('select');
       }
     } catch (error) {
-      report(error);
+      if (
+        pdfImportRef.current === request &&
+        !request.controller.signal.aborted
+      )
+        report(error);
     } finally {
-      setImportingPdf(false);
+      if (pdfImportRef.current === request) {
+        pdfImportRef.current = null;
+        setImportingPdf(false);
+      }
     }
   }
 

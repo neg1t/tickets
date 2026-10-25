@@ -210,7 +210,20 @@ const english: Record<string, string> = {
   'Введите конечное число': 'Enter a finite number',
   'Введите целое число': 'Enter a whole number',
   'PDF должен быть не больше 20 МБ': 'PDF must be no larger than 20 MB',
+  'JSON должен быть не больше 32 МБ': 'JSON must be no larger than 32 MB',
+  'Файл пуст или имеет неверный размер':
+    'The file is empty or has an invalid size',
   'Выберите PDF-файл': 'Select a PDF file',
+  'Выберите JSON-файл': 'Select a JSON file',
+  'Схема содержит слишком много объектов': 'The layout has too many objects',
+  'Схема содержит слишком много файлов': 'The layout has too many files',
+  'PDF содержит слишком много страниц': 'The PDF has too many pages',
+  'Схема содержит слишком много PDF-страниц':
+    'The layout has too many PDF pages',
+  'PDF содержит недопустимое число страниц':
+    'The PDF has an invalid number of pages',
+  'PDF содержит страницу неверного размера':
+    'The PDF has a page with invalid dimensions',
   'План изменился во время загрузки PDF. Повторите импорт.':
     'The layout changed while the PDF was loading. Import it again.',
   'Подложка недоступна или заблокирована':

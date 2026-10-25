@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import smallTheater from '@hall-platform/fixtures/small-theater.json';
 import banquetHall from '@hall-platform/fixtures/banquet-hall.json';
-import { layoutDocumentSchema } from '@hall-platform/domain';
+import {
+  backgroundSchema,
+  layoutDocumentSchema,
+  worldPointSchema,
+} from '@hall-platform/domain';
 import {
   createDemoOccurrence,
   getDemoAvailability,
@@ -18,6 +22,32 @@ const layout = { hallName: 'Small Theater', snapshot };
 const seatId = snapshot.seats[0]?.id ?? '';
 
 describe('demo booking', () => {
+  it('omits private PDF assets and backgrounds from buyer payload', () => {
+    const background = backgroundSchema.parse({
+      id: 'private-pdf',
+      floorId: snapshot.floors[0]?.id,
+      order: 0,
+      position: worldPointSchema.parse({ x: 0, y: 0 }),
+      scale: 1,
+      rotationRadians: 0,
+      opacity: 1,
+      visible: true,
+      locked: false,
+      source: { kind: 'pdf', assetId: 'private-plan', pageNumber: 1 },
+    });
+    const privateLayout = {
+      ...layout,
+      snapshot: { ...snapshot, backgrounds: [background] },
+      assets: {
+        'private-plan': { dataUrl: 'data:application/pdf;base64,SECRET' },
+      },
+    };
+    const occurrence = createDemoOccurrence('private', privateLayout);
+    expect('assets' in occurrence.layout).toBe(false);
+    expect(occurrence.layout.snapshot.backgrounds).toEqual([]);
+    expect(JSON.stringify(occurrence)).not.toContain('SECRET');
+  });
+
   it('holds a seat, rejects a competing hold, then confirms it as sold', () => {
     const occurrence = createDemoOccurrence('demo-small', layout);
     const held = holdDemoSelection(

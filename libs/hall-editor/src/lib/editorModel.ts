@@ -11,6 +11,31 @@ import {
 import type { HallLayoutDraft } from './editorDraft.js';
 import type { EditorTool } from './editorOperations.js';
 
+function equivalentValue(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object')
+    return false;
+  if (Array.isArray(left)) {
+    return (
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((item, index) => equivalentValue(item, right[index]))
+    );
+  }
+  if (Array.isArray(right)) return false;
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const keys = Object.keys(leftRecord);
+  return (
+    keys.length === Object.keys(rightRecord).length &&
+    keys.every(
+      (key) =>
+        Object.hasOwn(rightRecord, key) &&
+        equivalentValue(leftRecord[key], rightRecord[key]),
+    )
+  );
+}
+
 export function createEditorModel(initial: HallLayoutDraft) {
   const stateChanged = createEvent<EditorState>();
   const selectionChanged = createEvent<readonly HallTarget[]>();
@@ -43,7 +68,7 @@ export function createEditorModel(initial: HallLayoutDraft) {
     zoneChanged,
     backgroundChanged,
     replace(value: HallLayoutDraft) {
-      if ($state.getState().draft === value) return;
+      if (equivalentValue($state.getState().draft, value)) return;
       stateChanged(createEditorState(value));
       selectionChanged([]);
       zoneChanged('');

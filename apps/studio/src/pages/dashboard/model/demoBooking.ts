@@ -19,9 +19,11 @@ export function findOwnActiveHold(
   ownerId: string,
   now = Date.now(),
 ): DemoHold | null {
-  return occurrence.holds.find(
-    (hold) => hold.ownerId === ownerId && hold.expiresAt > now,
-  ) ?? null;
+  return (
+    occurrence.holds.find(
+      (hold) => hold.ownerId === ownerId && hold.expiresAt > now,
+    ) ?? null
+  );
 }
 
 export type DemoOrder = {
@@ -50,7 +52,9 @@ export function preferLatestDemoOccurrence(
 ): DemoOccurrence | null {
   if (!incoming || (current && current.id !== incoming.id)) return current;
   if (!current) return incoming;
-  return (incoming.revision ?? 0) > (current.revision ?? 0) ? incoming : current;
+  return (incoming.revision ?? 0) > (current.revision ?? 0)
+    ? incoming
+    : current;
 }
 
 export function createDemoOccurrence(
@@ -59,6 +63,16 @@ export function createDemoOccurrence(
   hallId = layout.snapshot.id,
 ): DemoOccurrence {
   const { snapshot } = layout;
+  const buyerLayout: PublishedHallLayout = {
+    hallName: layout.hallName,
+    ...(layout.zoneBounds ? { zoneBounds: layout.zoneBounds } : {}),
+    snapshot: {
+      ...snapshot,
+      backgrounds: snapshot.backgrounds.filter(
+        (background) => background.source.kind !== 'pdf',
+      ),
+    },
+  };
   const statuses = [
     'available',
     'held',
@@ -72,7 +86,7 @@ export function createDemoOccurrence(
     hallId,
     title: `${layout.hallName} — демо-мероприятие`,
     startsAt: new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString(),
-    layout,
+    layout: buyerLayout,
     initialSeats: Object.fromEntries(
       snapshot.seats.map((seat, index) => [
         seat.id,
@@ -211,7 +225,8 @@ export function holdDemoSelection(
   });
   if (!validation.valid) {
     const code = validation.issues[0]?.code;
-    if (code === 'empty_selection') throw new Error('Выберите места или билеты');
+    if (code === 'empty_selection')
+      throw new Error('Выберите места или билеты');
     if (code === 'duplicate_item') throw new Error('Повторное место в заказе');
     if (code === 'missing_price' || code === 'invalid_price')
       throw new Error('Цена билета недоступна');

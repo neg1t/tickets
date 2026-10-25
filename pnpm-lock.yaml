@@ -384,6 +384,9 @@ importers:
       '@hall-platform/domain':
         specifier: workspace:*
         version: link:../domain
+      '@hall-platform/pdf':
+        specifier: workspace:*
+        version: link:../pdf
 
   libs/pdf:
     dependencies:

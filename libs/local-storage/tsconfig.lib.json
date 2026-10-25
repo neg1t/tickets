@@ -9,6 +9,6 @@
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../domain/tsconfig.lib.json" }],
+  "references": [{ "path": "../domain/tsconfig.lib.json" }, { "path": "../pdf/tsconfig.lib.json" }],
   "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"]
 }
