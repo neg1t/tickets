@@ -33,6 +33,7 @@ export default [
                 'layer:pages',
                 'layer:widgets',
                 'layer:features',
+                'layer:contracts',
                 'layer:entities',
                 'layer:shared',
               ],
@@ -42,6 +43,7 @@ export default [
               onlyDependOnLibsWithTags: [
                 'layer:widgets',
                 'layer:features',
+                'layer:contracts',
                 'layer:entities',
                 'layer:shared',
               ],
@@ -50,12 +52,17 @@ export default [
               sourceTag: 'layer:widgets',
               onlyDependOnLibsWithTags: [
                 'layer:features',
+                'layer:contracts',
                 'layer:entities',
                 'layer:shared',
               ],
             },
             {
               sourceTag: 'layer:features',
+              onlyDependOnLibsWithTags: ['layer:contracts', 'layer:entities', 'layer:shared'],
+            },
+            {
+              sourceTag: 'layer:contracts',
               onlyDependOnLibsWithTags: ['layer:entities', 'layer:shared'],
             },
             {

@@ -49,6 +49,12 @@
       "path": "../../libs/hall-editor/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api-contracts/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/api-axios/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/fixtures/tsconfig.lib.json"
     },
     {

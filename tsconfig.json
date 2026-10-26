@@ -38,6 +38,12 @@
     },
     {
       "path": "./libs/design-tokens"
+    },
+    {
+      "path": "./libs/api-contracts"
+    },
+    {
+      "path": "./libs/api-axios"
     }
   ],
   "compilerOptions": {}

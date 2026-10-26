@@ -1,0 +1,7 @@
+{
+  "name": "api-axios",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/api-axios/src",
+  "projectType": "library",
+  "tags": ["scope:shared", "layer:features"]
+}

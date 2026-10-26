@@ -3,6 +3,8 @@
   "compilerOptions": {
     "outDir": "./out-tsc/vitest",
     "rootDir": ".",
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "lib": ["es2022", "dom", "dom.iterable"],
     "types": [

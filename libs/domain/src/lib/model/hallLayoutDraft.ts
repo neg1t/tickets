@@ -27,7 +27,7 @@ export const pdfAssetSchema = z.strictObject({
 
 export type PdfAsset = z.infer<typeof pdfAssetSchema>;
 
-const hallLayoutDraftSchema = z
+export const hallLayoutDraftSchema = z
   .strictObject({
     schemaVersion: z.literal(CURRENT_DRAFT_SCHEMA_VERSION),
     hallName: z.string().min(1),
