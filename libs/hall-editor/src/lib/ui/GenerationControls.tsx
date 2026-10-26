@@ -1,8 +1,10 @@
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import type { Row, Table } from '@hall-platform/domain';
+import { rowCurveSchema, type Row, type Table } from '@hall-platform/domain';
 import {
   generateRowSeatSlots,
   generateTableSeatSlots,
+  rowPathLength,
+  scaleRowPathFromStart,
   type Vector2,
 } from '@hall-platform/geometry';
 import {
@@ -52,6 +54,42 @@ type RowForm = {
   skippedNumbers: string;
   gaps: string;
 };
+
+const minimumRowSeatSpacing = 1.5;
+
+function rowCurveForSeatCount(
+  row: Row,
+  generation: NonNullable<Row['generation']>,
+  currentCount: number,
+  nextCount: number,
+): Row['curve'] {
+  if (nextCount <= currentCount) return row.curve;
+
+  const length = rowPathLength(row.curve);
+  const startInset = generation.startInset ?? 0;
+  const endInset = generation.endInset ?? 0;
+  const gapLength = (generation.gaps ?? []).reduce(
+    (total, gap) => total + gap.length,
+    0,
+  );
+  const step =
+    generation.distribution.kind === 'fixed'
+      ? generation.distribution.step
+      : Math.max(
+          minimumRowSeatSpacing,
+          currentCount > 1
+            ? (length - startInset - endInset - gapLength) /
+                (currentCount - 1)
+            : minimumRowSeatSpacing,
+        );
+  const requiredLength =
+    startInset + endInset + gapLength + step * (nextCount - 1);
+  return requiredLength > length
+    ? rowCurveSchema.parse(
+        scaleRowPathFromStart(row.curve, requiredLength / length),
+      )
+    : row.curve;
+}
 
 function rowForm(row: Row, seatCount: number): RowForm {
   const generation = row.generation;
@@ -136,18 +174,33 @@ export function RowGenerationControls({
           skippedNumbers,
         },
       };
-      const next = { ...row, generation };
+      const currentCount =
+        row.generation?.distribution.count ?? (seatCount || 8);
+      const curve = rowCurveForSeatCount(
+        row,
+        generation,
+        currentCount,
+        requestedCount,
+      );
+      const next = { ...row, curve, generation };
       const positions = generateRowSeatSlots(next.curve, generation).map(
         ({ position }) => position,
       );
       const changed =
         JSON.stringify(form) !== JSON.stringify(rowForm(row, seatCount));
-      return { next, positions, changed, error: null as string | null };
+      return {
+        next,
+        positions,
+        changed,
+        extended: curve !== row.curve,
+        error: null as string | null,
+      };
     } catch (error) {
       return {
         next: null,
         positions: [] as Vector2[],
         changed: false,
+        extended: false,
         error: error instanceof Error ? error.message : String(error),
       };
     }
@@ -257,6 +310,7 @@ export function RowGenerationControls({
       ) : preview.changed ? (
         <p role="status">
           {tr('Предпросмотр:')} {preview.positions.length} {tr('мест')}
+          {preview.extended && ` · ${tr('Ряд удлинится автоматически')}`}
         </p>
       ) : null}
       <button

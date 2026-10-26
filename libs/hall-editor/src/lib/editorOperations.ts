@@ -152,8 +152,8 @@ export function createObjectAt(
         tool === 'row-line'
           ? {
               kind: 'line',
-              start: worldPointSchema.parse({ x: point.x - 4, y: point.y }),
-              end: worldPointSchema.parse({ x: point.x + 4, y: point.y }),
+              start: worldPointSchema.parse({ x: point.x - 5.25, y: point.y }),
+              end: worldPointSchema.parse({ x: point.x + 5.25, y: point.y }),
             }
           : tool === 'row-arc'
             ? {
@@ -165,10 +165,10 @@ export function createObjectAt(
               }
             : {
                 kind: 'bezier',
-                p0: worldPointSchema.parse({ x: point.x - 4, y: point.y }),
-                p1: worldPointSchema.parse({ x: point.x - 2, y: point.y - 2 }),
-                p2: worldPointSchema.parse({ x: point.x + 2, y: point.y - 2 }),
-                p3: worldPointSchema.parse({ x: point.x + 4, y: point.y }),
+                p0: worldPointSchema.parse({ x: point.x - 5.25, y: point.y }),
+                p1: worldPointSchema.parse({ x: point.x - 2.6, y: point.y - 2 }),
+                p2: worldPointSchema.parse({ x: point.x + 2.6, y: point.y - 2 }),
+                p3: worldPointSchema.parse({ x: point.x + 5.25, y: point.y }),
               };
       const row: Row = {
         id: rowIdSchema.parse(`row-${id}`),

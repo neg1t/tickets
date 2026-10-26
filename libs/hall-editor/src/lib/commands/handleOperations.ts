@@ -18,16 +18,54 @@ function resizeBounds(
   point: Vector2,
 ): SpatialBounds {
   const next = { ...before };
-  const corner = handleId.slice('bounds:'.length);
-  if (corner.endsWith('w'))
+  const handle = handleId.slice('bounds:'.length);
+  if (handle.endsWith('w'))
     next.minX = Math.min(point.x, before.maxX - minimumSize);
-  if (corner.endsWith('e'))
+  if (handle.endsWith('e'))
     next.maxX = Math.max(point.x, before.minX + minimumSize);
-  if (corner.startsWith('n'))
+  if (handle.startsWith('n'))
     next.minY = Math.min(point.y, before.maxY - minimumSize);
-  if (corner.startsWith('s'))
+  if (handle.startsWith('s'))
     next.maxY = Math.max(point.y, before.minY + minimumSize);
   return next;
+}
+
+function polygonBounds(points: readonly Vector2[]): SpatialBounds {
+  return points.slice(1).reduce<SpatialBounds>(
+    (bounds, point) => ({
+      minX: Math.min(bounds.minX, point.x),
+      minY: Math.min(bounds.minY, point.y),
+      maxX: Math.max(bounds.maxX, point.x),
+      maxY: Math.max(bounds.maxY, point.y),
+    }),
+    {
+      minX: points[0]?.x ?? 0,
+      minY: points[0]?.y ?? 0,
+      maxX: points[0]?.x ?? 0,
+      maxY: points[0]?.y ?? 0,
+    },
+  );
+}
+
+function transformPolygon(
+  points: readonly Vector2[],
+  before: SpatialBounds,
+  after: SpatialBounds,
+) {
+  const width = before.maxX - before.minX;
+  const height = before.maxY - before.minY;
+  const nextWidth = after.maxX - after.minX;
+  const nextHeight = after.maxY - after.minY;
+  return points.map((vertex) =>
+    worldPointSchema.parse({
+      x:
+        after.minX +
+        (width ? (vertex.x - before.minX) / width : 0) * nextWidth,
+      y:
+        after.minY +
+        (height ? (vertex.y - before.minY) / height : 0) * nextHeight,
+    }),
+  );
 }
 
 function updateRowCurve(
@@ -38,6 +76,14 @@ function updateRowCurve(
   const curve = row.curve;
   const world = worldPointSchema.parse(point);
   if (curve.kind === 'line') {
+    if (handleId === 'bend')
+      return {
+        ...row,
+        curve: {
+          kind: 'polyline',
+          points: [curve.start, world, curve.end],
+        },
+      };
     if (handleId === 'start')
       return { ...row, curve: { ...curve, start: world } };
     if (handleId === 'end') return { ...row, curve: { ...curve, end: world } };
@@ -148,7 +194,27 @@ export function editHandle(
       publishedSeatIds,
     );
   }
-  if (target.kind === 'zone' && handleId.startsWith('bounds:')) {
+  if (target.kind === 'zone' && handleId.startsWith('vertex:')) {
+    const before = draft.snapshot.zones.find((item) => item.id === target.id);
+    const vertexIndex = /^vertex:(\d+)$/.exec(handleId)?.[1];
+    if (!before?.polygon || vertexIndex === undefined) return empty;
+    const after = {
+      ...before,
+      polygon: before.polygon.map((vertex, index) =>
+        index === Number(vertexIndex) ? worldPointSchema.parse(point) : vertex,
+      ),
+    };
+    return {
+      kind: 'update',
+      patches: [
+        { collection: 'zones', id: before.id, before, after },
+      ],
+    };
+  }
+  if (
+    target.kind === 'zone' &&
+    /^bounds:(nw|n|ne|e|se|s|sw|w)$/.test(handleId)
+  ) {
     const zone = draft.snapshot.zones.find((item) => item.id === target.id);
     if (!zone) return empty;
     const polygon = zone.polygon;
@@ -170,20 +236,7 @@ export function editHandle(
     if (!before) return empty;
     const after = resizeBounds(before, handleId, point);
     if (polygon) {
-      const oldWidth = before.maxX - before.minX;
-      const oldHeight = before.maxY - before.minY;
-      const width = after.maxX - after.minX;
-      const height = after.maxY - after.minY;
-      const transformed = polygon.map((vertex) =>
-        worldPointSchema.parse({
-          x:
-            after.minX +
-            (oldWidth ? (vertex.x - before.minX) / oldWidth : 0) * width,
-          y:
-            after.minY +
-            (oldHeight ? (vertex.y - before.minY) / oldHeight : 0) * height,
-        }),
-      );
+      const transformed = transformPolygon(polygon, before, after);
       return {
         kind: 'update',
         patches: [
@@ -205,6 +258,34 @@ export function editHandle(
           before: draft.zoneBounds[target.id] ?? null,
           after,
         },
+      ],
+    };
+  }
+  if (target.kind === 'decoration') {
+    const before = draft.snapshot.decorations.find(
+      (item) => item.id === target.id,
+    );
+    if (!before || before.kind === 'label') return empty;
+    let polygon: typeof before.polygon | null = null;
+    const vertexIndex = /^vertex:(\d+)$/.exec(handleId)?.[1];
+    if (vertexIndex !== undefined) {
+      polygon = before.polygon.map((vertex, index) =>
+        index === Number(vertexIndex) ? worldPointSchema.parse(point) : vertex,
+      );
+    } else if (/^bounds:(nw|n|ne|e|se|s|sw|w)$/.test(handleId)) {
+      const bounds = polygonBounds(before.polygon);
+      polygon = transformPolygon(
+        before.polygon,
+        bounds,
+        resizeBounds(bounds, handleId, point),
+      );
+    }
+    if (!polygon) return empty;
+    const after = { ...before, polygon };
+    return {
+      kind: 'update',
+      patches: [
+        { collection: 'decorations', id: before.id, before, after },
       ],
     };
   }

@@ -60,7 +60,10 @@ import {
   shouldStartBoxSelection,
   snapPoint,
   snappedMoveDelta,
+  type PolygonEditMode,
 } from './directManipulation.js';
+
+export type { PolygonEditMode } from './directManipulation.js';
 
 export type HallViewerLabels = Readonly<{
   hall: string;
@@ -102,6 +105,7 @@ export type HallViewerProps = {
     >
   >;
   readonly activeTool?: string;
+  readonly polygonEditMode?: PolygonEditMode;
   readonly selectedTargets?: readonly HallTarget[];
   readonly onCanvasClick?: (point: Vector2, target: HallTarget | null) => void;
   readonly onObjectMove?: (target: HallTarget, delta: Vector2) => void;
@@ -216,6 +220,7 @@ export function HallViewer(props: HallViewerProps) {
     zoneBounds,
     backgroundPages,
     activeTool,
+    polygonEditMode,
     selectedTargets,
     onCanvasClick,
     onObjectMove,
@@ -380,7 +385,9 @@ export function HallViewer(props: HallViewerProps) {
   const authoringMode = editorMode && activeTool !== 'pick';
   const handles =
     editorMode && activeTool === 'select' && onHandleCommit
-      ? selection.flatMap((target) => handlesForTarget(scene, target))
+      ? selection.flatMap((target) =>
+          handlesForTarget(scene, target, polygonEditMode),
+        )
       : [];
   const handlePreview =
     preview?.dragging &&
@@ -407,7 +414,7 @@ export function HallViewer(props: HallViewerProps) {
     : scene;
   const displayHandles =
     handlePreview && renderIntent?.target
-      ? handlesForTarget(displayScene, renderIntent.target)
+      ? handlesForTarget(displayScene, renderIntent.target, polygonEditMode)
       : handles;
   const boxBounds =
     preview?.dragging && renderIntent?.mode === 'box'
@@ -440,6 +447,19 @@ export function HallViewer(props: HallViewerProps) {
     preview && movingKeys.size > 0
       ? snappedMoveDelta(preview.startWorld, preview.delta, gridEnabled)
       : null;
+  const positionedHandles = displayHandles.map((handle) => {
+    const key = `${handle.target.kind}:${handle.target.id}`;
+    const delta = previewDelta && movingKeys.has(key) ? previewDelta : null;
+    return delta
+      ? {
+          ...handle,
+          point: {
+            x: handle.point.x + delta.x,
+            y: handle.point.y + delta.y,
+          },
+        }
+      : handle;
+  });
   // Include a screen-space margin so symbols and labels crossing an edge stay visible.
   const margin = Math.max(2, 100 / viewport.scale);
   const rendered = useMemo(
@@ -616,24 +636,58 @@ export function HallViewer(props: HallViewerProps) {
       0,
       showSeats ? undefined : farZoomTargets,
     );
-    const handle =
+    const clickedSeat =
+      exactTarget?.kind === 'seat'
+        ? scene.seatsById.get(exactTarget.id)
+        : null;
+    const clickedSeatRowId =
+      clickedSeat?.placement.kind === 'row' ? clickedSeat.placement.rowId : null;
+    const parentRowTarget =
+      clickedSeatRowId &&
+      (native.altKey ||
+        (selectedKeys.has(`row:${clickedSeatRowId}`) &&
+          !native.shiftKey &&
+          !native.ctrlKey &&
+          !native.metaKey))
+        ? { kind: 'row' as const, id: clickedSeatRowId }
+        : null;
+    const handleConflictsWithTarget = Boolean(
       nearbyHandle &&
-      exactTarget &&
-      `${nearbyHandle.target.kind}:${nearbyHandle.target.id}` !==
-        `${exactTarget.kind}:${exactTarget.id}`
-        ? null
-        : nearbyHandle;
+        exactTarget &&
+        `${nearbyHandle.target.kind}:${nearbyHandle.target.id}` !==
+          `${exactTarget.kind}:${exactTarget.id}`,
+    );
+    const selectedHandle = Boolean(
+      nearbyHandle &&
+        selectedKeys.has(
+          `${nearbyHandle.target.kind}:${nearbyHandle.target.id}`,
+        ),
+    );
+    const handle =
+      selectedHandle
+        ? nearbyHandle
+        : parentRowTarget || handleConflictsWithTarget
+          ? null
+          : nearbyHandle;
     const target =
-      exactTarget ??
       handle?.target ??
+      parentRowTarget ??
+      exactTarget ??
       hitTestHallScene(
         scene,
         world,
         (native.pointerType === 'touch' ? 10 : 3) / viewport.scale,
         showSeats ? undefined : farZoomTargets,
       );
-    const pan = tool === 'pan' || native.button === 1 || native.altKey;
-    const create = activeTool !== undefined && activeTool !== 'select' && !pan;
+    const pan =
+      tool === 'pan' ||
+      native.button === 1 ||
+      (native.altKey && !parentRowTarget);
+    const create =
+      !parentRowTarget &&
+      activeTool !== undefined &&
+      activeTool !== 'select' &&
+      !pan;
     const selected = target && selectedKeys.has(`${target.kind}:${target.id}`);
     const modifiers = {
       shift: native.shiftKey,
@@ -1367,16 +1421,30 @@ export function HallViewer(props: HallViewerProps) {
                   strokeWidth={0.12}
                 />
               )}
-              {displayHandles.map((handle) => (
-                <Circle
-                  key={`${handle.target.kind}:${handle.target.id}:${handle.id}`}
-                  x={handle.point.x}
-                  y={handle.point.y}
-                  radius={Math.max(0.15, 6 / viewport.scale)}
-                  fill={palette.selected}
-                  stroke={palette.ink}
-                  strokeWidth={Math.max(0.06, 1 / viewport.scale)}
-                />
+              {positionedHandles.map((handle) => (
+                handle.id.startsWith('bounds:') ? (
+                  <Rect
+                    key={`${handle.target.kind}:${handle.target.id}:${handle.id}`}
+                    x={handle.point.x - Math.max(0.16, 5 / viewport.scale)}
+                    y={handle.point.y - Math.max(0.16, 5 / viewport.scale)}
+                    width={Math.max(0.32, 10 / viewport.scale)}
+                    height={Math.max(0.32, 10 / viewport.scale)}
+                    cornerRadius={0.06}
+                    fill="#fff"
+                    stroke={palette.selected}
+                    strokeWidth={Math.max(0.06, 1 / viewport.scale)}
+                  />
+                ) : (
+                  <Circle
+                    key={`${handle.target.kind}:${handle.target.id}:${handle.id}`}
+                    x={handle.point.x}
+                    y={handle.point.y}
+                    radius={Math.max(0.15, 6 / viewport.scale)}
+                    fill={palette.selected}
+                    stroke={palette.ink}
+                    strokeWidth={Math.max(0.06, 1 / viewport.scale)}
+                  />
+                )
               ))}
               {calibrationGuide && (
                 <Line

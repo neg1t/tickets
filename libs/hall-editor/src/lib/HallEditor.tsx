@@ -20,9 +20,13 @@ import {
   type Table,
   type Zone,
 } from '@hall-platform/domain';
-import type { SpatialBounds, Vector2 } from '@hall-platform/geometry';
+import type { Vector2 } from '@hall-platform/geometry';
 import { encodePdfDataUrl, inspectPdfBytes } from '@hall-platform/pdf';
-import type { HallTarget } from '@hall-platform/renderer-konva';
+import {
+  buildHallScene,
+  type HallTarget,
+  type PolygonEditMode,
+} from '@hall-platform/renderer-konva';
 
 import type { EditorCommand } from './editorCommands.js';
 import type { HallLayoutDraft } from './editorDraft.js';
@@ -120,6 +124,7 @@ export function HallEditor(props: HallEditorProps) {
   const [floorId, setFloorId] = useState(value.snapshot.floors[0]?.id ?? '');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [knownMillimeters, setKnownMillimeters] = useState(1000);
+  const [polygonEditMode, setPolygonEditMode] = useState<PolygonEditMode>('move');
   const [calibrationFirst, setCalibrationFirst] = useState<Vector2 | null>(
     null,
   );
@@ -166,6 +171,10 @@ export function HallEditor(props: HallEditorProps) {
     draft.snapshot.backgrounds.find((item) => item.id === backgroundId) ?? null;
 
   useEffect(() => {
+    setPolygonEditMode('move');
+  }, [targetKey, selection.length]);
+
+  useEffect(() => {
     if (controlledValueRef.current !== value) {
       cancelPdfImport();
       controlledValueRef.current = value;
@@ -201,6 +210,7 @@ export function HallEditor(props: HallEditorProps) {
   function selectTool(next: EditorTool) {
     if (next !== tool) clearCalibration();
     model.toolChanged(next);
+    if (next !== 'select') setPolygonEditMode('move');
     setMobilePanel(null);
   }
 
@@ -581,46 +591,59 @@ export function HallEditor(props: HallEditorProps) {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
-    if (event.key === 'Escape') {
-      setMobilePanel(null);
-      if (tool !== 'select') model.toolChanged('select');
-      clearCalibration();
-    }
     if (
       event.target instanceof HTMLInputElement ||
-      event.target instanceof HTMLSelectElement
+      event.target instanceof HTMLSelectElement ||
+      event.target instanceof HTMLTextAreaElement ||
+      (event.target instanceof HTMLElement && event.target.isContentEditable)
     )
       return;
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+    const key = event.code.startsWith('Key')
+      ? event.code.slice(3).toLowerCase()
+      : event.key.toLowerCase();
+    if (event.key === 'Escape') {
+      setMobilePanel(null);
+      if (tool !== 'select') selectTool('select');
+      clearCalibration();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && key === 'z') {
       event.preventDefault();
       if (event.shiftKey) handleRedo();
       else handleUndo();
     } else if (
       (event.ctrlKey || event.metaKey) &&
-      event.key.toLowerCase() === 'y'
+      key === 'y'
     ) {
       event.preventDefault();
       handleRedo();
     } else if (
       (event.ctrlKey || event.metaKey) &&
-      event.key.toLowerCase() === 'd'
+      key === 'd'
     ) {
       event.preventDefault();
       handleDuplicate();
     } else if (
       (event.ctrlKey || event.metaKey) &&
-      event.key.toLowerCase() === 'c'
+      key === 'c'
     ) {
       event.preventDefault();
       handleCopy();
     } else if (
       (event.ctrlKey || event.metaKey) &&
-      event.key.toLowerCase() === 'v'
+      key === 'v'
     ) {
       event.preventDefault();
       handlePaste();
     } else if (event.key === 'Delete') {
       handleDelete();
+    } else if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+      const shortcutTool =
+        key === 'v' ? 'select' : key === 'h' ? 'pan' : null;
+      if (shortcutTool) {
+        event.preventDefault();
+        selectTool(shortcutTool);
+      }
     }
   }
 
@@ -687,16 +710,6 @@ export function HallEditor(props: HallEditorProps) {
         : transformTable(draft, table, after, publishedSeatIds),
     );
   }
-  function updateBounds(
-    id: string,
-    before: SpatialBounds,
-    after: SpatialBounds,
-  ) {
-    commit({
-      kind: 'update',
-      patches: [{ collection: 'zoneBounds', id, before, after }],
-    });
-  }
   function updateDecoration(before: Decoration, after: Decoration) {
     commit({
       kind: 'update',
@@ -712,6 +725,11 @@ export function HallEditor(props: HallEditorProps) {
     target?.kind === 'seat'
       ? draft.snapshot.seats.find((item) => item.id === target.id)
       : null;
+  const parentRowId =
+    seat && seat.placement.kind === 'row' ? seat.placement.rowId : null;
+  const parentRow = parentRowId
+    ? draft.snapshot.rows.find((item) => item.id === parentRowId) ?? null
+    : null;
   const row =
     target?.kind === 'row'
       ? draft.snapshot.rows.find((item) => item.id === target.id)
@@ -725,13 +743,40 @@ export function HallEditor(props: HallEditorProps) {
       ? draft.snapshot.decorations.find((item) => item.id === target.id)
       : null;
   const bounds = zone ? draft.zoneBounds[zone.id] : null;
-  const lineCurve = row?.curve.kind === 'line' ? row.curve : null;
-  const arcCurve = row?.curve.kind === 'arc' ? row.curve : null;
-  const bezierCurve = row?.curve.kind === 'bezier' ? row.curve : null;
+  const editablePolygon = Boolean(
+    zone || (decoration && decoration.kind !== 'label'),
+  );
+  const editableShape = Boolean(editablePolygon || row);
   const mixedCenterX =
     selection.length > 1 ? selectionCenterValue(draft, selection, 'x') : null;
   const mixedCenterY =
     selection.length > 1 ? selectionCenterValue(draft, selection, 'y') : null;
+
+  function activatePolygonMode(next: Exclude<PolygonEditMode, 'move'>) {
+    if (tool !== 'select') {
+      clearCalibration();
+      model.toolChanged('select');
+    }
+    const mode = polygonEditMode === next ? 'move' : next;
+    const zoneBounds =
+      zone && !zone.polygon
+        ? bounds ??
+          buildHallScene(draft.snapshot, zone.floorId, draft.zoneBounds).zones
+            .find((item) => item.zone.id === zone.id)?.bounds
+        : null;
+    if (mode === 'geometry' && zone && !zone.polygon && zoneBounds) {
+      updateZone(zone, {
+        ...zone,
+        polygon: [
+          worldPointSchema.parse({ x: zoneBounds.minX, y: zoneBounds.minY }),
+          worldPointSchema.parse({ x: zoneBounds.maxX, y: zoneBounds.minY }),
+          worldPointSchema.parse({ x: zoneBounds.maxX, y: zoneBounds.maxY }),
+          worldPointSchema.parse({ x: zoneBounds.minX, y: zoneBounds.maxY }),
+        ],
+      });
+    }
+    setPolygonEditMode(mode);
+  }
 
   return (
     <EditorLocaleContext.Provider value={locale}>
@@ -740,6 +785,15 @@ export function HallEditor(props: HallEditorProps) {
         aria-label={`${tr('Редактор зала')} ${draft.hallName}`}
         tabIndex={0}
         onKeyDown={handleKeyDown}
+        onPointerDown={(event) => {
+          const target = event.target;
+          if (
+            target instanceof Element &&
+            target.closest('button, input, select, textarea, [contenteditable="true"]')
+          )
+            return;
+          event.currentTarget.focus();
+        }}
       >
         <header className="hall-editor-header">
           <strong>{draft.hallName}</strong>
@@ -754,17 +808,19 @@ export function HallEditor(props: HallEditorProps) {
           <button
             type="button"
             disabled={readonly || state.past.length === 0}
+            aria-keyshortcuts="Control+Z Meta+Z"
             onClick={handleUndo}
           >
-            {tr('Отменить')}
+            {tr('Отменить')} <kbd className="hall-editor-shortcut">Ctrl+Z</kbd>
           </button>
 
           <button
             type="button"
             disabled={readonly || state.future.length === 0}
+            aria-keyshortcuts="Control+Y Meta+Y Control+Shift+Z Meta+Shift+Z"
             onClick={handleRedo}
           >
-            {tr('Повторить')}
+            {tr('Повторить')} <kbd className="hall-editor-shortcut">Ctrl+Y</kbd>
           </button>
 
           {onSave && (
@@ -812,6 +868,12 @@ export function HallEditor(props: HallEditorProps) {
                     key={item.id}
                     type="button"
                     aria-pressed={tool === item.id}
+                    aria-keyshortcuts={item.shortcut}
+                    title={
+                      item.shortcut
+                        ? `${tr(item.label)} (${item.shortcut})`
+                        : tr(item.label)
+                    }
                     disabled={
                       readonly && item.id !== 'select' && item.id !== 'pan'
                     }
@@ -819,7 +881,10 @@ export function HallEditor(props: HallEditorProps) {
                       selectTool(item.id);
                     }}
                   >
-                    {tr(item.label)}
+                    {tr(item.label)}{' '}
+                    {item.shortcut && (
+                      <kbd className="hall-editor-shortcut">{item.shortcut}</kbd>
+                    )}
                   </button>
                 ))}
               </div>
@@ -1015,6 +1080,7 @@ export function HallEditor(props: HallEditorProps) {
               previewSeats={previewSeats}
               onError={report}
               activeTool={tool}
+              polygonEditMode={polygonEditMode}
               selectedTargets={selection}
               {...(calibrationFirst && calibrationHover
                 ? {
@@ -1216,6 +1282,42 @@ export function HallEditor(props: HallEditorProps) {
                 )}
               </div>
             )}
+            {editableShape && selection.length === 1 && !readonly && (
+              <div
+                className="hall-editor-polygon-actions"
+                aria-label={tr('Изменение размера или формы объекта')}
+              >
+                <button
+                  type="button"
+                  aria-pressed={polygonEditMode === 'resize'}
+                  onClick={() => activatePolygonMode('resize')}
+                >
+                  {tr('Изменить размер')}
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={polygonEditMode === 'geometry'}
+                  onClick={() => activatePolygonMode('geometry')}
+                >
+                  {tr('Изменить форму')}
+                </button>
+                <p>
+                  {row
+                    ? polygonEditMode === 'resize'
+                      ? tr('Потяните за крайние точки ряда, чтобы изменить длину.')
+                      : polygonEditMode === 'geometry'
+                        ? tr('Перетаскивайте точки ряда, чтобы изменить форму.')
+                        : tr('Выберите размер или форму, затем перетаскивайте маркеры ряда.')
+                    : polygonEditMode === 'resize'
+                      ? tr('Потяните за край или угол.')
+                      : polygonEditMode === 'geometry'
+                        ? tr('Перетаскивайте точки контура.')
+                        : tr(
+                            'Выберите действие, затем перетаскивайте маркеры на схеме.',
+                          )}
+                </p>
+              </div>
+            )}
             {selection.length > 1 && (
               <div className="hall-editor-mixed-properties">
                 <h4>
@@ -1300,76 +1402,6 @@ export function HallEditor(props: HallEditorProps) {
                     }
                   />
                 )}
-                <button
-                  type="button"
-                  disabled={readonly || !bounds}
-                  onClick={() => {
-                    if (!bounds) return;
-                    updateZone(zone, {
-                      ...zone,
-                      polygon: [
-                        worldPointSchema.parse({
-                          x: bounds.minX,
-                          y: bounds.minY,
-                        }),
-                        worldPointSchema.parse({
-                          x: bounds.maxX,
-                          y: bounds.minY,
-                        }),
-                        worldPointSchema.parse({
-                          x: bounds.maxX,
-                          y: bounds.maxY,
-                        }),
-                        worldPointSchema.parse({
-                          x: bounds.minX,
-                          y: bounds.maxY,
-                        }),
-                      ],
-                    });
-                  }}
-                >
-                  {tr('Преобразовать в полигон')}
-                </button>
-                {zone.polygon?.map((point, index) => (
-                  <div key={index}>
-                    <PropertyField
-                      label={tr(`Вершина ${index + 1} X`)}
-                      value={point.x}
-                      disabled={readonly}
-                      onCommit={(x) =>
-                        updateZone(zone, {
-                          ...zone,
-                          polygon: zone.polygon?.map((item, i) =>
-                            i === index
-                              ? worldPointSchema.parse({
-                                  ...item,
-                                  x: Number(x),
-                                })
-                              : item,
-                          ),
-                        })
-                      }
-                    />
-                    <PropertyField
-                      label={tr(`Вершина ${index + 1} Y`)}
-                      value={point.y}
-                      disabled={readonly}
-                      onCommit={(y) =>
-                        updateZone(zone, {
-                          ...zone,
-                          polygon: zone.polygon?.map((item, i) =>
-                            i === index
-                              ? worldPointSchema.parse({
-                                  ...item,
-                                  y: Number(y),
-                                })
-                              : item,
-                          ),
-                        })
-                      }
-                    />
-                  </div>
-                ))}
                 <PropertyField
                   label={tr('Название зоны')}
                   value={zone.name}
@@ -1378,58 +1410,6 @@ export function HallEditor(props: HallEditorProps) {
                     updateZone(zone, { ...zone, name: String(name) })
                   }
                 />
-                {bounds && !zone.polygon && (
-                  <>
-                    <PropertyField
-                      label={tr('X зоны')}
-                      value={bounds.minX}
-                      disabled={readonly}
-                      onCommit={(x) => {
-                        const delta = Number(x) - bounds.minX;
-                        updateBounds(zone.id, bounds, {
-                          ...bounds,
-                          minX: Number(x),
-                          maxX: bounds.maxX + delta,
-                        });
-                      }}
-                    />
-                    <PropertyField
-                      label={tr('Y зоны')}
-                      value={bounds.minY}
-                      disabled={readonly}
-                      onCommit={(y) => {
-                        const delta = Number(y) - bounds.minY;
-                        updateBounds(zone.id, bounds, {
-                          ...bounds,
-                          minY: Number(y),
-                          maxY: bounds.maxY + delta,
-                        });
-                      }}
-                    />
-                    <PropertyField
-                      label={tr('Ширина зоны')}
-                      value={bounds.maxX - bounds.minX}
-                      disabled={readonly}
-                      onCommit={(width) =>
-                        updateBounds(zone.id, bounds, {
-                          ...bounds,
-                          maxX: bounds.minX + Number(width),
-                        })
-                      }
-                    />
-                    <PropertyField
-                      label={tr('Высота зоны')}
-                      value={bounds.maxY - bounds.minY}
-                      disabled={readonly}
-                      onCommit={(height) =>
-                        updateBounds(zone.id, bounds, {
-                          ...bounds,
-                          maxY: bounds.minY + Number(height),
-                        })
-                      }
-                    />
-                  </>
-                )}
               </>
             )}
             {decoration && (
@@ -1489,53 +1469,29 @@ export function HallEditor(props: HallEditorProps) {
                       }
                     />
                   </>
-                ) : (
-                  decoration.polygon.map((point, index) => (
-                    <div key={index}>
-                      <PropertyField
-                        label={tr(`Вершина объекта ${index + 1} X`)}
-                        value={point.x}
-                        disabled={readonly}
-                        onCommit={(x) =>
-                          updateDecoration(decoration, {
-                            ...decoration,
-                            polygon: decoration.polygon.map((item, i) =>
-                              i === index
-                                ? worldPointSchema.parse({
-                                    ...item,
-                                    x: Number(x),
-                                  })
-                                : item,
-                            ),
-                          })
-                        }
-                      />
-                      <PropertyField
-                        label={tr(`Вершина объекта ${index + 1} Y`)}
-                        value={point.y}
-                        disabled={readonly}
-                        onCommit={(y) =>
-                          updateDecoration(decoration, {
-                            ...decoration,
-                            polygon: decoration.polygon.map((item, i) =>
-                              i === index
-                                ? worldPointSchema.parse({
-                                    ...item,
-                                    y: Number(y),
-                                  })
-                                : item,
-                            ),
-                          })
-                        }
-                      />
-                    </div>
-                  ))
-                )}
+                ) : null}
               </>
             )}
             {seat && (
               <>
                 <h4>{tr('Место')}</h4>
+                {parentRow && (
+                  <button
+                    type="button"
+                    className="hall-editor-parent-select"
+                    title={tr('Alt+щелчок по месту — выбрать ряд')}
+                    onClick={() => {
+                      if (tool !== 'select') clearCalibration();
+                      model.toolChanged('select');
+                      model.selectionChanged([
+                        { kind: 'row', id: parentRow.id },
+                      ]);
+                    }}
+                  >
+                    {tr('Выбрать ряд')}: {parentRow.name}
+                    <kbd className="hall-editor-shortcut">Alt+клик</kbd>
+                  </button>
+                )}
                 <label className="hall-editor-field">
                   {tr('Тип места')}
                   <select
@@ -1601,173 +1557,6 @@ export function HallEditor(props: HallEditorProps) {
                     updateRow(row, { ...row, name: String(name) })
                   }
                 />
-                {lineCurve && (
-                  <>
-                    <PropertyField
-                      label={tr('Начало X')}
-                      value={lineCurve.start.x}
-                      disabled={readonly}
-                      onCommit={(x) =>
-                        updateRow(row, {
-                          ...row,
-                          curve: {
-                            ...lineCurve,
-                            start: { ...lineCurve.start, x: Number(x) },
-                          },
-                        })
-                      }
-                    />
-                    <PropertyField
-                      label={tr('Начало Y')}
-                      value={lineCurve.start.y}
-                      disabled={readonly}
-                      onCommit={(y) =>
-                        updateRow(row, {
-                          ...row,
-                          curve: {
-                            ...lineCurve,
-                            start: { ...lineCurve.start, y: Number(y) },
-                          },
-                        })
-                      }
-                    />
-                    <PropertyField
-                      label={tr('Конец X')}
-                      value={lineCurve.end.x}
-                      disabled={readonly}
-                      onCommit={(x) =>
-                        updateRow(row, {
-                          ...row,
-                          curve: {
-                            ...lineCurve,
-                            end: { ...lineCurve.end, x: Number(x) },
-                          },
-                        })
-                      }
-                    />
-                    <PropertyField
-                      label={tr('Конец Y')}
-                      value={lineCurve.end.y}
-                      disabled={readonly}
-                      onCommit={(y) =>
-                        updateRow(row, {
-                          ...row,
-                          curve: {
-                            ...lineCurve,
-                            end: { ...lineCurve.end, y: Number(y) },
-                          },
-                        })
-                      }
-                    />
-                  </>
-                )}
-                {arcCurve && (
-                  <>
-                    <PropertyField
-                      label={tr('Центр X')}
-                      value={arcCurve.center.x}
-                      disabled={readonly}
-                      onCommit={(x) =>
-                        updateRow(row, {
-                          ...row,
-                          curve: {
-                            ...arcCurve,
-                            center: { ...arcCurve.center, x: Number(x) },
-                          },
-                        })
-                      }
-                    />
-                    <PropertyField
-                      label={tr('Центр Y')}
-                      value={arcCurve.center.y}
-                      disabled={readonly}
-                      onCommit={(y) =>
-                        updateRow(row, {
-                          ...row,
-                          curve: {
-                            ...arcCurve,
-                            center: { ...arcCurve.center, y: Number(y) },
-                          },
-                        })
-                      }
-                    />
-                    <PropertyField
-                      label={tr('Радиус ряда')}
-                      value={arcCurve.radius}
-                      disabled={readonly}
-                      onCommit={(radius) =>
-                        updateRow(row, {
-                          ...row,
-                          curve: { ...arcCurve, radius: Number(radius) },
-                        })
-                      }
-                    />
-                    <PropertyField
-                      label={tr('Угол начала')}
-                      value={arcCurve.startAngle}
-                      disabled={readonly}
-                      onCommit={(startAngle) =>
-                        updateRow(row, {
-                          ...row,
-                          curve: {
-                            ...arcCurve,
-                            startAngle: Number(startAngle),
-                          },
-                        })
-                      }
-                    />
-                    <PropertyField
-                      label={tr('Угол конца')}
-                      value={arcCurve.endAngle}
-                      disabled={readonly}
-                      onCommit={(endAngle) =>
-                        updateRow(row, {
-                          ...row,
-                          curve: { ...arcCurve, endAngle: Number(endAngle) },
-                        })
-                      }
-                    />
-                  </>
-                )}
-                {bezierCurve &&
-                  (['p0', 'p1', 'p2', 'p3'] as const).map((pointKey) => (
-                    <div key={pointKey}>
-                      <PropertyField
-                        label={`${pointKey} X`}
-                        value={bezierCurve[pointKey].x}
-                        disabled={readonly}
-                        onCommit={(x) =>
-                          updateRow(row, {
-                            ...row,
-                            curve: {
-                              ...bezierCurve,
-                              [pointKey]: {
-                                ...bezierCurve[pointKey],
-                                x: Number(x),
-                              },
-                            },
-                          })
-                        }
-                      />
-                      <PropertyField
-                        label={`${pointKey} Y`}
-                        value={bezierCurve[pointKey].y}
-                        disabled={readonly}
-                        onCommit={(y) =>
-                          updateRow(row, {
-                            ...row,
-                            curve: {
-                              ...bezierCurve,
-                              [pointKey]: {
-                                ...bezierCurve[pointKey],
-                                y: Number(y),
-                              },
-                            },
-                          })
-                        }
-                      />
-                    </div>
-                  ))}
                 <RowGenerationControls
                   key={`${row.id}:${JSON.stringify(row.generation)}`}
                   row={row}

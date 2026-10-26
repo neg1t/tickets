@@ -18,6 +18,100 @@ export type EditHandle = Readonly<{
   target: HallTarget;
 }>;
 
+export type PolygonEditMode = 'move' | 'resize' | 'geometry';
+
+const cornerHandleIds = ['nw', 'ne', 'se', 'sw'] as const;
+const resizeHandleIds = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
+
+function boundsOfPoints(points: readonly Vector2[]): SpatialBounds | null {
+  if (points.length === 0) return null;
+  return points.slice(1).reduce<SpatialBounds>(
+    (bounds, point) => ({
+      minX: Math.min(bounds.minX, point.x),
+      minY: Math.min(bounds.minY, point.y),
+      maxX: Math.max(bounds.maxX, point.x),
+      maxY: Math.max(bounds.maxY, point.y),
+    }),
+    {
+      minX: points[0]?.x ?? 0,
+      minY: points[0]?.y ?? 0,
+      maxX: points[0]?.x ?? 0,
+      maxY: points[0]?.y ?? 0,
+    },
+  );
+}
+
+function boundsHandles(
+  target: HallTarget,
+  bounds: SpatialBounds,
+  mode: PolygonEditMode | undefined,
+): EditHandle[] {
+  if (mode === 'move' || mode === 'geometry') return [];
+  const ids = mode === 'resize' ? resizeHandleIds : cornerHandleIds;
+  const middleX = (bounds.minX + bounds.maxX) / 2;
+  const middleY = (bounds.minY + bounds.maxY) / 2;
+  const points: Record<(typeof resizeHandleIds)[number], Vector2> = {
+    nw: { x: bounds.minX, y: bounds.minY },
+    n: { x: middleX, y: bounds.minY },
+    ne: { x: bounds.maxX, y: bounds.minY },
+    e: { x: bounds.maxX, y: middleY },
+    se: { x: bounds.maxX, y: bounds.maxY },
+    s: { x: middleX, y: bounds.maxY },
+    sw: { x: bounds.minX, y: bounds.maxY },
+    w: { x: bounds.minX, y: middleY },
+  };
+  return ids.map((id) => ({ id: `bounds:${id}`, point: points[id], target }));
+}
+
+function vertexHandles(
+  target: HallTarget,
+  polygon: readonly Vector2[],
+  mode: PolygonEditMode | undefined,
+): EditHandle[] {
+  return mode === 'geometry'
+    ? polygon.map((point, index) => ({
+        id: `vertex:${index}`,
+        point,
+        target,
+      }))
+    : [];
+}
+
+function resizeBounds(
+  before: SpatialBounds,
+  handleId: string,
+  point: Vector2,
+): SpatialBounds {
+  const handle = handleId.slice('bounds:'.length);
+  const next = { ...before };
+  if (handle.endsWith('w')) next.minX = Math.min(point.x, before.maxX - 0.1);
+  if (handle.endsWith('e')) next.maxX = Math.max(point.x, before.minX + 0.1);
+  if (handle.startsWith('n')) next.minY = Math.min(point.y, before.maxY - 0.1);
+  if (handle.startsWith('s')) next.maxY = Math.max(point.y, before.minY + 0.1);
+  return next;
+}
+
+function transformPolygon(
+  polygon: readonly Vector2[],
+  before: SpatialBounds,
+  after: SpatialBounds,
+) {
+  const oldWidth = before.maxX - before.minX;
+  const oldHeight = before.maxY - before.minY;
+  const width = after.maxX - after.minX;
+  const height = after.maxY - after.minY;
+  return polygon.map((vertex) =>
+    worldPointSchema.parse({
+      x:
+        after.minX +
+        (oldWidth ? (vertex.x - before.minX) / oldWidth : 0) * width,
+      y:
+        after.minY +
+        (oldHeight ? (vertex.y - before.minY) / oldHeight : 0) * height,
+    }),
+  );
+}
+
 export function snapPoint(point: Vector2, enabled: boolean): Vector2 {
   return enabled ? { x: Math.round(point.x), y: Math.round(point.y) } : point;
 }
@@ -181,6 +275,7 @@ function rotatedPoint(
 export function handlesForTarget(
   scene: HallScene,
   target: HallTarget,
+  polygonMode?: PolygonEditMode,
 ): EditHandle[] {
   const handle = (id: string, point: Vector2): EditHandle => ({
     id,
@@ -201,42 +296,68 @@ export function handlesForTarget(
   if (target.kind === 'row') {
     const curve = scene.rowsById.get(target.id)?.row.curve;
     if (!curve) return [];
-    switch (curve.kind) {
-      case 'line':
-        return [handle('start', curve.start), handle('end', curve.end)];
-      case 'bezier':
-        return [
-          handle('start', curve.p0),
-          handle('control1', curve.p1),
-          handle('control2', curve.p2),
-          handle('end', curve.p3),
-        ];
-      case 'polyline':
-        return curve.points.map((point, index) =>
-          handle(`point:${index}`, point),
-        );
-      case 'arc':
-        return [
-          handle('center', curve.center),
-          handle(
-            'radius',
-            rotatedPoint(
-              curve.center,
-              curve.radius,
-              0,
-              (curve.startAngle + curve.endAngle) / 2,
+    const curveHandles = (() => {
+      switch (curve.kind) {
+        case 'line':
+          return [handle('start', curve.start), handle('end', curve.end)];
+        case 'bezier':
+          return [
+            handle('start', curve.p0),
+            handle('control1', curve.p1),
+            handle('control2', curve.p2),
+            handle('end', curve.p3),
+          ];
+        case 'polyline':
+          return curve.points.map((point, index) =>
+            handle(`point:${index}`, point),
+          );
+        case 'arc':
+          return [
+            handle('center', curve.center),
+            handle(
+              'radius',
+              rotatedPoint(
+                curve.center,
+                curve.radius,
+                0,
+                (curve.startAngle + curve.endAngle) / 2,
+              ),
             ),
-          ),
-          handle(
-            'startAngle',
-            rotatedPoint(curve.center, curve.radius, 0, curve.startAngle),
-          ),
-          handle(
-            'endAngle',
-            rotatedPoint(curve.center, curve.radius, 0, curve.endAngle),
-          ),
-        ];
+            handle(
+              'startAngle',
+              rotatedPoint(curve.center, curve.radius, 0, curve.startAngle),
+            ),
+            handle(
+              'endAngle',
+              rotatedPoint(curve.center, curve.radius, 0, curve.endAngle),
+            ),
+          ];
+      }
+    })();
+    if (polygonMode === 'move') return [];
+    if (polygonMode === 'resize') {
+      if (curve.kind === 'arc')
+        return curveHandles.filter((item) => item.id === 'radius');
+      if (curve.kind === 'bezier')
+        return curveHandles.filter(
+          (item) => item.id === 'start' || item.id === 'end',
+        );
+      if (curve.kind === 'polyline')
+        return curveHandles.filter(
+          (item) =>
+            item.id === 'point:0' ||
+            item.id === `point:${curve.points.length - 1}`,
+        );
     }
+    if (polygonMode === 'geometry' && curve.kind === 'line')
+      return [
+        ...curveHandles,
+        handle('bend', {
+          x: (curve.start.x + curve.end.x) / 2,
+          y: (curve.start.y + curve.end.y) / 2,
+        }),
+      ];
+    return curveHandles;
   }
   if (target.kind === 'table') {
     const table = scene.tablesById.get(target.id);
@@ -265,13 +386,17 @@ export function handlesForTarget(
   if (target.kind === 'zone') {
     const zone = scene.zonesById.get(target.id);
     if (!zone) return [];
-    const { minX, minY, maxX, maxY } = zone.bounds;
-    return [
-      handle('bounds:nw', { x: minX, y: minY }),
-      handle('bounds:ne', { x: maxX, y: minY }),
-      handle('bounds:se', { x: maxX, y: maxY }),
-      handle('bounds:sw', { x: minX, y: maxY }),
-    ];
+    if (polygonMode === 'geometry' && zone.zone.polygon)
+      return vertexHandles(target, zone.zone.polygon, polygonMode);
+    return boundsHandles(target, zone.bounds, polygonMode);
+  }
+  if (target.kind === 'decoration') {
+    const decoration = scene.decorationsById.get(target.id);
+    if (!decoration || decoration.kind === 'label') return [];
+    if (polygonMode === 'geometry')
+      return vertexHandles(target, decoration.polygon, polygonMode);
+    const bounds = boundsOfPoints(decoration.polygon);
+    return bounds ? boundsHandles(target, bounds, polygonMode) : [];
   }
   return [];
 }
@@ -326,6 +451,14 @@ export function editHandleGeometry(
       const curve = row.curve;
       switch (curve.kind) {
         case 'line':
+          if (handleId === 'bend')
+            return {
+              ...row,
+              curve: {
+                kind: 'polyline' as const,
+                points: [curve.start, worldPoint, curve.end],
+              },
+            };
           return {
             ...row,
             curve:
@@ -442,38 +575,74 @@ export function editHandleGeometry(
     };
   }
   if (target.kind === 'zone') {
-    const bounds = zoneBounds[target.id];
-    if (!bounds || !/^bounds:(nw|ne|se|sw)$/.test(handleId))
-      return { snapshot, zoneBounds };
-    const corner = handleId.slice('bounds:'.length);
-    const minX = corner.includes('w')
-      ? Math.min(point.x, bounds.maxX - 0.1)
-      : bounds.minX;
-    const maxX = corner.includes('e')
-      ? Math.max(point.x, bounds.minX + 0.1)
-      : bounds.maxX;
-    const minY = corner.includes('n')
-      ? Math.min(point.y, bounds.maxY - 0.1)
-      : bounds.minY;
-    const maxY = corner.includes('s')
-      ? Math.max(point.y, bounds.minY + 0.1)
-      : bounds.maxY;
-    const resized = { minX, minY, maxX, maxY };
-    const originalWidth = bounds.maxX - bounds.minX;
-    const originalHeight = bounds.maxY - bounds.minY;
-    const zones = snapshot.zones.map((zone) => {
-      if (zone.id !== target.id || !zone.polygon) return zone;
+    const zone = snapshot.zones.find((item) => item.id === target.id);
+    const vertexIndex = /^vertex:(\d+)$/.exec(handleId)?.[1];
+    if (zone?.polygon && vertexIndex !== undefined) {
       return {
-        ...zone,
-        polygon: zone.polygon.map((vertex) => worldPointSchema.parse({
-          x: minX + (originalWidth ? (vertex.x - bounds.minX) / originalWidth : 0) * (maxX - minX),
-          y: minY + (originalHeight ? (vertex.y - bounds.minY) / originalHeight : 0) * (maxY - minY),
-        })),
+        snapshot: {
+          ...snapshot,
+          zones: snapshot.zones.map((item) =>
+            item.id !== target.id
+              ? item
+              : {
+                  ...item,
+                  polygon: item.polygon?.map((vertex, index) =>
+                    index === Number(vertexIndex) ? worldPoint : vertex,
+                  ),
+                },
+          ),
+        },
+        zoneBounds,
+      };
+    }
+    const bounds = zoneBounds[target.id];
+    if (!bounds || !/^bounds:(nw|n|ne|e|se|s|sw|w)$/.test(handleId))
+      return { snapshot, zoneBounds };
+    const resized = resizeBounds(bounds, handleId, point);
+    const zones = snapshot.zones.map((item) => {
+      if (item.id !== target.id || !item.polygon) return item;
+      return {
+        ...item,
+        polygon: transformPolygon(item.polygon, bounds, resized),
       };
     });
     return {
       snapshot: { ...snapshot, zones },
       zoneBounds: { ...zoneBounds, [target.id]: resized },
+    };
+  }
+  if (target.kind === 'decoration') {
+    const decoration = snapshot.decorations.find(
+      (item) => item.id === target.id,
+    );
+    if (!decoration || decoration.kind === 'label')
+      return { snapshot, zoneBounds };
+    const vertexIndex = /^vertex:(\d+)$/.exec(handleId)?.[1];
+    const bounds = boundsOfPoints(decoration.polygon);
+    if (!bounds) return { snapshot, zoneBounds };
+    let polygon: ReturnType<typeof worldPointSchema.parse>[] | null = null;
+    if (vertexIndex !== undefined) {
+      polygon = decoration.polygon.map((vertex, index) =>
+        index === Number(vertexIndex) ? worldPoint : vertex,
+      );
+    } else if (/^bounds:(nw|n|ne|e|se|s|sw|w)$/.test(handleId)) {
+      polygon = transformPolygon(
+        decoration.polygon,
+        bounds,
+        resizeBounds(bounds, handleId, point),
+      );
+    }
+    if (!polygon) return { snapshot, zoneBounds };
+    return {
+      snapshot: {
+        ...snapshot,
+        decorations: snapshot.decorations.map((item) =>
+          item.id === target.id && item.kind !== 'label'
+            ? { ...item, polygon }
+            : item,
+        ),
+      },
+      zoneBounds,
     };
   }
   return { snapshot, zoneBounds };

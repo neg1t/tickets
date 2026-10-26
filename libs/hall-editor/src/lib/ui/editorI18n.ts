@@ -88,6 +88,23 @@ const english: Record<string, string> = {
   'Выберите объект на схеме или подложку в списке.':
     'Select an object on the layout or a background in the list.',
   'Операции с выделением': 'Selection actions',
+  'Выбрать ряд': 'Select row',
+  'Alt+щелчок по месту — выбрать ряд': 'Alt-click a seat to select its row',
+  'Изменение формы объекта': 'Edit object shape',
+  'Изменение размера или формы объекта': 'Change object size or shape',
+  'Изменить размер': 'Resize',
+  'Изменить форму': 'Edit shape',
+  'Потяните за край или угол.': 'Drag an edge or corner.',
+  'Перетаскивайте точки контура.': 'Drag the outline points.',
+  'Потяните за крайние точки ряда, чтобы изменить длину.':
+    'Drag the row endpoints to change its length.',
+  'Перетаскивайте точки ряда, чтобы изменить форму.':
+    'Drag the row points to change its shape.',
+  'Выберите размер или форму, затем перетаскивайте маркеры ряда.':
+    'Choose size or shape, then drag the row handles.',
+  'Ряд удлинится автоматически': 'The row will extend automatically',
+  'Выберите действие, затем перетаскивайте маркеры на схеме.':
+    'Choose an action, then drag the handles on the layout.',
   Дублировать: 'Duplicate',
   Копировать: 'Copy',
   Вставить: 'Paste',

@@ -5,9 +5,10 @@ export const editorTools: readonly {
   id: EditorTool;
   label: string;
   glyph: string;
+  shortcut?: string;
 }[] = [
-  { id: 'select', label: 'Выбор', glyph: '↖' },
-  { id: 'pan', label: 'Рука', glyph: '✥' },
+  { id: 'select', label: 'Выбор', glyph: '↖', shortcut: 'V' },
+  { id: 'pan', label: 'Рука', glyph: '✥', shortcut: 'H' },
   { id: 'zone', label: 'Зона', glyph: '▱' },
   { id: 'zone-ga', label: 'GA-зона', glyph: '◫' },
   { id: 'stage', label: 'Сцена', glyph: '▰' },
@@ -42,13 +43,19 @@ export function ToolsPanel({
         <button
           key={item.id}
           type="button"
-          title={editorText(locale, item.label)}
-          aria-label={editorText(locale, item.label)}
+          title={`${editorText(locale, item.label)}${item.shortcut ? ` (${item.shortcut})` : ''}`}
+          aria-label={`${editorText(locale, item.label)}${item.shortcut ? ` (${item.shortcut})` : ''}`}
+          aria-keyshortcuts={item.shortcut}
           aria-pressed={activeTool === item.id}
           disabled={readonly && item.id !== 'select' && item.id !== 'pan'}
           onClick={() => onSelect(item.id)}
         >
-          <span aria-hidden="true">{item.glyph}</span>
+          <span className="hall-editor-tool-glyph" aria-hidden="true">
+            {item.glyph}
+          </span>
+          {item.shortcut && (
+            <kbd className="hall-editor-shortcut">{item.shortcut}</kbd>
+          )}
         </button>
       ))}
     </nav>

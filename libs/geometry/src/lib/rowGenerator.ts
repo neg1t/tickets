@@ -155,6 +155,55 @@ function createPathSampler(path: RowPath): PathSampler {
   };
 }
 
+export function rowPathLength(path: RowPath): number {
+  return createPathSampler(path).length;
+}
+
+export function scaleRowPathFromStart(path: RowPath, scale: number): RowPath {
+  if (!Number.isFinite(scale) || scale <= 0) {
+    throw new RangeError('Row scale must be positive and finite');
+  }
+  if (scale === 1) return path;
+
+  const anchor =
+    path.kind === 'line'
+      ? path.start
+      : path.kind === 'arc'
+        ? arcPointAtFraction(path, 0)
+        : path.kind === 'bezier'
+          ? path.p0
+          : path.points[0];
+  if (!anchor) throw new RangeError('Row path has no start point');
+  const scalePoint = (point: Vector2): Vector2 =>
+    addVectors(anchor, {
+      x: (point.x - anchor.x) * scale,
+      y: (point.y - anchor.y) * scale,
+    });
+
+  switch (path.kind) {
+    case 'line':
+      return { ...path, end: scalePoint(path.end) };
+    case 'arc':
+      return {
+        ...path,
+        center: scalePoint(path.center),
+        radius: path.radius * scale,
+      };
+    case 'bezier':
+      return {
+        ...path,
+        p1: scalePoint(path.p1),
+        p2: scalePoint(path.p2),
+        p3: scalePoint(path.p3),
+      };
+    case 'polyline':
+      return {
+        ...path,
+        points: path.points.map((point) => scalePoint(point)),
+      };
+  }
+}
+
 function requireNonnegativeFinite(value: number, name: string): void {
   if (!Number.isFinite(value) || value < 0) {
     throw new RangeError(`${name} must be finite and nonnegative`);
