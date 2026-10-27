@@ -19,14 +19,22 @@ export function usePointerInteraction() {
     [],
   );
 
-  const move = useCallback((id: number, point: Vector2, viewport: Viewport) => {
-    const session = current.current;
-    if (!session || session.pointerId !== id) return null;
-    const next = advancePointerSession(session, point, viewport, id);
-    current.current = next;
-    setPreview(next.dragging ? next : null);
-    return next;
-  }, []);
+  const move = useCallback(
+    (
+      id: number,
+      point: Vector2,
+      viewport: Viewport,
+      publishPreview = true,
+    ) => {
+      const session = current.current;
+      if (!session || session.pointerId !== id) return null;
+      const next = advancePointerSession(session, point, viewport, id);
+      current.current = next;
+      if (publishPreview) setPreview(next.dragging ? next : null);
+      return next;
+    },
+    [],
+  );
 
   const finish = useCallback(
     (id: number, point: Vector2, viewport: Viewport) => {

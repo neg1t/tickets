@@ -1,6 +1,7 @@
 import {
   isValidElement,
   memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -329,6 +330,8 @@ export function HallViewer(props: HallViewerProps) {
   const pointersRef = useRef(new Map<number, Vector2>());
   const pinchRef = useRef<PinchGesture | null>(null);
   const viewportRef = useRef(viewport);
+  const pendingPanRef = useRef<Vector2>({ x: 0, y: 0 });
+  const panFrameRef = useRef(0);
   const dotBatcherRef = useRef<DotSeatBatcher | null>(null);
   dotBatcherRef.current ??= new DotSeatBatcher();
   useEffect(() => {
@@ -336,16 +339,53 @@ export function HallViewer(props: HallViewerProps) {
   }, [viewport]);
   useEffect(() => onViewportChange?.(viewport), [viewport, onViewportChange]);
 
+  const applyPendingPan = useCallback(() => {
+    panFrameRef.current = 0;
+    const delta = pendingPanRef.current;
+    pendingPanRef.current = { x: 0, y: 0 };
+    if (delta.x === 0 && delta.y === 0) return;
+    const next = panViewportBy(viewportRef.current, delta);
+    viewportRef.current = next;
+    setViewport(next);
+  }, []);
+  const schedulePan = useCallback(
+    (delta: Vector2) => {
+      pendingPanRef.current = {
+        x: pendingPanRef.current.x + delta.x,
+        y: pendingPanRef.current.y + delta.y,
+      };
+      if (panFrameRef.current === 0)
+        panFrameRef.current = requestAnimationFrame(applyPendingPan);
+    },
+    [applyPendingPan],
+  );
+  const flushPendingPan = useCallback(() => {
+    if (panFrameRef.current !== 0)
+      cancelAnimationFrame(panFrameRef.current);
+    panFrameRef.current = 0;
+    applyPendingPan();
+  }, [applyPendingPan]);
+  const discardPendingPan = useCallback(() => {
+    if (panFrameRef.current !== 0)
+      cancelAnimationFrame(panFrameRef.current);
+    panFrameRef.current = 0;
+    pendingPanRef.current = { x: 0, y: 0 };
+  }, []);
+
   useEffect(() => {
+    discardPendingPan();
     cancel();
     intentRef.current = null;
     pointersRef.current.clear();
     pinchRef.current = null;
-  }, [snapshot, activeFloorId, activeTool, cancel]);
+  }, [snapshot, activeFloorId, activeTool, cancel, discardPendingPan]);
+
+  useEffect(() => () => discardPendingPan(), [discardPendingPan]);
 
   useEffect(() => {
     function cancelOnEscape(event: globalThis.KeyboardEvent) {
       if (event.key !== 'Escape') return;
+      flushPendingPan();
       cancel();
       setMovingKeys(new Set());
       intentRef.current = null;
@@ -354,7 +394,7 @@ export function HallViewer(props: HallViewerProps) {
     }
     document.addEventListener('keydown', cancelOnEscape);
     return () => document.removeEventListener('keydown', cancelOnEscape);
-  }, [cancel]);
+  }, [cancel, flushPendingPan]);
 
   useEffect(() => {
     const session = preview;
@@ -417,13 +457,14 @@ export function HallViewer(props: HallViewerProps) {
     const observer = new ResizeObserver(() => {
       const nextWidth = Math.max(320, Math.round(element.clientWidth));
       if (nextWidth === observedWidth.current) return;
+      discardPendingPan();
       observedWidth.current = nextWidth;
       setWidth(nextWidth);
       setViewport(fitViewport(sceneRef.current.bounds, nextWidth, height));
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [height]);
+  }, [height, discardPendingPan]);
 
   const selectedKeys = new Set(
     selection.map((target) => `${target.kind}:${target.id}`),
@@ -735,6 +776,7 @@ export function HallViewer(props: HallViewerProps) {
     )
       native.target.setPointerCapture(native.pointerId);
     if (pointersRef.current.size > 1) {
+      flushPendingPan();
       cancel();
       setMovingKeys(new Set());
       intentRef.current = null;
@@ -898,7 +940,16 @@ export function HallViewer(props: HallViewerProps) {
     }
     const previous = intentRef.current?.lastScreen ?? point;
     if (intentRef.current) intentRef.current.lastScreen = point;
-    const next = move(native.pointerId, point, viewportRef.current);
+    const intent = intentRef.current;
+    const panPickDrag =
+      interactionMode === 'pick' && intent?.mode === 'pick';
+    const shouldPan = intent?.mode === 'pan' || panPickDrag;
+    const next = move(
+      native.pointerId,
+      point,
+      viewportRef.current,
+      !shouldPan,
+    );
     if (
       next?.dragging &&
       intentRef.current?.mode === 'edit' &&
@@ -908,17 +959,11 @@ export function HallViewer(props: HallViewerProps) {
       handleSelection([intentRef.current.target]);
       intentRef.current.selectionReady = true;
     }
-    const intent = intentRef.current;
-    const panPickDrag =
-      interactionMode === 'pick' && intent?.mode === 'pick';
-    const shouldPan = intent?.mode === 'pan' || panPickDrag;
     if (next?.dragging && shouldPan) {
-      const moved = panViewportBy(viewportRef.current, {
+      schedulePan({
         x: point.x - previous.x,
         y: point.y - previous.y,
       });
-      viewportRef.current = moved;
-      setViewport(moved);
     }
   }
 
@@ -936,6 +981,17 @@ export function HallViewer(props: HallViewerProps) {
     const intent = intentRef.current;
     const result =
       point && finish(native.pointerId, point, viewportRef.current);
+    const panPickDrag =
+      interactionMode === 'pick' && intent?.mode === 'pick';
+    const shouldPan = intent?.mode === 'pan' || panPickDrag;
+    if (point && result?.dragging && shouldPan) {
+      const previous = intent?.lastScreen ?? point;
+      schedulePan({
+        x: point.x - previous.x,
+        y: point.y - previous.y,
+      });
+    }
+    flushPendingPan();
     intentRef.current = null;
     setRenderIntent(null);
     setMovingKeys(new Set());
@@ -1023,6 +1079,7 @@ export function HallViewer(props: HallViewerProps) {
   function handlePointerCancel(native: PointerEvent) {
     pointersRef.current.delete(native.pointerId);
     if (!cancel(native.pointerId)) return;
+    flushPendingPan();
     setMovingKeys(new Set());
     intentRef.current = null;
     setRenderIntent(null);
