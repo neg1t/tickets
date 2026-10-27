@@ -81,7 +81,7 @@ export function validateLayout(
     )
       issues.push({
         code: 'empty-row',
-        severity: 'error',
+        severity: 'warning',
         message: `Ряд «${row.name}» не содержит мест`,
         targetId: row.id,
       });

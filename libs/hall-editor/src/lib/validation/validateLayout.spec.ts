@@ -48,7 +48,7 @@ describe('validateLayout', () => {
     expect(issues).toEqual([]);
     expect(elapsed).toBeLessThan(200);
   }, 20_000);
-  it('separates blocking links and empty rows from collision warnings', () => {
+  it('keeps empty rows as acknowledged warnings while blocking invalid links and numbers', () => {
     const draft = createEmptyDraft('Зал');
     const floorId = draft.snapshot.floors[0]?.id;
     if (!floorId) throw new Error('Missing floor');
@@ -86,7 +86,7 @@ describe('validateLayout', () => {
     const issues = validateLayout({ ...draft, snapshot } as typeof draft);
     expect(
       issues.some(
-        (issue) => issue.code === 'empty-row' && issue.severity === 'error',
+        (issue) => issue.code === 'empty-row' && issue.severity === 'warning',
       ),
     ).toBe(true);
     expect(
