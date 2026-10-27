@@ -40,6 +40,18 @@ test('forced WebGL replaces only the seat layer and preserves CPU picking', asyn
     )
     .toBe('webgl');
 
+  expect(
+    await page.evaluate(() => {
+      const testWindow = window as Window & {
+        __hallRendererTransitions?: Array<{
+          engine: string;
+          seatRenderer: string | null;
+        }>;
+      };
+      return testWindow.__hallRendererTransitions?.[0] ?? null;
+    }),
+  ).toEqual({ engine: 'webgl', seatRenderer: 'canvas' });
+
   await expect(page.locator('canvas[data-renderer="webgl2"]')).toBeVisible();
   await expect(page.locator('.hall-viewer-canvas')).toHaveAttribute(
     'data-seat-renderer',

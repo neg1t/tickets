@@ -11,6 +11,10 @@ import {
 
 type HallViewportTestWindow = Window & {
   __hallRendererMode?: string;
+  __hallRendererTransitions?: Array<{
+    engine: 'canvas' | 'webgl';
+    seatRenderer: string | null;
+  }>;
   __hallRendererError?: string;
   __hallClickTarget?: HallTarget | null;
   __hallSelection?: readonly HallTarget[];
@@ -75,6 +79,13 @@ function HallViewportHarness({
       : {}),
     onRendererChange: (engine) => {
       testWindow.__hallRendererMode = engine;
+      testWindow.__hallRendererTransitions ??= [];
+      testWindow.__hallRendererTransitions.push({
+        engine,
+        seatRenderer:
+          document.querySelector<HTMLElement>('.hall-viewer-canvas')?.dataset
+            .seatRenderer ?? null,
+      });
     },
     onRendererError: (error) => {
       testWindow.__hallRendererError = error.message;
@@ -97,6 +108,7 @@ export function mountHallViewportHarness(
   const testWindow = window as HallViewportTestWindow;
   testWindow.__hallMoveDelta = null;
   testWindow.__hallMoveCommitCount = 0;
+  testWindow.__hallRendererTransitions = [];
   testWindow.__hallViewportRoot = root;
   testWindow.__hallSeatWorld = firstSeat.position;
 }
@@ -106,6 +118,7 @@ export function unmountHallViewportHarness(container: HTMLElement): void {
   testWindow.__hallViewportRoot?.unmount();
   delete testWindow.__hallViewportRoot;
   delete testWindow.__hallRendererMode;
+  delete testWindow.__hallRendererTransitions;
   delete testWindow.__hallRendererError;
   delete testWindow.__hallClickTarget;
   delete testWindow.__hallSelection;

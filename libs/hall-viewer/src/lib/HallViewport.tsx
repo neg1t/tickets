@@ -9,6 +9,8 @@ import {
 } from 'react';
 import {
   createSeatScene,
+  type RendererScene,
+  type RendererSeatGeometry,
   type RendererSeatPositionUpdate,
   type RendererSeatUpdate,
   type Viewport,
@@ -20,7 +22,7 @@ import {
   type HallViewerProps,
 } from '@hall-platform/renderer-konva';
 import {
-  createSceneForRenderer,
+  scheduleRendererScenePreparation,
   selectRendererEngine,
   type RendererPreference,
 } from './rendererSelection.js';
@@ -32,6 +34,12 @@ const LazyWebGLHallCanvas = lazy(async () => {
 });
 
 const noSeatUpdates: readonly RendererSeatUpdate[] = [];
+
+type PreparedSeatScene = Readonly<{
+  seats: HallViewportProps['snapshot']['seats'];
+  floorId: string;
+  scene: RendererScene<RendererSeatGeometry>;
+}>;
 
 export type HallViewportProps = Omit<
   HallViewerProps,
@@ -66,7 +74,10 @@ export function HallViewport(props: HallViewportProps) {
   );
   const [viewport, setViewport] = useState<Viewport | null>(null);
   const [webglFailed, setWebglFailed] = useState(false);
-  const [webglReadyKey, setWebglReadyKey] = useState('');
+  const [preparedSeatScene, setPreparedSeatScene] =
+    useState<PreparedSeatScene | null>(null);
+  const [webglReadyScene, setWebglReadyScene] =
+    useState<RendererScene<RendererSeatGeometry> | null>(null);
   const [canvasSeatFillColor, setCanvasSeatFillColor] = useState(
     defaultHallCanvasPalette.seat,
   );
@@ -83,30 +94,13 @@ export function HallViewport(props: HallViewportProps) {
     : (snapshot.floors[0]?.id ?? '');
   const engine = selectRendererEngine(renderer, webglEnabled, webglFailed);
   const rendererKey = `${renderer}:${webglEnabled}`;
-  const webglReady = engine === 'webgl' && webglReadyKey === rendererKey;
-  const seatScene = useMemo(
-    () =>
-      createSceneForRenderer(engine, () =>
-        createSeatScene(
-          1,
-          snapshot.seats
-            .filter((seat) => seat.floorId === floorId)
-            .map((seat) => ({
-              id: seat.id,
-              floorId: seat.floorId,
-              position: seat.position,
-              ...(seat.rotationRadians !== undefined
-                ? { rotationRadians: seat.rotationRadians }
-                : {}),
-              ...(seat.visualKind !== undefined
-                ? { visualKind: seat.visualKind }
-                : {}),
-            })),
-          floorId,
-        ),
-      ),
-    [snapshot.seats, floorId, engine],
-  );
+  const seatScene =
+    preparedSeatScene?.seats === snapshot.seats &&
+    preparedSeatScene.floorId === floorId
+      ? preparedSeatScene.scene
+      : null;
+  const webglReady =
+    engine === 'webgl' && seatScene !== null && webglReadyScene === seatScene;
   const effectiveSeatUpdates = useMemo(() => {
     const updates: readonly RendererSeatUpdate[] =
       seatUpdates ??
@@ -185,11 +179,11 @@ export function HallViewport(props: HallViewportProps) {
     if (contextLosses.current > 1) setWebglFailed(true);
   }, []);
   const handleRendererReady = useCallback(() => {
-    setWebglReadyKey(rendererKey);
-  }, [rendererKey]);
+    if (seatScene) setWebglReadyScene(seatScene);
+  }, [seatScene]);
   const rendererLayer =
     engine === 'webgl' && viewport && seatScene ? (
-      <WebGLErrorBoundary key={renderer} onError={handleWebGLError}>
+      <WebGLErrorBoundary key={rendererKey} onError={handleWebGLError}>
         <Suspense fallback={null}>
           <LazyWebGLHallCanvas
             scene={seatScene}
@@ -205,6 +199,39 @@ export function HallViewport(props: HallViewportProps) {
       </WebGLErrorBoundary>
     ) : null;
 
+  useEffect(() => {
+    setPreparedSeatScene(null);
+    setWebglReadyScene(null);
+    const seats = snapshot.seats;
+    const requestedFloorId = floorId;
+    return scheduleRendererScenePreparation(
+      engine,
+      () =>
+        createSeatScene(
+          1,
+          seats
+            .filter((seat) => seat.floorId === requestedFloorId)
+            .map((seat) => ({
+              id: seat.id,
+              floorId: seat.floorId,
+              position: seat.position,
+              ...(seat.rotationRadians !== undefined
+                ? { rotationRadians: seat.rotationRadians }
+                : {}),
+              ...(seat.visualKind !== undefined
+                ? { visualKind: seat.visualKind }
+                : {}),
+            })),
+          requestedFloorId,
+        ),
+      (scene) =>
+        setPreparedSeatScene({
+          seats,
+          floorId: requestedFloorId,
+          scene,
+        }),
+    );
+  }, [engine, snapshot.seats, floorId]);
   useEffect(() => {
     contextLosses.current = 0;
     setWebglFailed(false);
