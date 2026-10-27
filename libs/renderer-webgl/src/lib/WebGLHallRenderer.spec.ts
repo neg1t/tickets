@@ -163,4 +163,27 @@ describe('WebGL hall renderer contract', () => {
 
     renderer.dispose();
   });
+
+  it('reports a failure when the context cannot restore its shaders', () => {
+    const gl = fakeContext();
+    const onError = vi.fn();
+    const target = Object.assign(new EventTarget(), {
+      width: 0,
+      height: 0,
+      getContext: vi.fn(() => gl),
+    }) as unknown as HTMLCanvasElement;
+    const renderer = new WebGLHallRenderer(target, { onError });
+    renderer.setScene(seatScene());
+    vi.mocked(gl.createShader).mockReturnValueOnce(null);
+
+    target.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    target.dispatchEvent(new Event('webglcontextrestored'));
+
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Unable to allocate WebGL shader',
+      }),
+    );
+    renderer.dispose();
+  });
 });

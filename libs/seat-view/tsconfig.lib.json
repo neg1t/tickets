@@ -15,6 +15,12 @@
       "path": "../renderer-konva/tsconfig.lib.json"
     },
     {
+      "path": "../renderer-core/tsconfig.lib.json"
+    },
+    {
+      "path": "../hall-viewer/tsconfig.lib.json"
+    },
+    {
       "path": "../geometry/tsconfig.lib.json"
     },
     {

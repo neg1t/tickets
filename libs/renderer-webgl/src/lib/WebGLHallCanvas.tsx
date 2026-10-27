@@ -100,6 +100,7 @@ export function WebGLHallCanvas({
       renderer = new WebGLHallRenderer(canvas, {
         onContextLost: () => callbacksRef.current.onContextLost?.(),
         onContextRestored: () => callbacksRef.current.onContextRestored?.(),
+        onError: (error) => callbacksRef.current.onRendererError?.(error),
       });
     } catch (error) {
       callbacksRef.current.onRendererError?.(

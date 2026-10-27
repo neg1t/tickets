@@ -28,6 +28,7 @@ export type WebGLRendererOptions = Readonly<{
   preserveDrawingBuffer?: boolean;
   onContextLost?: () => void;
   onContextRestored?: () => void;
+  onError?: (error: Error) => void;
 }>;
 
 type Uniforms = Readonly<{
@@ -84,7 +85,12 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     });
     if (!gl) throw new Error('WebGL2 is not available for this canvas');
     this.gl = gl;
-    this.initializeProgram();
+    try {
+      this.initializeProgram();
+    } catch (cause) {
+      this.resources.dispose(this.gl);
+      throw cause;
+    }
     this.stopObservingContext = observeWebGLContext(canvas, {
       onLost: () => this.handleContextLost(),
       onRestored: () => this.handleContextRestored(),
@@ -425,11 +431,21 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
 
   private handleContextRestored(): void {
     if (this.disposed) return;
-    this.contextLost = false;
-    this.initializeProgram();
-    this.uploadSeatBuffers();
-    this.contextCallbacks.onContextRestored?.();
-    this.scheduleFrame();
+    try {
+      this.contextLost = false;
+      this.initializeProgram();
+      this.uploadSeatBuffers();
+      this.contextCallbacks.onContextRestored?.();
+      this.scheduleFrame();
+    } catch (cause) {
+      this.contextLost = true;
+      this.program = null;
+      this.attributes.clear();
+      this.resources.dispose(this.gl);
+      this.contextCallbacks.onError?.(
+        cause instanceof Error ? cause : new Error(String(cause)),
+      );
+    }
   }
 
   private handleVisibilityChange = (): void => {

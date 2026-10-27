@@ -25,6 +25,9 @@
       "path": "./libs/renderer-webgl"
     },
     {
+      "path": "./libs/hall-viewer"
+    },
+    {
       "path": "./libs/fixtures"
     },
     {

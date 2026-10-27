@@ -129,6 +129,9 @@ export type HallViewerProps = {
   readonly onPointerWorldMove?: (point: Vector2 | null) => void;
   readonly onHoverTarget?: (target: HallTarget | null) => void;
   readonly calibrationGuide?: Readonly<{ first: Vector2; second: Vector2 }>;
+  readonly hideSeatShapes?: boolean;
+  readonly seatRendererLayer?: ReactNode;
+  readonly onViewportChange?: (viewport: Viewport) => void;
 };
 
 type PointerMode = 'pan' | 'pick' | 'edit' | 'create' | 'box' | 'handle';
@@ -256,6 +259,9 @@ export function HallViewer(props: HallViewerProps) {
     onPointerWorldMove,
     onHoverTarget,
     calibrationGuide,
+    hideSeatShapes = false,
+    seatRendererLayer,
+    onViewportChange,
   } = props;
   const ui = { ...defaultLabels, ...labels };
   const [floorId, setFloorId] = useState(snapshot.floors[0]?.id ?? '');
@@ -315,6 +321,7 @@ export function HallViewer(props: HallViewerProps) {
   useEffect(() => {
     viewportRef.current = viewport;
   }, [viewport]);
+  useEffect(() => onViewportChange?.(viewport), [viewport, onViewportChange]);
 
   useEffect(() => {
     cancel();
@@ -1061,13 +1068,13 @@ export function HallViewer(props: HallViewerProps) {
           ),
         });
     }
-    if (dotBatches) {
+    if (dotBatches && !hideSeatShapes) {
       for (const batch of dotBatches)
         nodes.push({
           key: `dots:${batch.key}`,
           node: <DotSeatBatchShape key={`dots:${batch.key}`} batch={batch} />,
         });
-    } else if (showSeats) {
+    } else if (showSeats && !hideSeatShapes) {
       for (const seat of rendered.seats)
         nodes.push({
           key: `seat:${seat.id}`,
@@ -1084,7 +1091,7 @@ export function HallViewer(props: HallViewerProps) {
           ),
         });
     }
-    if (showSeats) {
+    if (showSeats && !hideSeatShapes) {
       for (const seat of rendered.seats) {
         if (visibleLabels.has(seat.id))
           nodes.push({
@@ -1097,6 +1104,7 @@ export function HallViewer(props: HallViewerProps) {
   }, [
     rendered,
     showSeats,
+    hideSeatShapes,
     dotBatches,
     visibleLabels,
     palette,
@@ -1260,7 +1268,7 @@ export function HallViewer(props: HallViewerProps) {
       <div
         ref={containerRef}
         className="hall-viewer-canvas"
-        style={{ touchAction: 'none' }}
+        style={{ position: 'relative', touchAction: 'none' }}
         onPointerDown={(event) => handlePointerDown(event.nativeEvent)}
         onPointerMove={(event) => handlePointerMove(event.nativeEvent)}
         onPointerUp={(event) => handlePointerUp(event.nativeEvent)}
@@ -1275,8 +1283,11 @@ export function HallViewer(props: HallViewerProps) {
         data-preview-seats={previewSeats.length}
         data-floor-seat-count={scene.seats.length}
         data-seat-render-nodes={
-          dotBatches?.length ?? (showSeats ? rendered.seats.length : 0)
+          hideSeatShapes
+            ? 0
+            : (dotBatches?.length ?? (showSeats ? rendered.seats.length : 0))
         }
+        data-seat-renderer={hideSeatShapes ? 'external' : 'canvas'}
         data-viewport-x={viewport.x}
         data-viewport-y={viewport.y}
         data-viewport-scale={viewport.scale}
@@ -1430,7 +1441,7 @@ export function HallViewer(props: HallViewerProps) {
             <Group name="selection">
               {selection.flatMap((target) => {
                 const bounds = targetBounds(displayScene, target);
-                return bounds
+                return bounds && !(hideSeatShapes && target.kind === 'seat')
                   ? [
                       previewNode(
                         `${target.kind}:${target.id}`,
@@ -1544,6 +1555,20 @@ export function HallViewer(props: HallViewerProps) {
             </Group>
           </Layer>
         </HallStage>
+        {seatRendererLayer && (
+          <div
+            aria-hidden="true"
+            data-seat-renderer-layer="external"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 2,
+              pointerEvents: 'none',
+            }}
+          >
+            {seatRendererLayer}
+          </div>
+        )}
       </div>
 
       <div className="hall-viewer-status" aria-live="polite">

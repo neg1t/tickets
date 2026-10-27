@@ -49,6 +49,9 @@
       "path": "../../libs/renderer-webgl/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/hall-viewer/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/local-storage/tsconfig.lib.json"
     },
     {

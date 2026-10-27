@@ -17,8 +17,8 @@ import {
   type SeatViewData,
 } from './SeatView.js';
 
-vi.mock('@hall-platform/renderer-konva', () => ({
-  HallViewer: (props: {
+vi.mock('@hall-platform/hall-viewer', () => ({
+  HallViewport: (props: {
     stageId: string;
     viewerMode?: 'edit' | 'view' | 'pick';
     activeTool?: string;

@@ -313,6 +313,9 @@ importers:
       '@hall-platform/hall-editor':
         specifier: workspace:*
         version: link:../../libs/hall-editor
+      '@hall-platform/hall-viewer':
+        specifier: workspace:*
+        version: link:../../libs/hall-viewer
       '@hall-platform/local-storage':
         specifier: workspace:*
         version: link:../../libs/local-storage
@@ -412,6 +415,30 @@ importers:
         specifier: ^4.3.6
         version: 4.6.7
 
+  libs/hall-viewer:
+    dependencies:
+      '@hall-platform/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@hall-platform/geometry':
+        specifier: workspace:*
+        version: link:../geometry
+      '@hall-platform/renderer-core':
+        specifier: workspace:*
+        version: link:../renderer-core
+      '@hall-platform/renderer-konva':
+        specifier: workspace:*
+        version: link:../renderer-konva
+      '@hall-platform/renderer-webgl':
+        specifier: workspace:*
+        version: link:../renderer-webgl
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+      tslib:
+        specifier: ^2.3.0
+        version: 2.8.1
+
   libs/local-storage:
     dependencies:
       '@hall-platform/domain':
@@ -493,6 +520,12 @@ importers:
       '@hall-platform/geometry':
         specifier: workspace:*
         version: link:../geometry
+      '@hall-platform/hall-viewer':
+        specifier: workspace:*
+        version: link:../hall-viewer
+      '@hall-platform/renderer-core':
+        specifier: workspace:*
+        version: link:../renderer-core
       '@hall-platform/renderer-konva':
         specifier: workspace:*
         version: link:../renderer-konva

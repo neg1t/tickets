@@ -76,11 +76,11 @@ bool seatSilhouette(float symbolKind, vec2 point, float expansion) {
 }
 
 vec4 statusColor(float status) {
-  if (status > 3.5) return vec4(0.47, 0.51, 0.56, 1.0);
-  if (status > 2.5) return vec4(0.39, 0.43, 0.48, 1.0);
-  if (status > 1.5) return vec4(0.63, 0.29, 0.31, 1.0);
-  if (status > 0.5) return vec4(0.94, 0.62, 0.18, 1.0);
-  return vec4(0.18, 0.55, 0.42, 1.0);
+  if (status > 3.5) return vec4(0.647, 0.678, 0.714, 1.0);
+  if (status > 2.5) return vec4(0.404, 0.443, 0.494, 1.0);
+  if (status > 1.5) return vec4(0.604, 0.267, 0.314, 1.0);
+  if (status > 0.5) return vec4(0.725, 0.471, 0.098, 1.0);
+  return vec4(0.094, 0.471, 0.290, 1.0);
 }
 
 void main() {

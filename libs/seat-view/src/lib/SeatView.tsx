@@ -2,11 +2,15 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useUnit } from 'effector-react';
 import type { LayoutSnapshot, SeatStatus } from '@hall-platform/domain';
 import type { SpatialBounds } from '@hall-platform/geometry';
-import {
-  HallViewer,
-  type HallTarget,
-  type HallViewerLabels,
+import type {
+  HallTarget,
+  HallViewerLabels,
 } from '@hall-platform/renderer-konva';
+import {
+  HallViewport,
+  type RendererPreference,
+} from '@hall-platform/hall-viewer';
+import type { RendererSeatUpdate } from '@hall-platform/renderer-core';
 import { createSeatViewModel } from './seatView.model.js';
 import { buildSeatIndexes } from './seatIndexes.js';
 import {
@@ -74,6 +78,8 @@ export type SeatViewProps = {
   readonly onSelectionChange: (selection: SeatSelectionItem[]) => void;
   readonly onBuyClick: (data: SeatViewData) => void | Promise<void>;
   readonly onError?: (error: Error) => void;
+  readonly rendererPreference?: RendererPreference;
+  readonly webglEnabled?: boolean;
 };
 
 const statusColors: Record<SeatStatus, string> = {
@@ -219,6 +225,8 @@ export function SeatView(props: SeatViewProps) {
     onSelectionChange,
     onBuyClick,
     onError,
+    rendererPreference = 'auto',
+    webglEnabled = false,
   } = props;
   const labels = locale.toLowerCase().startsWith('en')
     ? translations.en
@@ -342,6 +350,15 @@ export function SeatView(props: SeatViewProps) {
           { fill: statusColors[availability.seats[seat.id] ?? 'unavailable'] },
         ]),
       ),
+    [layout.snapshot.seats, availability.seats],
+  );
+  const rendererSeatUpdates = useMemo<readonly RendererSeatUpdate[]>(
+    () =>
+      layout.snapshot.seats.map((seat) => ({
+        id: seat.id,
+        status: availability.seats[seat.id] ?? 'unavailable',
+        label: seat.label,
+      })),
     [layout.snapshot.seats, availability.seats],
   );
   const selectedTargets: HallTarget[] = [...selectedSeatIds].map((id) => ({
@@ -493,7 +510,7 @@ export function SeatView(props: SeatViewProps) {
 
       <div className="seat-view-layout">
         <div className="seat-view-map">
-          <HallViewer
+          <HallViewport
             snapshot={layout.snapshot}
             hallName={layout.hallName}
             {...(layout.zoneBounds ? { zoneBounds: layout.zoneBounds } : {})}
@@ -503,6 +520,10 @@ export function SeatView(props: SeatViewProps) {
               ? { labels: englishViewerLabels }
               : {})}
             seatAppearance={seatAppearance}
+            seatUpdates={rendererSeatUpdates}
+            renderer={rendererPreference}
+            webglEnabled={webglEnabled}
+            {...(onError ? { onRendererError: onError } : {})}
             stageId={`seat-stage-${instanceId}`}
             fitKey={`${layout.snapshot.id}:${activeFloorId}:${focusedZoneId ?? ''}`}
             focusedFloorId={activeFloorId}
