@@ -293,7 +293,7 @@ export function buildHallScene(
     allBounds.length > 0
       ? allBounds.reduce(mergeBounds)
       : pointBounds({ x: 0, y: 0 }, 10);
-  const index = createRendererScene(revision, sceneItems);
+  const index = createRendererScene(revision, sceneItems, floorId);
   if (measuredBuild) {
     globalThis.performance?.mark(`${buildName}:end`);
     globalThis.performance?.measure(

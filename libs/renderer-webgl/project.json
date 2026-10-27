@@ -1,0 +1,8 @@
+{
+  "name": "renderer-webgl",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/renderer-webgl/src",
+  "projectType": "library",
+  "tags": ["scope:shared", "layer:widgets", "type:ui"],
+  "targets": {}
+}

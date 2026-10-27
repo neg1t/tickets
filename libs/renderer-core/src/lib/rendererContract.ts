@@ -4,6 +4,12 @@ import type { Viewport } from './viewport.js';
 
 export type RendererTargetRef = Readonly<{ kind: string; id: string }>;
 
+export type RendererSeatGeometry = Readonly<{
+  position: Vector2;
+  rotationRadians?: number | undefined;
+  visualKind?: 'chair' | 'armchair' | 'wheelchairBay' | undefined;
+}>;
+
 /** Dynamic state is sent separately so renderers can update styles without rebuilding geometry. */
 export type RendererSeatUpdate = Readonly<{
   id: string;

@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "../../dist/out-tsc/renderer-webgl-spec",
+    "tsBuildInfoFile": "../../dist/out-tsc/renderer-webgl-spec/tsconfig.spec.tsbuildinfo",
+    "types": ["vitest/globals", "node"]
+  },
+  "include": [
+    "src/**/*.spec.ts",
+    "src/**/*.test.ts",
+    "src/**/*.spec.tsx",
+    "src/**/*.test.tsx"
+  ],
+  "references": [
+    { "path": "./tsconfig.lib.json" },
+    { "path": "../geometry/tsconfig.lib.json" },
+    { "path": "../renderer-core/tsconfig.lib.json" }
+  ]
+}

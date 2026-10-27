@@ -3,4 +3,6 @@ export * from './lib/interaction.js';
 export * from './lib/lod.js';
 export * from './lib/rendererContract.js';
 export * from './lib/scene.js';
+export * from './lib/seatGeometry.js';
+export * from './lib/seatScene.js';
 export * from './lib/viewport.js';

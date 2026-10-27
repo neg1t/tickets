@@ -11,6 +11,7 @@ export type SceneItem<TGeometry = unknown> = Readonly<{
 
 export type RendererScene<TGeometry = unknown> = Readonly<{
   revision: number;
+  floorId?: string;
   items: readonly SceneItem<TGeometry>[];
   itemByKey: ReadonlyMap<string, SceneItem<TGeometry>>;
   itemOrder: ReadonlyMap<SceneItem<TGeometry>, number>;
@@ -26,6 +27,7 @@ export function sceneItemKey(
 export function createRendererScene<TGeometry>(
   revision: number,
   items: readonly SceneItem<TGeometry>[],
+  floorId?: string,
 ): RendererScene<TGeometry> {
   const itemByKey = new Map<string, SceneItem<TGeometry>>();
   const itemOrder = new Map<SceneItem<TGeometry>, number>();
@@ -41,6 +43,7 @@ export function createRendererScene<TGeometry>(
   });
   return {
     revision,
+    ...(floorId !== undefined ? { floorId } : {}),
     items: stableItems,
     itemByKey,
     itemOrder,
