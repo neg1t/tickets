@@ -21,6 +21,7 @@ import {
   type Zone,
 } from '@hall-platform/domain';
 import type { Vector2 } from '@hall-platform/geometry';
+import type { RendererPreference } from '@hall-platform/hall-viewer';
 import { encodePdfDataUrl, inspectPdfBytes } from '@hall-platform/pdf';
 import {
   buildHallScene,
@@ -91,6 +92,8 @@ export type HallEditorProps = {
   ) => void | Promise<void>;
   readonly onError?: (error: Error) => void;
   readonly publishedSeatIds?: readonly Seat['id'][];
+  readonly rendererPreference?: RendererPreference;
+  readonly webglEnabled?: boolean;
 };
 
 export function HallEditor(props: HallEditorProps) {
@@ -104,6 +107,8 @@ export function HallEditor(props: HallEditorProps) {
     onPublish,
     onError,
     publishedSeatIds = [],
+    rendererPreference = 'auto',
+    webglEnabled = false,
   } = props;
   const tr = (russian: string) => editorText(locale, russian);
   const [model] = useState(() => createEditorModel(value));
@@ -1076,6 +1081,8 @@ export function HallEditor(props: HallEditorProps) {
               }}
               height={canvasHeight}
               draft={draft}
+              renderer={rendererPreference}
+              webglEnabled={webglEnabled}
               viewerMode="edit"
               focusedFloorId={activeFloorId}
               previewSeats={previewSeats}

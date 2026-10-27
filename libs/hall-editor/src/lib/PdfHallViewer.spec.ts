@@ -9,13 +9,24 @@ import { PdfHallViewer } from './PdfHallViewer.js';
 const mocks = vi.hoisted(() => ({
   renderPdfPage: vi.fn(),
   viewerProps: undefined as
-    | { backgroundPages?: Record<string, { canvas?: HTMLCanvasElement }> }
+    | {
+        backgroundPages?: Record<string, { canvas?: HTMLCanvasElement }>;
+        renderer?: string;
+        webglEnabled?: boolean;
+        seatUpdates?: readonly unknown[];
+      }
     | undefined,
 }));
 
 vi.mock('@hall-platform/pdf', () => ({ renderPdfPage: mocks.renderPdfPage }));
 vi.mock('@hall-platform/renderer-konva', () => ({
   HallViewer: (props: typeof mocks.viewerProps) => {
+    mocks.viewerProps = props;
+    return null;
+  },
+}));
+vi.mock('@hall-platform/hall-viewer', () => ({
+  HallViewport: (props: typeof mocks.viewerProps) => {
     mocks.viewerProps = props;
     return null;
   },
@@ -78,6 +89,23 @@ afterEach(() => {
 });
 
 describe('PdfHallViewer', () => {
+  it('passes renderer rollout settings and seat metadata to HallViewport', () => {
+    const view = render(
+      createElement(PdfHallViewer, {
+        draft: createEmptyDraft('Renderer'),
+        renderer: 'webgl',
+        webglEnabled: true,
+      }),
+    );
+
+    expect(mocks.viewerProps).toMatchObject({
+      renderer: 'webgl',
+      webglEnabled: true,
+      seatUpdates: [],
+    });
+    view.unmount();
+  });
+
   it('renders at most two PDF pages concurrently', async () => {
     const resolvePage: Array<(value: { canvas: HTMLCanvasElement }) => void> = [];
     mocks.renderPdfPage.mockImplementation(() =>

@@ -16,11 +16,19 @@ type HallViewportTestWindow = Window & {
   __hallSelection?: readonly HallTarget[];
   __hallSeatWorld?: Readonly<{ x: number; y: number }>;
   __hallViewportRoot?: Root;
+  __hallMoveDelta?: Readonly<{ x: number; y: number }> | null;
+  __hallMoveCommitCount?: number;
 };
 
 const snapshot = layoutDocumentSchema.parse(smallTheater.document).snapshot;
 
-function HallViewportHarness({ renderer }: { renderer: RendererPreference }) {
+function HallViewportHarness({
+  renderer,
+  editorMode,
+}: {
+  renderer: RendererPreference;
+  editorMode: boolean;
+}) {
   const [selection, setSelection] = useState<HallTarget[]>([]);
   const seatUpdates = useMemo<readonly RendererSeatUpdate[]>(
     () =>
@@ -38,7 +46,8 @@ function HallViewportHarness({ renderer }: { renderer: RendererPreference }) {
     hallName: 'Renderer parity test',
     height: 480,
     stageId: 'renderer-parity-stage',
-    viewerMode: 'pick',
+    viewerMode: editorMode ? 'edit' : 'pick',
+    ...(editorMode ? { activeTool: 'select' as const } : {}),
     renderer,
     webglEnabled: false,
     seatUpdates,
@@ -52,6 +61,18 @@ function HallViewportHarness({ renderer }: { renderer: RendererPreference }) {
       testWindow.__hallClickTarget = target;
       if (target?.kind === 'seat') setSelection([target]);
     },
+    ...(editorMode
+      ? {
+          onObjectsMove: (
+            _targets: readonly HallTarget[],
+            delta: Readonly<{ x: number; y: number }>,
+          ) => {
+            testWindow.__hallMoveDelta = delta;
+            testWindow.__hallMoveCommitCount =
+              (testWindow.__hallMoveCommitCount ?? 0) + 1;
+          },
+        }
+      : {}),
     onRendererChange: (engine) => {
       testWindow.__hallRendererMode = engine;
     },
@@ -64,6 +85,7 @@ function HallViewportHarness({ renderer }: { renderer: RendererPreference }) {
 export function mountHallViewportHarness(
   container: HTMLElement,
   renderer: RendererPreference,
+  editorMode = false,
 ): void {
   const firstSeat = snapshot.seats[0];
   if (!firstSeat) throw new Error('Small theater fixture has no seats');
@@ -71,8 +93,10 @@ export function mountHallViewportHarness(
   container.style.width = '1000px';
   container.style.height = '520px';
   const root = createRoot(container);
-  root.render(createElement(HallViewportHarness, { renderer }));
+  root.render(createElement(HallViewportHarness, { renderer, editorMode }));
   const testWindow = window as HallViewportTestWindow;
+  testWindow.__hallMoveDelta = null;
+  testWindow.__hallMoveCommitCount = 0;
   testWindow.__hallViewportRoot = root;
   testWindow.__hallSeatWorld = firstSeat.position;
 }
@@ -86,5 +110,7 @@ export function unmountHallViewportHarness(container: HTMLElement): void {
   delete testWindow.__hallClickTarget;
   delete testWindow.__hallSelection;
   delete testWindow.__hallSeatWorld;
+  delete testWindow.__hallMoveDelta;
+  delete testWindow.__hallMoveCommitCount;
   container.replaceChildren();
 }

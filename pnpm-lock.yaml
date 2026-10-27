@@ -393,6 +393,9 @@ importers:
       '@hall-platform/geometry':
         specifier: workspace:*
         version: link:../geometry
+      '@hall-platform/hall-viewer':
+        specifier: workspace:*
+        version: link:../hall-viewer
       '@hall-platform/pdf':
         specifier: workspace:*
         version: link:../pdf

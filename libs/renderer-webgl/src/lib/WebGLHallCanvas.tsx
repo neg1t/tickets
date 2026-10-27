@@ -3,6 +3,7 @@ import type {
   RendererEvent,
   RendererScene,
   RendererSeatGeometry,
+  RendererSeatPositionUpdate,
   RendererSeatUpdate,
   RendererTargetRef,
   Viewport,
@@ -13,33 +14,39 @@ import { WebGLHallRenderer } from './WebGLHallRenderer.js';
 
 const noSeatUpdates: readonly RendererSeatUpdate[] = [];
 const noSelection: readonly RendererTargetRef[] = [];
+const noPreviewPositions: readonly RendererSeatPositionUpdate[] = [];
 
 export type WebGLHallCanvasProps = Readonly<{
   scene: RendererScene<RendererSeatGeometry>;
   viewport: Viewport;
   seatUpdates?: readonly RendererSeatUpdate[];
+  previewPositions?: readonly RendererSeatPositionUpdate[];
   selection?: readonly RendererTargetRef[];
   className?: string;
   onEvent?: (event: RendererEvent) => void;
   onContextLost?: () => void;
   onContextRestored?: () => void;
   onRendererError?: (error: Error) => void;
+  onRendererReady?: () => void;
 }>;
 
 export function WebGLHallCanvas({
   scene,
   viewport,
   seatUpdates = noSeatUpdates,
+  previewPositions = noPreviewPositions,
   selection = noSelection,
   className,
   onEvent,
   onContextLost,
   onContextRestored,
   onRendererError,
+  onRendererReady,
 }: WebGLHallCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const labelsCanvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<WebGLHallRenderer | null>(null);
+  const rendererReadyRef = useRef(false);
   const labelsById = useMemo(
     () =>
       new Map(
@@ -57,12 +64,14 @@ export function WebGLHallCanvas({
     onContextLost,
     onContextRestored,
     onRendererError,
+    onRendererReady,
   });
   callbacksRef.current = {
     onEvent,
     onContextLost,
     onContextRestored,
     onRendererError,
+    onRendererReady,
   };
 
   drawLabelsRef.current = () => {
@@ -122,20 +131,34 @@ export function WebGLHallCanvas({
     return () => {
       observer.disconnect();
       renderer.dispose();
+      rendererReadyRef.current = false;
       if (rendererRef.current === renderer) rendererRef.current = null;
     };
   }, []);
 
   useEffect(() => rendererRef.current?.setScene(scene), [scene]);
   useEffect(() => rendererRef.current?.updateSeats(seatUpdates), [seatUpdates]);
+  useEffect(
+    () => rendererRef.current?.setPreviewPositions(previewPositions),
+    [previewPositions],
+  );
   useEffect(() => rendererRef.current?.setViewport(viewport), [viewport]);
   useEffect(() => rendererRef.current?.setSelection(selection), [selection]);
+  useEffect(() => {
+    if (!rendererRef.current || rendererReadyRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      rendererReadyRef.current = true;
+      callbacksRef.current.onRendererReady?.();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [scene, seatUpdates, previewPositions, viewport, selection]);
   useEffect(() => drawLabelsRef.current(), [scene, labelsById, viewport]);
 
   return (
     <div
       className={className}
       data-renderer="webgl2"
+      data-preview-seats={previewPositions.length}
       style={{
         position: 'relative',
         width: '100%',
@@ -146,6 +169,7 @@ export function WebGLHallCanvas({
         ref={canvasRef}
         aria-hidden="true"
         data-renderer="webgl2"
+        data-preview-seats={previewPositions.length}
         style={{
           position: 'absolute',
           inset: 0,

@@ -1,6 +1,7 @@
 import { seatSymbolDiameter } from '@hall-platform/renderer-core';
 import type {
   RendererSeatGeometry,
+  RendererSeatPositionUpdate,
   RendererSeatUpdate,
   RendererTargetRef,
 } from '@hall-platform/renderer-core';
@@ -114,6 +115,27 @@ export function updateSeatStatuses(
     changed.push(index);
   }
   return rangesForIndices(changed, 1);
+}
+
+export function updateSeatPositions(
+  buffers: SeatBuffers,
+  updates: readonly RendererSeatPositionUpdate[],
+): BufferRange[] {
+  const changed: number[] = [];
+  for (const update of updates) {
+    const index = buffers.indexById.get(update.id);
+    if (index === undefined) continue;
+    const offset = index * 2;
+    if (
+      buffers.positions[offset] === update.position.x &&
+      buffers.positions[offset + 1] === update.position.y
+    )
+      continue;
+    buffers.positions[offset] = update.position.x;
+    buffers.positions[offset + 1] = update.position.y;
+    changed.push(index);
+  }
+  return rangesForIndices(changed);
 }
 
 export function updateSeatSelection(

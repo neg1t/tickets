@@ -17,6 +17,7 @@
   "dependencies": {
     "@hall-platform/domain": "workspace:*",
     "@hall-platform/geometry": "workspace:*",
+    "@hall-platform/hall-viewer": "workspace:*",
     "@hall-platform/pdf": "workspace:*",
     "@hall-platform/renderer-konva": "workspace:*",
     "effector": "^23.4.4",

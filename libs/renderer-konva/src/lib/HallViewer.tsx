@@ -15,6 +15,7 @@ import {
   readHallCanvasPalette,
 } from '@hall-platform/design-tokens';
 import type { SpatialBounds, Vector2 } from '@hall-platform/geometry';
+import type { RendererSeatPositionUpdate } from '@hall-platform/renderer-core';
 import {
   advancePinchViewport,
   pinchGestureFromPointers,
@@ -67,6 +68,8 @@ import {
   snappedMoveDelta,
   type PolygonEditMode,
 } from './directManipulation.js';
+
+const noPreviewPositions: readonly RendererSeatPositionUpdate[] = [];
 
 export type { PolygonEditMode } from './directManipulation.js';
 
@@ -132,6 +135,9 @@ export type HallViewerProps = {
   readonly hideSeatShapes?: boolean;
   readonly seatRendererLayer?: ReactNode;
   readonly onViewportChange?: (viewport: Viewport) => void;
+  readonly onSeatPreviewChange?: (
+    positions: readonly RendererSeatPositionUpdate[],
+  ) => void;
 };
 
 type PointerMode = 'pan' | 'pick' | 'edit' | 'create' | 'box' | 'handle';
@@ -262,6 +268,7 @@ export function HallViewer(props: HallViewerProps) {
     hideSeatShapes = false,
     seatRendererLayer,
     onViewportChange,
+    onSeatPreviewChange,
   } = props;
   const ui = { ...defaultLabels, ...labels };
   const [floorId, setFloorId] = useState(snapshot.floors[0]?.id ?? '');
@@ -488,6 +495,27 @@ export function HallViewer(props: HallViewerProps) {
     preview && movingKeys.size > 0
       ? snappedMoveDelta(preview.startWorld, preview.delta, gridEnabled)
       : null;
+  const previewSeatPositions = useMemo<
+    readonly RendererSeatPositionUpdate[]
+  >(() => {
+    if (!hideSeatShapes || !previewDelta) return noPreviewPositions;
+    const movedSeats = [...movingKeys].flatMap((key) => {
+      if (!key.startsWith('seat:')) return [];
+      const seat = scene.seatsById.get(key.slice('seat:'.length));
+      return seat ? [seat] : [];
+    });
+    return movedSeats.map((seat) => ({
+      id: seat.id,
+      position: {
+        x: seat.position.x + previewDelta.x,
+        y: seat.position.y + previewDelta.y,
+      },
+    }));
+  }, [hideSeatShapes, previewDelta, movingKeys, scene.seatsById]);
+  useEffect(
+    () => onSeatPreviewChange?.(previewSeatPositions),
+    [previewSeatPositions, onSeatPreviewChange],
+  );
   const positionedHandles = displayHandles.map((handle) => {
     const key = `${handle.target.kind}:${handle.target.id}`;
     const delta = previewDelta && movingKeys.has(key) ? previewDelta : null;
@@ -1281,6 +1309,7 @@ export function HallViewer(props: HallViewerProps) {
         }}
         data-visible-seats={showSeats}
         data-preview-seats={previewSeats.length}
+        data-preview-moving-seats={previewSeatPositions.length}
         data-floor-seat-count={scene.seats.length}
         data-seat-render-nodes={
           hideSeatShapes

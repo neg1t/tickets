@@ -18,6 +18,11 @@ export type RendererSeatUpdate = Readonly<{
   label?: string;
 }>;
 
+export type RendererSeatPositionUpdate = Readonly<{
+  id: string;
+  position: Vector2;
+}>;
+
 export type RendererEvent =
   | Readonly<{
       type: 'pick';
@@ -33,6 +38,7 @@ export type RendererEvent =
 export type RendererContract<TGeometry = unknown> = Readonly<{
   setScene(scene: RendererScene<TGeometry>): void;
   updateSeats(updates: readonly RendererSeatUpdate[]): void;
+  setPreviewPositions(positions: readonly RendererSeatPositionUpdate[]): void;
   setViewport(viewport: Viewport): void;
   setSelection(targets: readonly RendererTargetRef[]): void;
   resize(width: number, height: number, pixelRatio?: number): void;

@@ -2,10 +2,12 @@ import type { Vector2 } from '@hall-platform/geometry';
 import { SpatialIndex, type SpatialBounds } from '@hall-platform/geometry';
 import {
   screenToWorld,
+  seatSymbolBounds,
   type RendererContract,
   type RendererEvent,
   type RendererScene,
   type RendererSeatGeometry,
+  type RendererSeatPositionUpdate,
   type RendererSeatUpdate,
   type RendererTargetRef,
   type SceneItem,
@@ -17,6 +19,7 @@ import { WebGLResourceManager } from './resourceManager.js';
 import {
   createSeatBuffers,
   updateSeatSelection,
+  updateSeatPositions,
   updateSeatStatuses,
   type BufferRange,
   type SeatBuffers,
@@ -59,6 +62,12 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
   >(renderBlockSize);
   private buffers: SeatBuffers = createSeatBuffers([]);
   private readonly attributes = new Map<string, AttributeBinding>();
+  private readonly seatItemsById = new Map<
+    string,
+    SceneItem<RendererSeatGeometry>
+  >();
+  private readonly previewPositions = new Map<string, Vector2>();
+  private basePositions = new Float32Array();
   private viewport: Viewport = { x: 0, y: 0, scale: 1 };
   private width = 1;
   private height = 1;
@@ -102,18 +111,23 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     if (this.disposed) return;
     this.scene = scene;
     this.renderIndex.clear();
+    this.seatItemsById.clear();
+    this.previewPositions.clear();
     const seatItems = scene.items.filter(
       (item) =>
         item.kind === 'seat' &&
         (!scene.floorId || item.floorId === scene.floorId),
     );
-    for (const item of seatItems)
+    for (const item of seatItems) {
+      this.seatItemsById.set(item.id, item);
       this.renderIndex.upsert(item.id, item.bounds, item);
+    }
     const seats = seatItems.map((item) => ({ id: item.id, ...item.geometry }));
     const nextSeatIds = new Set(seats.map(({ id }) => id));
     for (const id of this.stylesById.keys())
       if (!nextSeatIds.has(id)) this.stylesById.delete(id);
     this.buffers = createSeatBuffers(seats);
+    this.basePositions = new Float32Array(this.buffers.positions);
     updateSeatStatuses(this.buffers, [...this.stylesById.values()]);
     updateSeatSelection(this.buffers, this.selection);
     this.uploadSeatBuffers();
@@ -125,6 +139,35 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     for (const update of updates) this.stylesById.set(update.id, update);
     const ranges = updateSeatStatuses(this.buffers, updates);
     this.uploadRanges('statuses', this.buffers.statuses, ranges);
+    if (ranges.length > 0) this.scheduleFrame();
+  }
+
+  setPreviewPositions(positions: readonly RendererSeatPositionUpdate[]): void {
+    if (this.disposed) return;
+    const next = new Map(
+      positions
+        .filter((position) => this.seatItemsById.has(position.id))
+        .map(({ id, position }) => [id, position]),
+    );
+    const affected = new Set([...this.previewPositions.keys(), ...next.keys()]);
+    const updates: RendererSeatPositionUpdate[] = [];
+    for (const id of affected) {
+      const baseItem = this.seatItemsById.get(id);
+      const index = this.buffers.indexById.get(id);
+      if (!baseItem || index === undefined) continue;
+      const position = next.get(id) ?? {
+        x: this.basePositions[index * 2] ?? baseItem.geometry.position.x,
+        y: this.basePositions[index * 2 + 1] ?? baseItem.geometry.position.y,
+      };
+      const geometry = { ...baseItem.geometry, position };
+      const bounds = seatSymbolBounds(geometry);
+      this.renderIndex.upsert(id, bounds, { ...baseItem, bounds, geometry });
+      updates.push({ id, position });
+    }
+    this.previewPositions.clear();
+    for (const [id, position] of next) this.previewPositions.set(id, position);
+    const ranges = updateSeatPositions(this.buffers, updates);
+    this.uploadRanges('positions', this.buffers.positions, ranges, 2);
     if (ranges.length > 0) this.scheduleFrame();
   }
 
@@ -205,6 +248,9 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     this.eventHandler = null;
     this.scene = null;
     this.renderIndex.clear();
+    this.seatItemsById.clear();
+    this.previewPositions.clear();
+    this.basePositions = new Float32Array();
     this.attributes.clear();
     this.stylesById.clear();
   }
@@ -268,7 +314,12 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
 
   private uploadSeatBuffers(): void {
     if (this.contextLost) return;
-    this.resources.uploadBuffer(this.gl, 'positions', this.buffers.positions);
+    this.resources.uploadBuffer(
+      this.gl,
+      'positions',
+      this.buffers.positions,
+      this.gl.DYNAMIC_DRAW,
+    );
     this.resources.uploadBuffer(this.gl, 'rotations', this.buffers.rotations);
     this.resources.uploadBuffer(
       this.gl,
@@ -317,14 +368,18 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     bufferName: string,
     data: Float32Array,
     ranges: readonly Readonly<{ start: number; count: number }>[],
+    components = 1,
   ): void {
     if (this.contextLost || this.disposed) return;
     for (const range of ranges) {
       this.resources.updateBuffer(
         this.gl,
         bufferName,
-        range.start * Float32Array.BYTES_PER_ELEMENT,
-        data.subarray(range.start, range.start + range.count),
+        range.start * components * Float32Array.BYTES_PER_ELEMENT,
+        data.subarray(
+          range.start * components,
+          (range.start + range.count) * components,
+        ),
       );
     }
   }

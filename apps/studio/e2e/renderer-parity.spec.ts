@@ -71,6 +71,76 @@ test('forced WebGL replaces only the seat layer and preserves CPU picking', asyn
     .toMatchObject({ kind: 'seat' });
 });
 
+test('editor drag previews move WebGL seat buffers and commit once on release', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.evaluate(async () => {
+    const harness = await import('/src/e2e/hallViewportHarness.ts');
+    harness.mountHallViewportHarness(document.body, 'webgl', true);
+  });
+  await expect(page.locator('canvas[data-renderer="webgl2"]')).toBeVisible();
+  const seatPoint = await page.evaluate(() => {
+    const container = document.querySelector<HTMLElement>(
+      '.hall-viewer-canvas',
+    );
+    const testWindow = window as Window & {
+      __hallSeatWorld?: { x: number; y: number };
+    };
+    if (!container || !testWindow.__hallSeatWorld)
+      throw new Error('Missing HallViewport test fixture');
+    const bounds = container.getBoundingClientRect();
+    const x = Number(container.dataset.viewportX);
+    const y = Number(container.dataset.viewportY);
+    const scale = Number(container.dataset.viewportScale);
+    return {
+      x: bounds.left + x + testWindow.__hallSeatWorld.x * scale,
+      y: bounds.top + y + testWindow.__hallSeatWorld.y * scale,
+    };
+  });
+
+  await page.mouse.move(seatPoint.x, seatPoint.y);
+  await page.mouse.down();
+  await page.mouse.move(seatPoint.x + 30, seatPoint.y + 12, { steps: 4 });
+  await expect(page.locator('canvas[data-renderer="webgl2"]')).toHaveAttribute(
+    'data-preview-seats',
+    '1',
+  );
+  await expect(page.locator('.hall-viewer-canvas')).toHaveAttribute(
+    'data-preview-moving-seats',
+    '1',
+  );
+  await page.mouse.up();
+
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as Window & {
+              __hallMoveDelta?: { x: number; y: number } | null;
+            }
+          ).__hallMoveDelta,
+      ),
+    )
+    .toMatchObject({ x: expect.any(Number), y: expect.any(Number) });
+  expect(
+    await page.evaluate(
+      () =>
+        (window as Window & { __hallMoveCommitCount?: number })
+          .__hallMoveCommitCount,
+    ),
+  ).toBe(1);
+  await expect(page.locator('canvas[data-renderer="webgl2"]')).toHaveAttribute(
+    'data-preview-seats',
+    '0',
+  );
+  await expect(page.locator('.hall-viewer-canvas')).toHaveAttribute(
+    'data-preview-moving-seats',
+    '0',
+  );
+});
+
 test('falls back to Konva when WebGL2 context creation fails', async ({
   page,
 }) => {
@@ -94,13 +164,15 @@ test('falls back to Konva when WebGL2 context creation fails', async ({
     'canvas',
   );
   await expect(page.locator('canvas[data-renderer="webgl2"]')).toHaveCount(0);
-  expect(
-    await page.evaluate(
-      () =>
-        (window as Window & { __hallRendererError?: string })
-          .__hallRendererError,
-    ),
-  ).toBe('WebGL2 is not available for this canvas');
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as Window & { __hallRendererError?: string })
+            .__hallRendererError,
+      ),
+    )
+    .toBe('WebGL2 is not available for this canvas');
 });
 
 test('restores once and falls back after the context is lost again', async ({

@@ -21,6 +21,9 @@
       "path": "../geometry/tsconfig.lib.json"
     },
     {
+      "path": "../hall-viewer/tsconfig.lib.json"
+    },
+    {
       "path": "../domain/tsconfig.lib.json"
     }
   ],

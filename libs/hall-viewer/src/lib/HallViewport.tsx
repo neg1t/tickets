@@ -9,6 +9,7 @@ import {
 } from 'react';
 import {
   createSeatScene,
+  type RendererSeatPositionUpdate,
   type RendererSeatUpdate,
   type Viewport,
 } from '@hall-platform/renderer-core';
@@ -32,7 +33,10 @@ const noSeatUpdates: readonly RendererSeatUpdate[] = [];
 
 export type HallViewportProps = Omit<
   HallViewerProps,
-  'hideSeatShapes' | 'seatRendererLayer' | 'onViewportChange'
+  | 'hideSeatShapes'
+  | 'seatRendererLayer'
+  | 'onViewportChange'
+  | 'onSeatPreviewChange'
 > & {
   readonly renderer?: RendererPreference;
   readonly webglEnabled?: boolean;
@@ -58,15 +62,21 @@ export function HallViewport(props: HallViewportProps) {
   );
   const [viewport, setViewport] = useState<Viewport | null>(null);
   const [webglFailed, setWebglFailed] = useState(false);
+  const [webglReadyKey, setWebglReadyKey] = useState('');
   const contextLosses = useRef(0);
   const [hoveredTarget, setHoveredTarget] = useState<HallTarget | null>(null);
   const [localSelection, setLocalSelection] = useState<HallTarget[]>([]);
+  const [previewPositions, setPreviewPositions] = useState<
+    readonly RendererSeatPositionUpdate[]
+  >([]);
   const selectedTargets = controlledSelection ?? localSelection;
   const preferredFloorId = requestedFloorId ?? localFloorId;
   const floorId = snapshot.floors.some((floor) => floor.id === preferredFloorId)
     ? preferredFloorId
     : (snapshot.floors[0]?.id ?? '');
   const engine = selectRendererEngine(renderer, webglEnabled, webglFailed);
+  const rendererKey = `${renderer}:${webglEnabled}`;
+  const webglReady = engine === 'webgl' && webglReadyKey === rendererKey;
   const seatScene = useMemo(
     () =>
       createSeatScene(
@@ -149,6 +159,9 @@ export function HallViewport(props: HallViewportProps) {
     contextLosses.current += 1;
     if (contextLosses.current > 1) setWebglFailed(true);
   }, []);
+  const handleRendererReady = useCallback(() => {
+    setWebglReadyKey(rendererKey);
+  }, [rendererKey]);
   const rendererLayer =
     engine === 'webgl' && viewport ? (
       <WebGLErrorBoundary key={renderer} onError={handleWebGLError}>
@@ -157,9 +170,11 @@ export function HallViewport(props: HallViewportProps) {
             scene={seatScene}
             viewport={viewport}
             seatUpdates={effectiveSeatUpdates}
+            previewPositions={previewPositions}
             selection={selection}
             onContextLost={handleContextLost}
             onRendererError={handleWebGLError}
+            onRendererReady={handleRendererReady}
           />
         </Suspense>
       </WebGLErrorBoundary>
@@ -187,7 +202,8 @@ export function HallViewport(props: HallViewportProps) {
       onSelectionChange={handleSelectionChange}
       onHoverTarget={handleHoverTarget}
       onViewportChange={handleViewportChange}
-      hideSeatShapes={rendererLayer !== null}
+      onSeatPreviewChange={setPreviewPositions}
+      hideSeatShapes={webglReady}
       seatRendererLayer={rendererLayer}
     />
   );

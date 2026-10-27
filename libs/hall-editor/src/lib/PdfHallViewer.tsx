@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { renderPdfPage } from '@hall-platform/pdf';
+import type { HallViewerProps } from '@hall-platform/renderer-konva';
 import {
-  HallViewer,
-  type HallViewerProps,
-} from '@hall-platform/renderer-konva';
+  HallViewport,
+  type RendererPreference,
+} from '@hall-platform/hall-viewer';
 import type { HallLayoutDraft } from './editorDraft.js';
 import { editorText } from './ui/editorI18n.js';
 
@@ -55,10 +56,19 @@ export type PdfHallViewerProps = Omit<
   readonly draft: HallLayoutDraft;
   readonly locale?: string;
   readonly onError?: (error: Error) => void;
+  readonly renderer?: RendererPreference;
+  readonly webglEnabled?: boolean;
 };
 
 export function PdfHallViewer(props: PdfHallViewerProps) {
-  const { draft, locale, onError, ...viewerProps } = props;
+  const {
+    draft,
+    locale,
+    onError,
+    renderer = 'auto',
+    webglEnabled = false,
+    ...viewerProps
+  } = props;
   const cache = useRef(new Map<string, RenderedPage>());
   const pending = useRef(new Map<string, PendingPage>());
   const [canvases, setCanvases] = useState<
@@ -74,6 +84,15 @@ export function PdfHallViewer(props: PdfHallViewerProps) {
   )
     ? requestedFloorId
     : (draft.snapshot.floors[0]?.id ?? '');
+  const rendererSeatUpdates = useMemo(
+    () =>
+      draft.snapshot.seats.map((seat) => ({
+        id: seat.id,
+        status: 'available',
+        label: seat.label,
+      })),
+    [draft.snapshot.seats],
+  );
   const pageSizes = useMemo(
     () =>
       Object.fromEntries(
@@ -269,8 +288,12 @@ export function PdfHallViewer(props: PdfHallViewerProps) {
         </p>
       )}
 
-      <HallViewer
+      <HallViewport
         {...viewerProps}
+        renderer={renderer}
+        webglEnabled={webglEnabled}
+        seatUpdates={rendererSeatUpdates}
+        {...(onError ? { onRendererError: onError } : {})}
         onFloorChange={(floorId) => {
           setSelectedFloorId(floorId);
           viewerProps.onFloorChange?.(floorId);

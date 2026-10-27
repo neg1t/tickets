@@ -186,4 +186,31 @@ describe('WebGL hall renderer contract', () => {
     );
     renderer.dispose();
   });
+
+  it('moves preview seats in GPU buffers and restores their base positions', () => {
+    const gl = fakeContext();
+    const target = Object.assign(new EventTarget(), {
+      width: 0,
+      height: 0,
+      getContext: vi.fn(() => gl),
+    }) as unknown as HTMLCanvasElement;
+    const renderer = new WebGLHallRenderer(target);
+    renderer.setScene(seatScene());
+    vi.mocked(gl.bufferSubData).mockClear();
+    const uploadedPositions: number[][] = [];
+    vi.mocked(gl.bufferSubData).mockImplementation((_target, _offset, data) => {
+      uploadedPositions.push(Array.from(data as Float32Array));
+    });
+
+    renderer.setPreviewPositions([
+      { id: 'seat-a', position: { x: 10, y: 20 } },
+    ]);
+    renderer.setPreviewPositions([]);
+
+    expect(uploadedPositions).toEqual([
+      [10, 20],
+      [0, 0],
+    ]);
+    renderer.dispose();
+  });
 });
