@@ -177,6 +177,54 @@ describe('WebGL hall renderer contract', () => {
     renderer.dispose();
   });
 
+  it('draws mixed seat symbols in one scene-order instanced range', () => {
+    const gl = fakeContext();
+    const target = Object.assign(new EventTarget(), {
+      width: 0,
+      height: 0,
+      getContext: vi.fn(() => gl),
+    }) as unknown as HTMLCanvasElement;
+    const renderer = new WebGLHallRenderer(target);
+    const symbols = [
+      { id: 'chair', visualKind: 'chair' },
+      { id: 'armchair', visualKind: 'armchair' },
+      { id: 'wheelchair', visualKind: 'wheelchairBay' },
+    ] as const;
+    renderer.resize(640, 480, 1);
+    renderer.setScene(
+      createRendererScene<RendererSeatGeometry>(
+        1,
+        symbols.map(({ id, visualKind }, index) => ({
+          id,
+          floorId: 'main',
+          kind: 'seat' as const,
+          bounds: {
+            minX: index * 2 - 1,
+            minY: -1,
+            maxX: index * 2 + 1,
+            maxY: 1,
+          },
+          geometry: { position: { x: index * 2, y: 0 }, visualKind },
+        })),
+      ),
+    );
+    renderer.setViewport({ x: 40, y: 40, scale: 1 });
+    frames.splice(0).forEach((frame) => frame(16));
+
+    expect(gl.vertexAttribPointer).toHaveBeenCalledWith(
+      3,
+      1,
+      gl.FLOAT,
+      false,
+      0,
+      0,
+    );
+    expect(gl.drawArraysInstanced).toHaveBeenCalledTimes(1);
+    expect(gl.drawArraysInstanced).toHaveBeenCalledWith(gl.TRIANGLES, 0, 6, 3);
+
+    renderer.dispose();
+  });
+
   it('reports a failure when the context cannot restore its shaders', () => {
     const gl = fakeContext();
     const onError = vi.fn();
