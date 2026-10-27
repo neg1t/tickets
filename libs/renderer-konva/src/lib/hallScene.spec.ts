@@ -2,7 +2,7 @@ import {
   layoutDocumentSchema,
   layoutSnapshotSchema,
 } from '@hall-platform/domain';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import smallTheater from '@hall-platform/fixtures/small-theater.json' with { type: 'json' };
 import banquetHall from '@hall-platform/fixtures/banquet-hall.json' with { type: 'json' };
 import operaHall from '@hall-platform/fixtures/opera-hall.json' with { type: 'json' };
@@ -79,6 +79,33 @@ describe('hall scene', () => {
       'far',
       'right',
     ]);
+  });
+
+  it('omits seat draw data when an external renderer owns the seat layer', () => {
+    const snapshot = layoutDocumentSchema.parse(smallTheater.document).snapshot;
+    const scene = buildHallScene(snapshot, snapshot.floors[0]?.id ?? '');
+    const seat = scene.seats[0];
+    if (!seat) throw new Error('Fixture is missing a seat');
+    const seatIndexSearch = vi.spyOn(scene.index.index, 'search');
+    const nonSeatIndexSearch = vi.spyOn(scene.nonSeatIndex, 'search');
+
+    const visible = visibleHallScene(
+      scene,
+      scene.bounds,
+      undefined,
+      undefined,
+      false,
+    );
+
+    expect(visible.seats).toEqual([]);
+    expect(seatIndexSearch).not.toHaveBeenCalled();
+    expect(nonSeatIndexSearch).toHaveBeenCalledOnce();
+    seatIndexSearch.mockRestore();
+    nonSeatIndexSearch.mockRestore();
+    expect(hitTestHallScene(scene, seat.position)).toEqual({
+      kind: 'seat',
+      id: seat.id,
+    });
   });
 
   it('builds visible objects from spatial hits without scanning full arrays', () => {

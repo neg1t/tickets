@@ -539,12 +539,18 @@ export function HallViewer(props: HallViewerProps) {
   const margin = Math.max(2, 100 / viewport.scale);
   const rendered = useMemo(
     () =>
-      visibleHallScene(displayScene, {
-        minX: visibleWorld.minX - margin,
-        minY: visibleWorld.minY - margin,
-        maxX: visibleWorld.maxX + margin,
-        maxY: visibleWorld.maxY + margin,
-      }),
+      visibleHallScene(
+        displayScene,
+        {
+          minX: visibleWorld.minX - margin,
+          minY: visibleWorld.minY - margin,
+          maxX: visibleWorld.maxX + margin,
+          maxY: visibleWorld.maxY + margin,
+        },
+        undefined,
+        undefined,
+        !hideSeatShapes,
+      ),
     [
       displayScene,
       visibleWorld.minX,
@@ -552,6 +558,7 @@ export function HallViewer(props: HallViewerProps) {
       visibleWorld.maxX,
       visibleWorld.maxY,
       margin,
+      hideSeatShapes,
     ],
   );
   const gridStep = gridStepForScale(viewport.scale);
@@ -592,15 +599,26 @@ export function HallViewer(props: HallViewerProps) {
     showSeats || interactionMode === 'pick' ? undefined : farZoomTargets;
   const visibleLabels = useMemo(
     () =>
-      visibleSeatLabelIds(rendered.seats, viewport.scale, {
-        x: viewport.x,
-        y: viewport.y,
-        width,
-        height,
-      }),
-    [rendered.seats, viewport.scale, viewport.x, viewport.y, width, height],
+      hideSeatShapes
+        ? new Set<string>()
+        : visibleSeatLabelIds(rendered.seats, viewport.scale, {
+            x: viewport.x,
+            y: viewport.y,
+            width,
+            height,
+          }),
+    [
+      hideSeatShapes,
+      rendered.seats,
+      viewport.scale,
+      viewport.x,
+      viewport.y,
+      width,
+      height,
+    ],
   );
   const dotCachePixels = useMemo(() => {
+    if (hideSeatShapes) return 0;
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -612,9 +630,9 @@ export function HallViewer(props: HallViewerProps) {
       maxY = Math.max(maxY, seat.position.y);
     }
     return scene.seats.length ? (maxX - minX + 2) * (maxY - minY + 2) * 4 : 0;
-  }, [scene.seats]);
+  }, [hideSeatShapes, scene.seats]);
   const dotBatches = useMemo(() => {
-    if (!showSeats || movingKeys.size > 0) return null;
+    if (!showSeats || hideSeatShapes || movingKeys.size > 0) return null;
     const visibleBounds =
       dotCachePixels > 8_000_000
         ? {
@@ -633,6 +651,7 @@ export function HallViewer(props: HallViewerProps) {
     );
   }, [
     showSeats,
+    hideSeatShapes,
     movingKeys.size,
     scene.seats,
     viewport.scale,

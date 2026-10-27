@@ -56,6 +56,27 @@ const cornerVertices = new Float32Array([
   -1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1,
 ]);
 
+function boundsContain(
+  container: SpatialBounds,
+  bounds: SpatialBounds,
+): boolean {
+  return (
+    container.minX <= bounds.minX &&
+    container.minY <= bounds.minY &&
+    container.maxX >= bounds.maxX &&
+    container.maxY >= bounds.maxY
+  );
+}
+
+function boundsIntersect(first: SpatialBounds, second: SpatialBounds): boolean {
+  return (
+    first.minX <= second.maxX &&
+    first.maxX >= second.minX &&
+    first.minY <= second.maxY &&
+    first.maxY >= second.minY
+  );
+}
+
 export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry> {
   private readonly gl: WebGL2RenderingContext;
   private readonly resources = new WebGLResourceManager();
@@ -64,6 +85,10 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
   private readonly renderIndex = new SpatialIndex<
     SceneItem<RendererSeatGeometry>
   >(renderBlockSize);
+  private visibleSeatRangesCache: {
+    bounds: SpatialBounds;
+    candidates: { index: number; bounds: SpatialBounds }[];
+  } | null = null;
   private buffers: SeatBuffers = createSeatBuffers([]);
   private readonly attributes = new Map<string, AttributeBinding>();
   private readonly seatItemsById = new Map<
@@ -114,6 +139,7 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
   setScene(scene: RendererScene<RendererSeatGeometry>): void {
     if (this.disposed) return;
     this.scene = scene;
+    this.visibleSeatRangesCache = null;
     this.renderIndex.clear();
     this.seatItemsById.clear();
     this.previewPositions.clear();
@@ -175,7 +201,10 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     for (const [id, position] of next) this.previewPositions.set(id, position);
     const ranges = updateSeatPositions(this.buffers, updates);
     this.uploadRanges('positions', this.buffers.positions, ranges, 2);
-    if (ranges.length > 0) this.scheduleFrame();
+    if (ranges.length > 0) {
+      this.visibleSeatRangesCache = null;
+      this.scheduleFrame();
+    }
   }
 
   setViewport(viewport: Viewport): void {
@@ -467,29 +496,47 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
       maxX: (this.width - this.viewport.x) / scale,
       maxY: (this.height - this.viewport.y) / scale,
     };
-    const indexes: number[] = [];
-    for (const entry of this.renderIndex.search(bounds)) {
-      const index = this.buffers.indexById.get(entry.value.id);
-      if (index !== undefined) indexes.push(index);
-    }
-    if (indexes.length === 0) return [];
-    if (indexes.length === this.buffers.ids.length)
-      return [{ start: 0, count: indexes.length }];
+    const cached = this.visibleSeatRangesCache;
 
-    indexes.sort((first, second) => first - second);
+    const marginX = (bounds.maxX - bounds.minX) * 0.25;
+    const marginY = (bounds.maxY - bounds.minY) * 0.25;
+    const queryBounds: SpatialBounds = {
+      minX: bounds.minX - marginX,
+      minY: bounds.minY - marginY,
+      maxX: bounds.maxX + marginX,
+      maxY: bounds.maxY + marginY,
+    };
+    let candidates = cached?.candidates;
+    if (!cached || !boundsContain(cached.bounds, bounds)) {
+      candidates = [];
+      for (const entry of this.renderIndex.search(queryBounds)) {
+        const index = this.buffers.indexById.get(entry.value.id);
+        if (index !== undefined)
+          candidates.push({ index, bounds: entry.bounds });
+      }
+      candidates.sort((first, second) => first.index - second.index);
+      this.visibleSeatRangesCache = { bounds: queryBounds, candidates };
+    }
+
     const ranges: BufferRange[] = [];
-    let start = indexes[0] ?? 0;
-    let previous = start;
-    for (const index of indexes.slice(1)) {
-      if (index === previous + 1) {
-        previous = index;
+    let start = -1;
+    let previous = -1;
+    for (const candidate of candidates ?? []) {
+      if (!boundsIntersect(candidate.bounds, bounds)) continue;
+      if (start < 0) {
+        start = candidate.index;
+        previous = candidate.index;
+        continue;
+      }
+      if (candidate.index === previous + 1) {
+        previous = candidate.index;
         continue;
       }
       ranges.push({ start, count: previous - start + 1 });
-      start = index;
-      previous = index;
+      start = candidate.index;
+      previous = candidate.index;
     }
-    ranges.push({ start, count: previous - start + 1 });
+    if (start >= 0) ranges.push({ start, count: previous - start + 1 });
     return ranges;
   }
 

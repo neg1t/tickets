@@ -3,6 +3,7 @@ import {
   createRendererScene,
   type RendererSeatGeometry,
 } from '@hall-platform/renderer-core';
+import { SpatialIndex } from '@hall-platform/geometry';
 import { WebGLHallRenderer } from './WebGLHallRenderer.js';
 
 let frames: FrameRequestCallback[];
@@ -175,6 +176,31 @@ describe('WebGL hall renderer contract', () => {
     );
 
     renderer.dispose();
+  });
+
+  it('reuses visible seat ranges while the viewport stays inside its cached bounds', () => {
+    const search = vi.spyOn(SpatialIndex.prototype, 'search');
+    const gl = fakeContext();
+    const target = Object.assign(new EventTarget(), {
+      width: 0,
+      height: 0,
+      getContext: vi.fn(() => gl),
+    }) as unknown as HTMLCanvasElement;
+    const renderer = new WebGLHallRenderer(target);
+    renderer.resize(640, 480, 1);
+    renderer.setScene(seatScene());
+    frames.splice(0).forEach((frame) => frame(16));
+    expect(search).toHaveBeenCalledTimes(1);
+
+    renderer.setViewport({ x: 100, y: 40, scale: 1 });
+    frames.splice(0).forEach((frame) => frame(32));
+    expect(search).toHaveBeenCalledTimes(1);
+
+    renderer.setViewport({ x: -5_000, y: 0, scale: 1 });
+    frames.splice(0).forEach((frame) => frame(48));
+    expect(search).toHaveBeenCalledTimes(2);
+    renderer.dispose();
+    search.mockRestore();
   });
 
   it('draws mixed seat symbols in one scene-order instanced range', () => {

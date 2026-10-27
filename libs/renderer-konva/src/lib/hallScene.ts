@@ -14,6 +14,7 @@ import {
   type SceneItem,
 } from '@hall-platform/renderer-core';
 import {
+  SpatialIndex,
   arcPointAtFraction,
   bezierPointAtParameter,
   distanceBetweenVectors,
@@ -61,6 +62,7 @@ export type HallScene = Readonly<{
   targetOrderById: ReadonlyMap<string, number>;
   bounds: SpatialBounds;
   index: RendererScene<HallTarget>;
+  nonSeatIndex: SpatialIndex<SceneItem<HallTarget>>;
 }>;
 
 export type VisibleHallScene = Pick<
@@ -294,6 +296,11 @@ export function buildHallScene(
       ? allBounds.reduce(mergeBounds)
       : pointBounds({ x: 0, y: 0 }, 10);
   const index = createRendererScene(revision, sceneItems, floorId);
+  const nonSeatIndex = new SpatialIndex<SceneItem<HallTarget>>(8);
+  for (const item of sceneItems) {
+    if (item.kind === 'seat') continue;
+    nonSeatIndex.upsert(sceneItemKey(item), item.bounds, item);
+  }
   if (measuredBuild) {
     globalThis.performance?.mark(`${buildName}:end`);
     globalThis.performance?.measure(
@@ -318,6 +325,7 @@ export function buildHallScene(
     targetOrderById,
     bounds,
     index,
+    nonSeatIndex,
   };
 }
 
@@ -335,10 +343,13 @@ export function visibleHallScene(
   bounds: SpatialBounds,
   movingKeys?: ReadonlySet<string>,
   delta?: Vector2,
+  includeSeats = true,
 ): VisibleHallScene {
   const visibleTargets = new Map<string, HallTarget>();
-  for (const { value } of scene.index.index.search(bounds)) {
+  const index = includeSeats ? scene.index.index : scene.nonSeatIndex;
+  for (const { value } of index.search(bounds)) {
     const target = value.geometry;
+    if (!includeSeats && target.kind === 'seat') continue;
     visibleTargets.set(`${target.kind}:${target.id}`, target);
   }
   if (movingKeys && delta) {
@@ -348,8 +359,9 @@ export function visibleHallScene(
       maxX: bounds.maxX - delta.x,
       maxY: bounds.maxY - delta.y,
     };
-    for (const { value } of scene.index.index.search(originalBounds)) {
+    for (const { value } of index.search(originalBounds)) {
       const target = value.geometry;
+      if (!includeSeats && target.kind === 'seat') continue;
       const key = `${target.kind}:${target.id}`;
       if (movingKeys.has(key)) visibleTargets.set(key, target);
     }
