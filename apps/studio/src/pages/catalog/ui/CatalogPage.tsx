@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { PERFORMANCE_HALL_ID } from '@hall-platform/fixtures';
 import type { HallSummary, RecoveryDraft } from '@hall-platform/local-storage';
 import type { RecoveryAutosaveStatus } from '../../dashboard/model/recoveryAutosave.js';
 import { Button } from '@hall-platform/ui';
@@ -16,7 +17,9 @@ export type CatalogPageProps = {
   error: string | null;
   hasSavedHall: boolean;
   hasPublishedVersion: boolean;
+  creatingPerformanceHall: boolean;
   onCreate: () => void;
+  onCreatePerformanceHall: () => void;
   onOpen: (id: string) => void;
   onEditor: () => void;
   onPreview: () => void;
@@ -84,6 +87,9 @@ export function CatalogPage(props: CatalogPageProps) {
         : right.updatedAt.localeCompare(left.updatedAt),
     );
   }, [props.catalog, query, sort]);
+  const hasPerformanceHall = props.catalog.some(
+    (hall) => hall.id === PERFORMANCE_HALL_ID,
+  );
 
   return (
     <div className="studio-catalog-page">
@@ -323,6 +329,21 @@ export function CatalogPage(props: CatalogPageProps) {
                 onClick={props.onSample}
               >
                 Открыть тестовый зал
+              </button>
+              <button
+                type="button"
+                className="studio-button"
+                onClick={props.onCreatePerformanceHall}
+                disabled={
+                  !props.ready || props.saving || props.creatingPerformanceHall
+                }
+                title="Тестовый зал сохраняется в данных этого браузера"
+              >
+                {props.creatingPerformanceHall
+                  ? 'Создаём тестовый зал · 50 000 мест…'
+                  : hasPerformanceHall
+                    ? 'Открыть тестовый зал · 50 000 мест'
+                    : 'Создать тестовый зал · 50 000 мест'}
               </button>
               <button
                 type="button"

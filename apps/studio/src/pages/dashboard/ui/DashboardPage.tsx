@@ -28,6 +28,7 @@ import {
   $revision,
   $seatSelection,
   $versions,
+  createPerformanceHallFx,
   cancelDemoFx,
   catalogOpened,
   confirmDemoFx,
@@ -41,6 +42,7 @@ import {
   openBuyerFx,
   openDemoEventFx,
   requestOpenHall,
+  requestCreatePerformanceHall,
   requestImportDraft,
   requestImportHallPackage,
   requestSaveDraft,
@@ -111,6 +113,7 @@ export function DashboardPage() {
     seatSelection,
     savePending,
     publishPending,
+    performanceHallPending,
   ] = useUnit([
     $draft,
     $mode,
@@ -131,6 +134,7 @@ export function DashboardPage() {
     $seatSelection,
     saveDraftFx.pending,
     publishDraftFx.pending,
+    createPerformanceHallFx.pending,
   ]);
   const [
     initialize,
@@ -299,6 +303,11 @@ export function DashboardPage() {
         hasPublishedVersion={Boolean(latestVersion)}
         onCreate={() => {
           if (canSwitchHall()) createHall();
+        }}
+        creatingPerformanceHall={performanceHallPending}
+        onCreatePerformanceHall={() => {
+          if (canSwitchHall())
+            void requestCreatePerformanceHall().catch(() => undefined);
         }}
         onOpen={(id) => {
           if (canSwitchHall()) void requestOpenHall(id).catch(() => undefined);

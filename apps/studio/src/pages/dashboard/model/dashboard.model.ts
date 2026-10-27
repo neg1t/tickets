@@ -1,5 +1,13 @@
 import { createEffect, createEvent, createStore, sample } from 'effector';
-import { layoutDocumentSchema } from '@hall-platform/domain';
+import {
+  layoutDocumentSchema,
+  layoutSnapshotSchema,
+} from '@hall-platform/domain';
+import {
+  createPerformanceHallSnapshot,
+  PERFORMANCE_HALL_ID,
+  PERFORMANCE_HALL_NAME,
+} from '@hall-platform/fixtures';
 import arena from '@hall-platform/fixtures/arena.json';
 import banquetHall from '@hall-platform/fixtures/banquet-hall.json';
 import operaHall from '@hall-platform/fixtures/opera-hall.json';
@@ -80,6 +88,11 @@ const fixtures = [smallTheater, operaHall, arena, banquetHall].map(
 );
 const sampleDraft = fixtures[0];
 if (!sampleDraft) throw new Error('Studio needs at least one fixture');
+
+function createPerformanceHallDraft(): HallLayoutDraft {
+  const snapshot = layoutSnapshotSchema.parse(createPerformanceHallSnapshot());
+  return createDraftFromSnapshot(PERFORMANCE_HALL_NAME, snapshot);
+}
 
 type OpenedHall = {
   record: StoredHall;
@@ -166,6 +179,32 @@ export function requestOpenHall(id: string): Promise<OpenedHall> {
     epoch: documentEpoch,
   });
 }
+export const createPerformanceHallFx = createEffect(
+  async ({
+    epoch,
+    requestId,
+  }: {
+    epoch: number;
+    requestId: number;
+  }): Promise<OpenedHall> => {
+    requireCurrentNavigation(requestId, epoch);
+    const existing = await repository.read(PERFORMANCE_HALL_ID);
+    requireCurrentNavigation(requestId, epoch);
+    if (!existing) {
+      const draft = createPerformanceHallDraft();
+      requireCurrentNavigation(requestId, epoch);
+      await repository.save(draft, 0);
+    }
+    requireCurrentNavigation(requestId, epoch);
+    return openStoredHall(PERFORMANCE_HALL_ID);
+  },
+);
+export function requestCreatePerformanceHall(): Promise<OpenedHall> {
+  return createPerformanceHallFx({
+    epoch: documentEpoch,
+    requestId: beginNavigation(),
+  });
+}
 const acceptedOpenHall = sample({
   clock: openHallFx.done,
   filter: ({ params }) => isCurrentNavigation(params.requestId, params.epoch),
@@ -175,6 +214,11 @@ const acceptedOpenHallFailure = sample({
   clock: openHallFx.fail,
   filter: ({ params }) => isCurrentNavigation(params.requestId, params.epoch),
   fn: ({ error }) => error,
+});
+const acceptedPerformanceHall = sample({
+  clock: createPerformanceHallFx.done,
+  filter: ({ params }) => isCurrentNavigation(params.requestId, params.epoch),
+  fn: ({ result }) => result,
 });
 export const sampleHallRequested = createEvent();
 sampleHallRequested.watch(() => {
@@ -636,9 +680,15 @@ const acceptedNavigationFailures = [
     filter: ({ params }) => isCurrentNavigation(params.requestId, params.epoch),
     fn: ({ error }) => error,
   }),
+  sample({
+    clock: createPerformanceHallFx.fail,
+    filter: ({ params }) => isCurrentNavigation(params.requestId, params.epoch),
+    fn: ({ error }) => error,
+  }),
 ];
 for (const event of [
   acceptedOpenHall,
+  acceptedPerformanceHall,
   acceptedImport,
   acceptedPackageImport,
   acceptedDuplicate,
@@ -653,6 +703,7 @@ for (const event of [
 const opened = [
   initializeFx.doneData,
   acceptedOpenHall,
+  acceptedPerformanceHall,
   acceptedDuplicate,
   acceptedImport,
   acceptedPackageImport,
@@ -710,7 +761,12 @@ export const $mode = createStore<
   .on(openBuyerFx.doneData, () => 'buyer')
   .on(openDemoEventFx.doneData, () => 'buyer')
   .on(acceptedPublished, () => 'published');
-for (const event of [acceptedOpenHall, acceptedImport, acceptedPackageImport])
+for (const event of [
+  acceptedOpenHall,
+  acceptedPerformanceHall,
+  acceptedImport,
+  acceptedPackageImport,
+])
   $mode.on(event, () => 'editor');
 for (const event of [
   acceptedDuplicate,
@@ -893,6 +949,7 @@ for (const event of acceptedNavigationFailures)
   $error.on(event, (_, error) => error.message);
 $error.reset(
   acceptedDuplicate,
+  acceptedPerformanceHall,
   acceptedDelete,
   acceptedRestore,
   acceptedReset,
