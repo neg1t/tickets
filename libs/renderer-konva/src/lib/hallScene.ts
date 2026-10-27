@@ -23,6 +23,8 @@ export type HallTarget = Readonly<{
   id: string;
 }>;
 
+let sceneBuildSequence = 0;
+
 export type SceneRow = Readonly<{
   row: Row;
   points: readonly Vector2[];
@@ -50,6 +52,7 @@ export type HallScene = Readonly<{
   tablesById: ReadonlyMap<string, Table>;
   zonesById: ReadonlyMap<string, SceneZone>;
   decorationsById: ReadonlyMap<string, Decoration>;
+  targetOrderById: ReadonlyMap<string, number>;
   bounds: SpatialBounds;
   index: SpatialIndex<HallTarget>;
 }>;
@@ -171,6 +174,11 @@ export function buildHallScene(
   explicitZoneBounds: Readonly<Record<string, SpatialBounds>> = {},
   backgroundPageSizes: Readonly<Record<string, BackgroundPageSize>> = {},
 ): HallScene {
+  const measuredBuild = snapshot.seats.length >= 5_000;
+  const buildName = measuredBuild
+    ? `hall:scene-index:${snapshot.id}:${floorId}:${++sceneBuildSequence}`
+    : '';
+  if (measuredBuild) globalThis.performance?.mark(`${buildName}:start`);
   const seats = snapshot.seats.filter((seat) => seat.floorId === floorId);
   const rows = snapshot.rows
     .filter((row) => row.floorId === floorId)
@@ -184,7 +192,9 @@ export function buildHallScene(
   );
   const index = new SpatialIndex<HallTarget>(8);
   const memberBounds = new Map<string, SpatialBounds>();
+  const targetOrderById = new Map<string, number>();
   const allBounds: SpatialBounds[] = [];
+  let nextTargetOrder = 0;
   const backgrounds = snapshot.backgrounds
     .filter(
       (background) => background.floorId === floorId && background.visible,
@@ -207,7 +217,9 @@ export function buildHallScene(
     bounds: SpatialBounds,
     zoneId?: string,
   ): void {
-    index.upsert(`${kind}:${id}`, bounds, { kind, id });
+    const key = `${kind}:${id}`;
+    index.upsert(key, bounds, { kind, id });
+    targetOrderById.set(key, nextTargetOrder++);
     if (kind !== 'zone') allBounds.push(bounds);
     if (zoneId) {
       const previous = memberBounds.get(zoneId);
@@ -273,6 +285,14 @@ export function buildHallScene(
     allBounds.length > 0
       ? allBounds.reduce(mergeBounds)
       : pointBounds({ x: 0, y: 0 }, 10);
+  if (measuredBuild) {
+    globalThis.performance?.mark(`${buildName}:end`);
+    globalThis.performance?.measure(
+      buildName,
+      `${buildName}:start`,
+      `${buildName}:end`,
+    );
+  }
   return {
     floorId,
     seats,
@@ -286,6 +306,7 @@ export function buildHallScene(
     tablesById: new Map(tables.map((table) => [table.id, table])),
     zonesById: new Map(zones.map((zone) => [zone.zone.id, zone])),
     decorationsById: new Map(decorations.map((item) => [item.id, item])),
+    targetOrderById,
     bounds,
     index,
   };
@@ -293,8 +314,10 @@ export function buildHallScene(
 
 function boundsIntersect(first: SpatialBounds, second: SpatialBounds): boolean {
   return (
-    first.minX <= second.maxX && first.maxX >= second.minX &&
-    first.minY <= second.maxY && first.maxY >= second.minY
+    first.minX <= second.maxX &&
+    first.maxX >= second.minX &&
+    first.minY <= second.maxY &&
+    first.maxY >= second.minY
   );
 }
 
@@ -304,7 +327,9 @@ export function visibleHallScene(
   movingKeys?: ReadonlySet<string>,
   delta?: Vector2,
 ): VisibleHallScene {
-  const keys = new Set(scene.index.search(bounds).map(({ id }) => id));
+  const visibleTargets = new Map<string, HallTarget>();
+  for (const { id, value } of scene.index.search(bounds))
+    visibleTargets.set(id, value);
   if (movingKeys && delta) {
     const originalBounds = {
       minX: bounds.minX - delta.x,
@@ -312,17 +337,58 @@ export function visibleHallScene(
       maxX: bounds.maxX - delta.x,
       maxY: bounds.maxY - delta.y,
     };
-    for (const { id } of scene.index.search(originalBounds)) {
-      if (movingKeys.has(id)) keys.add(id);
+    for (const { id, value } of scene.index.search(originalBounds)) {
+      if (movingKeys.has(id)) visibleTargets.set(id, value);
+    }
+  }
+  const orderedTargets = [...visibleTargets.entries()].sort(
+    ([first], [second]) =>
+      (scene.targetOrderById.get(first) ?? Number.MAX_SAFE_INTEGER) -
+      (scene.targetOrderById.get(second) ?? Number.MAX_SAFE_INTEGER),
+  );
+  const seats: HallScene['seats'][number][] = [];
+  const rows: HallScene['rows'][number][] = [];
+  const tables: HallScene['tables'][number][] = [];
+  const zones: HallScene['zones'][number][] = [];
+  const decorations: HallScene['decorations'][number][] = [];
+  for (const [, target] of orderedTargets) {
+    switch (target.kind) {
+      case 'seat': {
+        const item = scene.seatsById.get(target.id);
+        if (item) seats.push(item);
+        break;
+      }
+      case 'row': {
+        const item = scene.rowsById.get(target.id);
+        if (item) rows.push(item);
+        break;
+      }
+      case 'table': {
+        const item = scene.tablesById.get(target.id);
+        if (item) tables.push(item);
+        break;
+      }
+      case 'zone': {
+        const item = scene.zonesById.get(target.id);
+        if (item) zones.push(item);
+        break;
+      }
+      case 'decoration': {
+        const item = scene.decorationsById.get(target.id);
+        if (item) decorations.push(item);
+        break;
+      }
     }
   }
   return {
-    seats: scene.seats.filter((seat) => keys.has(`seat:${seat.id}`)),
-    rows: scene.rows.filter(({ row }) => keys.has(`row:${row.id}`)),
-    tables: scene.tables.filter((table) => keys.has(`table:${table.id}`)),
-    zones: scene.zones.filter(({ zone }) => keys.has(`zone:${zone.id}`)),
-    decorations: scene.decorations.filter((item) => keys.has(`decoration:${item.id}`)),
-    backgrounds: scene.backgrounds.filter(({ bounds: item }) => boundsIntersect(item, bounds)),
+    seats,
+    rows,
+    tables,
+    zones,
+    decorations,
+    backgrounds: scene.backgrounds.filter(({ bounds: item }) =>
+      boundsIntersect(item, bounds),
+    ),
   };
 }
 

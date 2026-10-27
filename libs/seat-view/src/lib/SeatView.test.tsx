@@ -18,10 +18,17 @@ import {
 } from './SeatView.js';
 
 vi.mock('@hall-platform/renderer-konva', () => ({
-  HallViewer: (props: { stageId: string; labels?: { zoomIn?: string } }) => (
+  HallViewer: (props: {
+    stageId: string;
+    viewerMode?: 'edit' | 'view' | 'pick';
+    activeTool?: string;
+    labels?: { zoomIn?: string };
+  }) => (
     <div
       data-testid="hall-viewer"
       data-stage-id={props.stageId}
+      data-viewer-mode={props.viewerMode}
+      data-active-tool={props.activeTool}
       data-zoom-in-label={props.labels?.zoomIn}
     />
   ),
@@ -71,6 +78,14 @@ function ControlledView(props: {
 }
 
 describe('SeatView', () => {
+  it('uses the pick interaction mode without entering editor tools', () => {
+    render(<ControlledView name="pick-mode" />);
+    const viewer = screen.getByTestId('hall-viewer');
+
+    expect(viewer.getAttribute('data-viewer-mode')).toBe('pick');
+    expect(viewer.getAttribute('data-active-tool')).toBeNull();
+  });
+
   it('limits a large seat list while preserving search and keyboard navigation', () => {
     const seatPrice = prices.seats[first.id];
     if (!seatPrice) throw new Error('Missing seat price');
@@ -100,12 +115,16 @@ describe('SeatView', () => {
     const list = document.querySelector('.seat-view-seat-list');
     if (!list) throw new Error('Accessible seat list is missing');
     expect(list.querySelectorAll('button').length).toBeLessThanOrEqual(80);
-    expect(screen.queryByRole('button', { name: /^Место B-9999 —/ })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /^Место B-9999 —/ }),
+    ).toBeNull();
 
     fireEvent.change(screen.getByRole('searchbox', { name: 'Места' }), {
       target: { value: 'B-9999' },
     });
-    expect(screen.getByRole('button', { name: /^Место B-9999 —/ })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: /^Место B-9999 —/ }),
+    ).toBeTruthy();
     fireEvent.change(screen.getByRole('searchbox', { name: 'Места' }), {
       target: { value: '' },
     });

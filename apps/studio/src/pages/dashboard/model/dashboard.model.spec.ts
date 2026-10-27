@@ -1,4 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+import type {
+  HallSummary,
+  PublishedHallVersion,
+  PublishedVersionMetadata,
+  StoredHall,
+} from '@hall-platform/local-storage';
 import {
   $draft,
   $mode,
@@ -26,6 +32,46 @@ function deferred<T>() {
 }
 
 describe('dashboard async identity', () => {
+  it('opens the selected hall before catalog and publication reads finish', async () => {
+    const draft = $draft.getState();
+    const record: StoredHall = {
+      id: draft.snapshot.id,
+      draft,
+      revision: 1,
+      updatedAt: new Date().toISOString(),
+      publishedVersionNumber: 0,
+    };
+    const catalog = deferred<HallSummary[]>();
+    const versions = deferred<PublishedVersionMetadata[]>();
+    const repository = {
+      get: vi.fn(async () => null),
+      read: vi.fn(async () => record),
+      list: vi.fn(() => catalog.promise),
+      listPublishedMetadata: vi.fn(() => versions.promise),
+    };
+    vi.resetModules();
+    vi.doMock('@hall-platform/local-storage', async (importOriginal) => ({
+      ...(await importOriginal<
+        typeof import('@hall-platform/local-storage')
+      >()),
+      createLocalHallRepository: () => repository as never,
+    }));
+    try {
+      const model = await import('./dashboard.model.js');
+      const opened = await model.requestOpenHall(record.id);
+
+      expect(opened.record.id).toBe(record.id);
+      expect(repository.read).toHaveBeenCalledOnce();
+      expect(repository.list).toHaveBeenCalledOnce();
+      expect(repository.listPublishedMetadata).toHaveBeenCalledOnce();
+      catalog.resolve([]);
+      versions.resolve([]);
+    } finally {
+      vi.doUnmock('@hall-platform/local-storage');
+      vi.resetModules();
+    }
+  });
+
   it('R01: a late A response cannot replace a newer B request', async () => {
     const original = openHallFx.use.getCurrent();
     const first = deferred<Awaited<ReturnType<typeof openHallFx>>>();
@@ -77,6 +123,7 @@ describe('dashboard async identity', () => {
           publishedVersionNumber: 0,
         }),
         listPublished: async () => [],
+        listPublishedMetadata: async () => [],
       }),
       duplicateHallDraft: () => undefined,
     }));

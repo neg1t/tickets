@@ -8,6 +8,7 @@ import {
   type HallViewerLabels,
 } from '@hall-platform/renderer-konva';
 import { createSeatViewModel } from './seatView.model.js';
+import { buildSeatIndexes } from './seatIndexes.js';
 import {
   validateSeatPrice,
   validateSelection,
@@ -31,6 +32,8 @@ export type SeatSelectionItem =
       readonly zoneId: string;
       readonly quantity: number;
     };
+
+let buyerIndexBuildSequence = 0;
 
 export type SeatViewData = {
   readonly occurrenceId: string;
@@ -80,6 +83,7 @@ const statusColors: Record<SeatStatus, string> = {
   blocked: '#67717e',
   unavailable: '#a5adb6',
 };
+const priceFormatters = new Map<string, Intl.NumberFormat>();
 
 const translations = {
   ru: {
@@ -185,11 +189,17 @@ const englishViewerLabels: HallViewerLabels = {
 
 function formatPrice(price: SeatPrice, locale: string): string {
   try {
-    return new Intl.NumberFormat(locale, {
-      style: 'currency',
-      currency: price.currency,
-      maximumFractionDigits: 2,
-    }).format(price.amount);
+    const key = `${locale}\u0000${price.currency}`;
+    let formatter = priceFormatters.get(key);
+    if (!formatter) {
+      formatter = new Intl.NumberFormat(locale, {
+        style: 'currency',
+        currency: price.currency,
+        maximumFractionDigits: 2,
+      });
+      priceFormatters.set(key, formatter);
+    }
+    return formatter.format(price.amount);
   } catch {
     return `${price.amount} ${price.currency}`;
   }
@@ -252,25 +262,21 @@ export function SeatView(props: SeatViewProps) {
   const instanceId = useId().replace(/:/g, '');
   const layoutIndex = useMemo(() => {
     const snapshot = layout.snapshot;
-    const floorById = new Map<string, (typeof snapshot.floors)[number]>(
-      snapshot.floors.map((floor) => [floor.id, floor]),
-    );
-    const zoneById = new Map<string, (typeof snapshot.zones)[number]>(
-      snapshot.zones.map((zone) => [zone.id, zone]),
-    );
-    const rowById = new Map<string, (typeof snapshot.rows)[number]>(
-      snapshot.rows.map((row) => [row.id, row]),
-    );
-    const seatById = new Map<string, (typeof snapshot.seats)[number]>(
-      snapshot.seats.map((seat) => [seat.id, seat]),
-    );
-    const searchTextById = new Map(
-      snapshot.seats.map((seat) => [
-        seat.id,
-        `${seat.label} ${zoneById.get(seat.zoneId ?? '')?.name ?? ''} ${seat.placement.kind === 'row' ? (rowById.get(seat.placement.rowId)?.name ?? '') : ''}`.toLowerCase(),
-      ]),
-    );
-    return { floorById, zoneById, rowById, seatById, searchTextById };
+    const measuredIndex = snapshot.seats.length >= 5_000;
+    const indexName = measuredIndex
+      ? `hall:buyer-index:${snapshot.id}:${++buyerIndexBuildSequence}`
+      : '';
+    if (measuredIndex) globalThis.performance?.mark(`${indexName}:start`);
+    const index = buildSeatIndexes(snapshot);
+    if (measuredIndex) {
+      globalThis.performance?.mark(`${indexName}:end`);
+      globalThis.performance?.measure(
+        indexName,
+        `${indexName}:start`,
+        `${indexName}:end`,
+      );
+    }
+    return index;
   }, [layout.snapshot]);
   const activeFloorId = layout.snapshot.floors.some(
     (floor) => floor.id === floorId,
@@ -282,19 +288,32 @@ export function SeatView(props: SeatViewProps) {
   )
     ? zoneId
     : null;
-  const zones = layout.snapshot.zones.filter(
-    (zone) => zone.floorId === activeFloorId,
+  const zones = useMemo(
+    () =>
+      layout.snapshot.zones.filter((zone) => zone.floorId === activeFloorId),
+    [layout.snapshot.zones, activeFloorId],
   );
   const normalizedSearch = search.trim().toLowerCase();
-  const snapshotSeats = layout.snapshot.seats;
   const availabilitySeats = availability.seats;
   const searchTextById = layoutIndex.searchTextById;
-  const seats = snapshotSeats.filter(
-    (seat) =>
-      seat.floorId === activeFloorId &&
-      (!activeZoneId || seat.zoneId === activeZoneId) &&
-      (!availableOnly || availabilitySeats[seat.id] === 'available') &&
-      (searchTextById.get(seat.id)?.includes(normalizedSearch) ?? false),
+  const baseSeats = activeZoneId
+    ? (layoutIndex.seatsByFloorZone.get(
+        `${activeFloorId}\u0000${activeZoneId}`,
+      ) ?? [])
+    : (layoutIndex.seatsByFloor.get(activeFloorId) ?? []);
+  const availabilityFilter = availableOnly ? availabilitySeats : null;
+  const seats = useMemo(
+    () =>
+      !normalizedSearch && !availabilityFilter
+        ? baseSeats
+        : baseSeats.filter(
+            (seat) =>
+              (!availabilityFilter ||
+                availabilityFilter[seat.id] === 'available') &&
+              (searchTextById.get(seat.id)?.includes(normalizedSearch) ??
+                false),
+          ),
+    [baseSeats, normalizedSearch, availabilityFilter, searchTextById],
   );
   const { seatById, zoneById } = layoutIndex;
   const safeSelection = selection.filter(
@@ -335,15 +354,26 @@ export function SeatView(props: SeatViewProps) {
       if (seat.floorId !== activeFloorId) continue;
       const price = prices.seats[seat.id];
       if (price && validateSeatPrice(price).valid) {
-        unique.set(`${price.category ?? labels.seat}:${price.amount}:${price.currency}`, price);
+        unique.set(
+          `${price.category ?? labels.seat}:${price.amount}:${price.currency}`,
+          price,
+        );
       }
     }
     return [...unique.values()];
   }, [layout.snapshot.seats, activeFloorId, prices.seats, labels.seat]);
   const locked = loading || buying || pending;
   const validation = useMemo(
-    () => validateSelection({ layout, selection, availability, prices }),
-    [layout, selection, availability, prices],
+    () =>
+      validateSelection({
+        layout,
+        selection,
+        availability,
+        prices,
+        seatIds: layoutIndex.seatById,
+        zoneIds: layoutIndex.zoneById,
+      }),
+    [layout, layoutIndex, selection, availability, prices],
   );
   const selectedCount = validation.count;
   const total = validation.total;
@@ -467,7 +497,7 @@ export function SeatView(props: SeatViewProps) {
             snapshot={layout.snapshot}
             hallName={layout.hallName}
             {...(layout.zoneBounds ? { zoneBounds: layout.zoneBounds } : {})}
-            activeTool="pick"
+            viewerMode="pick"
             selectedTargets={selectedTargets}
             {...(locale.toLowerCase().startsWith('en')
               ? { labels: englishViewerLabels }
@@ -666,7 +696,7 @@ export function SeatView(props: SeatViewProps) {
                   ? zoneById.get(item.zoneId)
                   : null;
               const name = seat
-                  ? `${labels.seat} ${seat.label} · ${layoutIndex.floorById.get(seat.floorId)?.name ?? ''} · ${seat.zoneId ? (zoneById.get(seat.zoneId)?.name ?? '') : ''}`
+                ? `${labels.seat} ${seat.label} · ${layoutIndex.floorById.get(seat.floorId)?.name ?? ''} · ${seat.zoneId ? (zoneById.get(seat.zoneId)?.name ?? '') : ''}`
                 : `${zone?.name ?? (item.kind === 'generalAdmission' ? item.zoneId : item.seatId)} × ${item.kind === 'generalAdmission' ? item.quantity : 1}`;
               const price =
                 item.kind === 'seat'

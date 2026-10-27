@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { layoutDocumentSchema } from '@hall-platform/domain';
 import smallTheater from '@hall-platform/fixtures/small-theater.json' with { type: 'json' };
 import type {
@@ -67,6 +67,21 @@ describe('validateSeatPrice', () => {
         minorUnits: 1234,
       },
     );
+  });
+
+  it('caches currency fraction digits after the first valid price check', () => {
+    const resolvedOptions = vi.spyOn(
+      Intl.NumberFormat.prototype,
+      'resolvedOptions',
+    );
+
+    validateSeatPrice({ amount: 12, currency: 'CZK' });
+    const firstCheckCalls = resolvedOptions.mock.calls.length;
+    validateSeatPrice({ amount: 13, currency: 'CZK' });
+
+    expect(firstCheckCalls).toBeGreaterThan(0);
+    expect(resolvedOptions).toHaveBeenCalledTimes(firstCheckCalls);
+    resolvedOptions.mockRestore();
   });
 
   it.each([
@@ -172,6 +187,36 @@ describe('validateSelection', () => {
     expect(validate([{ kind: 'seat', seatId: ' ' }]).issues).toContainEqual(
       expect.objectContaining({ code: 'invalid_id' }),
     );
+  });
+
+  it('uses memoized identity sets instead of scanning the layout for every selection', () => {
+    const forbidArrayScan = <T>(items: readonly T[]): readonly T[] =>
+      new Proxy(items, {
+        get(target, property, receiver) {
+          if (property === 'map' || property === Symbol.iterator)
+            throw new Error('validateSelection rescanned the layout');
+          return Reflect.get(target, property, receiver);
+        },
+      });
+    const indexedLayout = {
+      ...layout,
+      snapshot: {
+        ...layout.snapshot,
+        seats: forbidArrayScan(layout.snapshot.seats),
+        zones: forbidArrayScan(layout.snapshot.zones),
+      },
+    };
+
+    expect(
+      validateSelection({
+        layout: indexedLayout,
+        selection: seatSelection,
+        availability,
+        prices,
+        seatIds: new Set([seat.id]),
+        zoneIds: new Set([zone.id]),
+      }),
+    ).toMatchObject({ valid: true });
   });
 
   it('checks GA quantity, stock, and order limit', () => {

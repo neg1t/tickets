@@ -6,7 +6,10 @@ import { getReadyUrl, workspaceRoot } from '@nx/devkit';
 // getReadyUrl moves the address to the port the dev server task reported.
 const productionPreview = process.env['HALL_PRODUCTION_PREVIEW'] === '1';
 const browserMatrix = process.env['HALL_BROWSER_MATRIX'] === '1';
-const previewUrl = productionPreview ? 'http://localhost:4300' : 'http://localhost:4200';
+const capturePerformanceTrace = process.env['HALL_CAPTURE_TRACE'] === '1';
+const previewUrl = productionPreview
+  ? 'http://localhost:4300'
+  : 'http://localhost:4200';
 const baseURL = process.env['BASE_URL'] || getReadyUrl(previewUrl);
 
 /**
@@ -31,7 +34,7 @@ export default defineConfig({
   use: {
     baseURL,
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
-    trace: 'on-first-retry',
+    trace: capturePerformanceTrace ? 'on' : 'on-first-retry',
   },
   webServer: {
     command: productionPreview
@@ -46,10 +49,12 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
-    ...(browserMatrix ? [
-      { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
-      { name: 'webkit', use: { ...devices['Desktop Safari'] } },
-      { name: 'mobile-chromium', use: { ...devices['Pixel 7'] } },
-    ] : []),
+    ...(browserMatrix
+      ? [
+          { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+          { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+          { name: 'mobile-chromium', use: { ...devices['Pixel 7'] } },
+        ]
+      : []),
   ],
 });

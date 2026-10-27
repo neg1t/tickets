@@ -1,6 +1,6 @@
 import { HallStorageError } from './storageCodec.js';
 
-export const DATABASE_VERSION = 2;
+export const DATABASE_VERSION = 4;
 
 export function storageFailure(error: unknown): HallStorageError {
   if (error instanceof HallStorageError) return error;
@@ -42,6 +42,17 @@ export function openDatabase(name: string): Promise<IDBDatabase> {
         database.createObjectStore('assets', { keyPath: 'key' });
       if (!database.objectStoreNames.contains('recovery'))
         database.createObjectStore('recovery', { keyPath: 'hallId' });
+      if (!database.objectStoreNames.contains('hallMetadata'))
+        database.createObjectStore('hallMetadata', { keyPath: 'id' });
+      if (!database.objectStoreNames.contains('repositoryMetadata'))
+        database.createObjectStore('repositoryMetadata', { keyPath: 'key' });
+      if (!database.objectStoreNames.contains('publishedVersionMetadata')) {
+        const metadata = database.createObjectStore(
+          'publishedVersionMetadata',
+          { keyPath: 'versionId' },
+        );
+        metadata.createIndex('hallId', 'hallId');
+      }
     };
     request.onsuccess = () => {
       if (settled) {

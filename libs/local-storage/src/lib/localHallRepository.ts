@@ -18,9 +18,22 @@ import {
   HallStorageError,
   validateStoredDraft,
   validateStoredHall,
+  validateStoredHallEnvelope,
   type StoredDraft,
   type StoredHallRecord,
 } from './storageCodec.js';
+import {
+  createHallMetadata,
+  readHallMetadata,
+  validateHallMetadata,
+  type HallMetadata,
+} from './hallMetadata.js';
+import {
+  createPublishedVersionMetadata,
+  readPublishedVersionMetadata,
+  readStoredPublishedVersionMetadata,
+  type PublishedVersionMetadata,
+} from './publishedVersionMetadata.js';
 import {
   createDatabaseAccessor,
   readAllStore,
@@ -36,15 +49,7 @@ export type StoredHall = Readonly<{
   publishedVersionNumber: number;
 }>;
 
-export type HallSummary = Readonly<{
-  id: string;
-  name: string;
-  updatedAt: string;
-  revision: number;
-  publishedVersionNumber: number;
-  seats: number;
-  zones: number;
-}>;
+export type HallSummary = HallMetadata;
 
 export type PublishedHallVersion = Readonly<{
   versionId: string;
@@ -73,6 +78,7 @@ export interface LocalHallRepository {
     expectedRevision: number,
   ): Promise<{ record: StoredHall; published: PublishedHallVersion }>;
   listPublished(id: string): Promise<PublishedHallVersion[]>;
+  listPublishedMetadata(id: string): Promise<PublishedVersionMetadata[]>;
   getPublished(versionId: string): Promise<PublishedHallVersion | null>;
   exportHallPackage(id: string): Promise<HallExportPackage>;
   importHallPackage(
@@ -207,18 +213,6 @@ export function createPublishedVersion(
   };
 }
 
-function summarize(record: StoredHall): HallSummary {
-  return {
-    id: record.id,
-    name: record.draft.hallName,
-    updatedAt: record.updatedAt,
-    revision: record.revision,
-    publishedVersionNumber: record.publishedVersionNumber,
-    seats: record.draft.snapshot.seats.length,
-    zones: record.draft.snapshot.zones.length,
-  };
-}
-
 type StoredVersion = Omit<PublishedHallVersion, 'layout'> & {
   layout: StoredDraft;
 };
@@ -298,7 +292,7 @@ async function validatePackagePdfAssets(
   }
 }
 
-function validateStoredVersion(value: unknown): StoredVersion {
+function validateStoredVersionEnvelope(value: unknown): StoredVersion {
   if (typeof value !== 'object' || value === null) {
     throw new HallStorageError(
       'corrupt',
@@ -321,20 +315,165 @@ function validateStoredVersion(value: unknown): StoredVersion {
       'Stored published version metadata is invalid',
     );
   }
-  const layout = validateStoredDraft(record.layout);
-  if (layout.snapshot.layoutVersionId !== record.versionId) {
+  const layout = record.layout;
+  if (
+    typeof layout !== 'object' ||
+    layout === null ||
+    typeof (layout as Record<string, unknown>).snapshot !== 'object' ||
+    (layout as { snapshot?: { layoutVersionId?: unknown } }).snapshot
+      ?.layoutVersionId !== record.versionId
+  ) {
     throw new HallStorageError(
       'corrupt',
       'Published version ID differs from layout ID',
     );
   }
-  return { ...(value as StoredVersion), layout };
+  return value as StoredVersion;
+}
+
+function validateStoredVersion(value: unknown): StoredVersion {
+  const version = validateStoredVersionEnvelope(value);
+  return {
+    ...version,
+    layout: validateStoredDraft(version.layout),
+  };
 }
 
 export function createLocalHallRepository(
   name = 'hall-platform-studio',
 ): LocalHallRepository {
   const database = createDatabaseAccessor(name);
+  let catalogMetadataMigration: Promise<void> | null = null;
+  let publishedVersionMetadataMigration: Promise<void> | null = null;
+  const ensureCatalogMetadata = async (): Promise<void> => {
+    catalogMetadataMigration ??= (async () => {
+      const db = await database();
+      const migrationKey = 'hall-summary-migration-v1';
+      const migrated = await readStore<{ key: string }>(
+        db,
+        'repositoryMetadata',
+        migrationKey,
+      );
+      if (migrated) return;
+      await transact<void>(
+        db,
+        ['halls', 'hallMetadata', 'repositoryMetadata'],
+        'readwrite',
+        (transaction, done, fail) => {
+          const cursorRequest = transaction.objectStore('halls').openCursor();
+          cursorRequest.onerror = () => fail(cursorRequest.error);
+          cursorRequest.onsuccess = () => {
+            try {
+              const cursor = cursorRequest.result;
+              if (cursor) {
+                const summary = readHallMetadata(cursor.value);
+                if (summary)
+                  transaction.objectStore('hallMetadata').put(summary);
+                cursor.continue();
+              } else {
+                transaction
+                  .objectStore('repositoryMetadata')
+                  .put({ key: migrationKey });
+                done(undefined);
+              }
+            } catch (error) {
+              fail(error);
+            }
+          };
+        },
+      );
+    })().catch((error: unknown) => {
+      catalogMetadataMigration = null;
+      throw error;
+    });
+    await catalogMetadataMigration;
+  };
+  const ensurePublishedVersionMetadata = async (): Promise<void> => {
+    publishedVersionMetadataMigration ??= (async () => {
+      const db = await database();
+      const migrationKey = 'published-version-summary-migration-v1';
+      const migrated = await readStore<{ key: string }>(
+        db,
+        'repositoryMetadata',
+        migrationKey,
+      );
+      if (migrated) return;
+      await transact<void>(
+        db,
+        ['versions', 'publishedVersionMetadata', 'repositoryMetadata'],
+        'readwrite',
+        (transaction, done, fail) => {
+          const cursorRequest = transaction
+            .objectStore('versions')
+            .openCursor();
+          cursorRequest.onerror = () => fail(cursorRequest.error);
+          cursorRequest.onsuccess = () => {
+            try {
+              const cursor = cursorRequest.result;
+              if (cursor) {
+                const summary = readStoredPublishedVersionMetadata(
+                  cursor.value,
+                );
+                if (summary)
+                  transaction
+                    .objectStore('publishedVersionMetadata')
+                    .put(summary);
+                cursor.continue();
+              } else {
+                transaction
+                  .objectStore('repositoryMetadata')
+                  .put({ key: migrationKey });
+                done(undefined);
+              }
+            } catch (error) {
+              fail(error);
+            }
+          };
+        },
+      );
+    })().catch((error: unknown) => {
+      publishedVersionMetadataMigration = null;
+      throw error;
+    });
+    await publishedVersionMetadataMigration;
+  };
+  const repairPublishedVersionMetadata = async (id: string): Promise<void> => {
+    await transact<void>(
+      await database(),
+      ['versions', 'publishedVersionMetadata'],
+      'readwrite',
+      (transaction, done, fail) => {
+        const metadata = transaction.objectStore('publishedVersionMetadata');
+        const cursorRequest = transaction
+          .objectStore('versions')
+          .index('hallId')
+          .openCursor(id);
+        cursorRequest.onerror = () => fail(cursorRequest.error);
+        cursorRequest.onsuccess = () => {
+          const cursor = cursorRequest.result;
+          if (!cursor) {
+            done(undefined);
+            return;
+          }
+          const currentRequest = metadata.get(cursor.primaryKey);
+          currentRequest.onerror = () => fail(currentRequest.error);
+          currentRequest.onsuccess = () => {
+            try {
+              if (!readPublishedVersionMetadata(currentRequest.result)) {
+                const summary = readStoredPublishedVersionMetadata(
+                  cursor.value,
+                );
+                if (summary) metadata.put(summary);
+              }
+              cursor.continue();
+            } catch (error) {
+              fail(error);
+            }
+          };
+        };
+      },
+    );
+  };
   const loadBlob = async (key: string): Promise<Blob | undefined> =>
     (
       await readStore<{ key: string; blob: Blob }>(
@@ -344,7 +483,7 @@ export function createLocalHallRepository(
       )
     )?.blob;
   const hydrateHall = async (value: unknown): Promise<StoredHall> => {
-    const record = validateStoredHall(value);
+    const record = validateStoredHallEnvelope(value);
     return {
       ...record,
       draft: await decodeStoredDraft(record.draft, loadBlob),
@@ -353,7 +492,7 @@ export function createLocalHallRepository(
   const hydrateVersion = async (
     value: unknown,
   ): Promise<PublishedHallVersion> => {
-    const version = validateStoredVersion(value);
+    const version = validateStoredVersionEnvelope(value);
     return {
       ...version,
       layout: await decodeStoredDraft(version.layout, loadBlob),
@@ -362,17 +501,15 @@ export function createLocalHallRepository(
 
   const repository: LocalHallRepository = {
     async list() {
-      const records = await readAllStore<unknown>(await database(), 'halls');
+      await ensureCatalogMetadata();
+      const records = await readAllStore<unknown>(
+        await database(),
+        'hallMetadata',
+      );
       return records
         .flatMap((value) => {
-          try {
-            const record = validateStoredHall(value);
-            return [
-              summarize({ ...record, draft: record.draft as HallLayoutDraft }),
-            ];
-          } catch {
-            return [];
-          }
+          const summary = validateHallMetadata(value);
+          return summary ? [summary] : [];
         })
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     },
@@ -391,7 +528,7 @@ export function createLocalHallRepository(
       let invalid: unknown;
       return transact<StoredHall>(
         await database(),
-        ['halls', 'versions', 'assets'],
+        ['halls', 'versions', 'assets', 'hallMetadata'],
         'readwrite',
         (transaction, done, fail) => {
           const store = transaction.objectStore('halls');
@@ -427,6 +564,9 @@ export function createLocalHallRepository(
                 for (const entry of encoded.blobs)
                   transaction.objectStore('assets').put(entry);
                 store.put({ ...record, draft: encoded.draft });
+                transaction
+                  .objectStore('hallMetadata')
+                  .put(createHallMetadata(record));
                 done(record);
               };
               if (previous) {
@@ -468,10 +608,11 @@ export function createLocalHallRepository(
     async delete(id) {
       return transact(
         await database(),
-        ['halls'],
+        ['halls', 'hallMetadata'],
         'readwrite',
         (transaction, done) => {
           transaction.objectStore('halls').delete(id);
+          transaction.objectStore('hallMetadata').delete(id);
           done(undefined);
         },
       );
@@ -487,7 +628,13 @@ export function createLocalHallRepository(
         published: PublishedHallVersion;
       }>(
         await database(),
-        ['halls', 'versions', 'assets'],
+        [
+          'halls',
+          'versions',
+          'assets',
+          'hallMetadata',
+          'publishedVersionMetadata',
+        ],
         'readwrite',
         (transaction, done, fail) => {
           const halls = transaction.objectStore('halls');
@@ -530,7 +677,13 @@ export function createLocalHallRepository(
                     snapshot: published.layout.snapshot,
                   },
                 });
+                transaction
+                  .objectStore('publishedVersionMetadata')
+                  .put(createPublishedVersionMetadata(published));
                 halls.put({ ...record, draft: encoded.draft });
+                transaction
+                  .objectStore('hallMetadata')
+                  .put(createHallMetadata(record));
                 done({ record, published });
               };
               if (previous) {
@@ -581,7 +734,13 @@ export function createLocalHallRepository(
       let conflict = false;
       return transact<PublishedHallVersion>(
         await database(),
-        ['halls', 'versions', 'assets'],
+        [
+          'halls',
+          'versions',
+          'assets',
+          'hallMetadata',
+          'publishedVersionMetadata',
+        ],
         'readwrite',
         (transaction, done, fail) => {
           const halls = transaction.objectStore('halls');
@@ -603,10 +762,17 @@ export function createLocalHallRepository(
               transaction
                 .objectStore('versions')
                 .add({ ...published, layout: encoded.draft });
-              halls.put({
+              transaction
+                .objectStore('publishedVersionMetadata')
+                .put(createPublishedVersionMetadata(published));
+              const updatedRecord = {
                 ...record,
                 publishedVersionNumber: published.versionNumber,
-              });
+              };
+              halls.put(updatedRecord);
+              transaction
+                .objectStore('hallMetadata')
+                .put(createHallMetadata(updatedRecord));
               done(published);
             } catch (error) {
               fail(error);
@@ -643,6 +809,36 @@ export function createLocalHallRepository(
         }
       }
       return versions.sort((a, b) => b.versionNumber - a.versionNumber);
+    },
+    async listPublishedMetadata(id) {
+      await ensurePublishedVersionMetadata();
+      const loadMetadata = async () =>
+        transact<unknown[]>(
+          await database(),
+          ['publishedVersionMetadata'],
+          'readonly',
+          (transaction, done) => {
+            const request = transaction
+              .objectStore('publishedVersionMetadata')
+              .index('hallId')
+              .getAll(id);
+            request.onsuccess = () => done(request.result as unknown[]);
+          },
+        );
+      let stored = await loadMetadata();
+      const hallSummary = validateHallMetadata(
+        await readStore<unknown>(await database(), 'hallMetadata', id),
+      );
+      if (hallSummary && stored.length < hallSummary.publishedVersionNumber) {
+        await repairPublishedVersionMetadata(id);
+        stored = await loadMetadata();
+      }
+      return stored
+        .flatMap((value) => {
+          const summary = readPublishedVersionMetadata(value);
+          return summary && summary.hallId === id ? [summary] : [];
+        })
+        .sort((a, b) => b.versionNumber - a.versionNumber);
     },
     async getPublished(versionId) {
       const value = await readStore<unknown>(
@@ -691,7 +887,13 @@ export function createLocalHallRepository(
       let exists = false;
       const result = await transact<StoredHall>(
         await database(),
-        ['halls', 'versions', 'assets'],
+        [
+          'halls',
+          'versions',
+          'assets',
+          'hallMetadata',
+          'publishedVersionMetadata',
+        ],
         'readwrite',
         (transaction, done, fail) => {
           const abort = () => {
@@ -726,28 +928,54 @@ export function createLocalHallRepository(
                 }
                 const assets = transaction.objectStore('assets');
                 for (const entry of encodedHall.blobs) assets.put(entry);
-                halls.put({ ...packageValue.hall, draft: encodedHall.draft });
+                const importedHall = {
+                  ...packageValue.hall,
+                  draft: encodedHall.draft,
+                };
+                halls.put(importedHall);
+                transaction
+                  .objectStore('hallMetadata')
+                  .put(createHallMetadata(importedHall));
                 const versions = transaction.objectStore('versions');
                 for (const { version, encoded } of encodedVersions) {
                   for (const entry of encoded.blobs) assets.put(entry);
                   versions.put({ ...version, layout: encoded.draft });
+                  transaction
+                    .objectStore('publishedVersionMetadata')
+                    .put(createPublishedVersionMetadata(version));
                 }
                 done(packageValue.hall);
               };
               const versions = transaction.objectStore('versions');
+              const versionMetadata = transaction.objectStore(
+                'publishedVersionMetadata',
+              );
               const commitPackage = () => {
                 if (request.result && options?.replace) {
                   const oldKeys = versions
                     .index('hallId')
                     .getAllKeys(packageValue.hall.id);
-                  oldKeys.onsuccess = () => {
+                  const oldMetadataKeys = versionMetadata
+                    .index('hallId')
+                    .getAllKeys(packageValue.hall.id);
+                  let completed = 0;
+                  const finishReplace = () => {
+                    if (++completed !== 2) return;
                     try {
                       for (const key of oldKeys.result) versions.delete(key);
+                      for (const key of oldMetadataKeys.result)
+                        versionMetadata.delete(key);
                       putPackage();
                     } catch (error) {
                       fail(error);
                     }
                   };
+                  oldKeys.onsuccess = () => {
+                    finishReplace();
+                  };
+                  oldMetadataKeys.onsuccess = finishReplace;
+                  oldKeys.onerror = () => fail(oldKeys.error);
+                  oldMetadataKeys.onerror = () => fail(oldMetadataKeys.error);
                 } else {
                   putPackage();
                 }
@@ -859,13 +1087,22 @@ export function createLocalHallRepository(
     async clear() {
       return transact(
         await database(),
-        ['halls', 'versions', 'recovery', 'assets'],
+        [
+          'halls',
+          'versions',
+          'recovery',
+          'assets',
+          'hallMetadata',
+          'publishedVersionMetadata',
+        ],
         'readwrite',
         (transaction, done) => {
           transaction.objectStore('halls').clear();
           transaction.objectStore('versions').clear();
+          transaction.objectStore('publishedVersionMetadata').clear();
           transaction.objectStore('recovery').clear();
           transaction.objectStore('assets').clear();
+          transaction.objectStore('hallMetadata').clear();
           done(undefined);
         },
       );

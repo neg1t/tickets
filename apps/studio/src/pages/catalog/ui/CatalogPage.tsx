@@ -1,5 +1,9 @@
 import { useMemo, useState } from 'react';
-import { PERFORMANCE_HALL_ID } from '@hall-platform/fixtures';
+import {
+  getPerformanceHallId,
+  PERFORMANCE_HALL_SIZES,
+  type PerformanceHallSize,
+} from '@hall-platform/fixtures';
 import type { HallSummary, RecoveryDraft } from '@hall-platform/local-storage';
 import type { RecoveryAutosaveStatus } from '../../dashboard/model/recoveryAutosave.js';
 import { Button } from '@hall-platform/ui';
@@ -19,7 +23,7 @@ export type CatalogPageProps = {
   hasPublishedVersion: boolean;
   creatingPerformanceHall: boolean;
   onCreate: () => void;
-  onCreatePerformanceHall: () => void;
+  onCreatePerformanceHall: (size: PerformanceHallSize) => void;
   onOpen: (id: string) => void;
   onEditor: () => void;
   onPreview: () => void;
@@ -87,9 +91,8 @@ export function CatalogPage(props: CatalogPageProps) {
         : right.updatedAt.localeCompare(left.updatedAt),
     );
   }, [props.catalog, query, sort]);
-  const hasPerformanceHall = props.catalog.some(
-    (hall) => hall.id === PERFORMANCE_HALL_ID,
-  );
+  const hasPerformanceHall = (size: PerformanceHallSize) =>
+    props.catalog.some((hall) => hall.id === getPerformanceHallId(size));
 
   return (
     <div className="studio-catalog-page">
@@ -330,21 +333,29 @@ export function CatalogPage(props: CatalogPageProps) {
               >
                 Открыть тестовый зал
               </button>
-              <button
-                type="button"
-                className="studio-button"
-                onClick={props.onCreatePerformanceHall}
-                disabled={
-                  !props.ready || props.saving || props.creatingPerformanceHall
-                }
-                title="Тестовый зал сохраняется в данных этого браузера"
-              >
-                {props.creatingPerformanceHall
-                  ? 'Создаём тестовый зал · 50 000 мест…'
-                  : hasPerformanceHall
-                    ? 'Открыть тестовый зал · 50 000 мест'
-                    : 'Создать тестовый зал · 50 000 мест'}
-              </button>
+              {PERFORMANCE_HALL_SIZES.map((size) => {
+                const seatCount = size.toLocaleString('ru-RU');
+                return (
+                  <button
+                    key={size}
+                    type="button"
+                    className="studio-button"
+                    onClick={() => props.onCreatePerformanceHall(size)}
+                    disabled={
+                      !props.ready ||
+                      props.saving ||
+                      props.creatingPerformanceHall
+                    }
+                    title="Тестовый зал сохраняется в данных этого браузера"
+                  >
+                    {props.creatingPerformanceHall
+                      ? 'Создаём тестовый зал…'
+                      : hasPerformanceHall(size)
+                        ? `Открыть тестовый зал · ${seatCount} мест`
+                        : `Создать тестовый зал · ${seatCount} мест`}
+                  </button>
+                );
+              })}
               <button
                 type="button"
                 className="studio-button"

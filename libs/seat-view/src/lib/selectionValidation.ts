@@ -54,6 +54,24 @@ export type SeatPriceValidationResult =
 
 const supportedCurrencies = new Set(Intl.supportedValuesOf('currency'));
 const largestSafeMinorUnit = BigInt(Number.MAX_SAFE_INTEGER);
+const currencyFractionDigits = new Map<string, number | null>();
+
+function getCurrencyFractionDigits(currency: string): number | null {
+  if (currencyFractionDigits.has(currency))
+    return currencyFractionDigits.get(currency) ?? null;
+  let fractionDigits: number | null = null;
+  try {
+    const value = new Intl.NumberFormat('en', {
+      style: 'currency',
+      currency,
+    }).resolvedOptions().maximumFractionDigits;
+    if (value !== undefined) fractionDigits = value;
+  } catch {
+    /* Invalid currency metadata remains cached as a rejected result. */
+  }
+  currencyFractionDigits.set(currency, fractionDigits);
+  return fractionDigits;
+}
 
 /** SeatPrice.amount is in major units; returns an exact, safe integer minor amount. */
 export function validateSeatPrice(
@@ -73,12 +91,8 @@ export function validateSeatPrice(
   )
     return { valid: false, code: 'invalid_price' };
 
-  const fractionDigits = new Intl.NumberFormat('en', {
-    style: 'currency',
-    currency,
-  }).resolvedOptions().maximumFractionDigits;
-  if (fractionDigits === undefined)
-    return { valid: false, code: 'invalid_price' };
+  const fractionDigits = getCurrencyFractionDigits(currency);
+  if (fractionDigits === null) return { valid: false, code: 'invalid_price' };
   const parts = /^(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i.exec(amount.toString());
   if (!parts) return { valid: false, code: 'invalid_price' };
   const digits = `${parts[1]}${parts[2] ?? ''}`;
@@ -100,12 +114,18 @@ export function validateSelection(input: {
   readonly selection: readonly SeatSelectionItem[];
   readonly availability: SeatAvailabilityMap;
   readonly prices: SeatPriceMap;
+  readonly seatIds?: Pick<ReadonlySet<string>, 'has'>;
+  readonly zoneIds?: Pick<ReadonlySet<string>, 'has'>;
 }): SelectionValidationResult {
   const { layout, selection, availability, prices } = input;
   const issues: SelectionValidationIssue[] = [];
   if (selection.length === 0) issues.push({ code: 'empty_selection' });
-  const seatIds = new Set<string>(layout.snapshot.seats.map((seat) => seat.id));
-  const zoneIds = new Set<string>(layout.snapshot.zones.map((zone) => zone.id));
+  const seatIds =
+    input.seatIds ??
+    new Set<string>(layout.snapshot.seats.map((seat) => seat.id));
+  const zoneIds =
+    input.zoneIds ??
+    new Set<string>(layout.snapshot.zones.map((zone) => zone.id));
   const seen = new Set<string>();
   let count = 0;
   let minorTotal = 0n;

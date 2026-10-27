@@ -3,7 +3,7 @@ import {
   PdfHallViewer,
   type HallLayoutDraft,
 } from '@hall-platform/hall-editor';
-import type { PublishedHallVersion } from '@hall-platform/local-storage';
+import type { PublishedVersionMetadata } from '@hall-platform/local-storage';
 import { Menu } from '@hall-platform/ui';
 import type { RecoveryAutosaveStatus } from '../../dashboard/model/recoveryAutosave.js';
 import './editor-page.css';
@@ -12,7 +12,7 @@ type EditorPageProps = {
   draft: HallLayoutDraft;
   mode: 'editor' | 'preview' | 'published';
   publishedDraft: HallLayoutDraft | null;
-  versions: readonly PublishedHallVersion[];
+  versions: readonly PublishedVersionMetadata[];
   dirty: boolean;
   notice: string;
   recoveryStatus: RecoveryAutosaveStatus;
@@ -155,8 +155,8 @@ export function EditorPage(props: EditorPageProps) {
             </span>
             <HallEditor
               value={props.draft}
-              publishedSeatIds={props.versions.flatMap((version) =>
-                version.layout.snapshot.seats.map((seat) => seat.id),
+              publishedSeatIds={props.versions.flatMap(
+                (version) => version.seatIds,
               )}
               onChange={props.onChange}
               saving={props.saving}

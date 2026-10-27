@@ -5,6 +5,7 @@ import {
   decodeStoredDraft,
   encodeStoredDraft,
   validateStoredHall,
+  validateStoredHallEnvelope,
 } from './storageCodec.js';
 
 function draftWithPdf() {
@@ -70,6 +71,20 @@ describe('stored hall codec', () => {
     expect(() =>
       validateStoredHall({ ...record, draft: { ...draft, schemaVersion: 99 } }),
     ).toThrow();
+  });
+
+  it('checks the stored record envelope without parsing the draft geometry', () => {
+    const draft = draftWithPdf();
+    const record = {
+      id: draft.snapshot.id,
+      draft: { ...draft, snapshot: { ...draft.snapshot, floors: [{}] } },
+      updatedAt: new Date().toISOString(),
+      revision: 1,
+      publishedVersionNumber: 0,
+    };
+
+    expect(validateStoredHallEnvelope(record).id).toBe(record.id);
+    expect(() => validateStoredHall(record)).toThrow();
   });
 
   it('retains asset references from published versions and recovery drafts during collection', async () => {

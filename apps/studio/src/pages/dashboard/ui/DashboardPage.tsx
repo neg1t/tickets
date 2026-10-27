@@ -281,7 +281,7 @@ export function DashboardPage() {
     const version =
       mode === 'published' && publishedDraft
         ? (versions.find(
-            (item) => item.layout.snapshot.id === publishedDraft.snapshot.id,
+            (item) => item.snapshotId === publishedDraft.snapshot.id,
           ) ?? latestVersion)
         : latestVersion;
     void openBuyer(version).catch(() => undefined);
@@ -305,9 +305,9 @@ export function DashboardPage() {
           if (canSwitchHall()) createHall();
         }}
         creatingPerformanceHall={performanceHallPending}
-        onCreatePerformanceHall={() => {
+        onCreatePerformanceHall={(seatCount) => {
           if (canSwitchHall())
-            void requestCreatePerformanceHall().catch(() => undefined);
+            void requestCreatePerformanceHall(seatCount).catch(() => undefined);
         }}
         onOpen={(id) => {
           if (canSwitchHall()) void requestOpenHall(id).catch(() => undefined);

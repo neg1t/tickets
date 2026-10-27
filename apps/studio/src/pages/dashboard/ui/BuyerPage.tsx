@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useUnit } from 'effector-react';
 import { SeatView, type SeatSelectionItem } from '@hall-platform/seat-view';
 import { getDemoAvailability, getDemoTotal } from '../model/demoBooking.js';
@@ -45,6 +45,24 @@ const englishText: Record<string, string> = {
   'Демо-мероприятие не найдено': 'Demo event was not found',
 };
 
+const rubleFormatters = new Map<string, Intl.NumberFormat>();
+
+function translate(locale: string, russian: string): string {
+  return locale === 'en-US' ? (englishText[russian] ?? russian) : russian;
+}
+
+function formatRubles(amount: number, locale: string): string {
+  let formatter = rubleFormatters.get(locale);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'RUB',
+    });
+    rubleFormatters.set(locale, formatter);
+  }
+  return formatter.format(amount);
+}
+
 type BuyerPageProps = {
   occurrence: DemoOccurrence | null;
   activeHoldId: string | null;
@@ -59,32 +77,22 @@ type BuyerPageProps = {
   onReopen: (id: string) => Promise<unknown>;
 };
 
-export function BuyerPage(props: BuyerPageProps) {
-  const [locale, setLocale] = useState<'ru-RU' | 'en-US'>('ru-RU');
-  const tr = (russian: string) =>
-    locale === 'en-US' ? (englishText[russian] ?? russian) : russian;
-  const money = (amount: number) =>
-    new Intl.NumberFormat(locale, {
-      style: 'currency',
-      currency: 'RUB',
-    }).format(amount);
-  const occurrence = props.occurrence;
-  const onCancel = props.onCancel;
-  const holdId = props.activeHoldId;
-  const hold = occurrence?.holds.find((item) => item.id === holdId);
+function ActiveHoldPanel(props: {
+  occurrence: DemoOccurrence;
+  hold: NonNullable<DemoOccurrence['holds'][number]>;
+  locale: string;
+  confirmPending: boolean;
+  cancelPending: boolean;
+  onExpired: (occurrenceId: string) => void;
+  onConfirm: (occurrenceId: string, holdId: string) => Promise<unknown>;
+  onCancel: (occurrenceId: string, holdId: string) => Promise<unknown>;
+}) {
   const [now, setNow] = useState<number | null>(null);
-  const [expiredOccurrenceId, setExpiredOccurrenceId] = useState<string | null>(
-    null,
-  );
   const expiryRequested = useRef<string | null>(null);
-  const [confirmPending, cancelPending] = useUnit([
-    confirmDemoFx.pending,
-    cancelDemoFx.pending,
-  ]);
   const remaining =
-    hold && now !== null
-      ? Math.max(0, Math.ceil((hold.expiresAt - now) / 1000))
-      : 0;
+    now === null
+      ? 0
+      : Math.max(0, Math.ceil((props.hold.expiresAt - now) / 1000));
 
   useEffect(() => {
     const updateClock = () => setNow(Date.now());
@@ -98,22 +106,156 @@ export function BuyerPage(props: BuyerPageProps) {
 
   useEffect(() => {
     if (
-      !occurrence ||
-      !hold ||
       now === null ||
       remaining > 0 ||
-      expiryRequested.current === hold.id
+      expiryRequested.current === props.hold.id
     )
       return;
-    expiryRequested.current = hold.id;
-    setExpiredOccurrenceId(occurrence.id);
-    void onCancel(occurrence.id, hold.id).catch(() => {
+    expiryRequested.current = props.hold.id;
+    props.onExpired(props.occurrence.id);
+    void props.onCancel(props.occurrence.id, props.hold.id).catch(() => {
       expiryRequested.current = null;
     });
-  }, [occurrence, hold, now, remaining, onCancel]);
+  }, [
+    now,
+    remaining,
+    props.hold.id,
+    props.occurrence.id,
+    props.onCancel,
+    props.onExpired,
+  ]);
 
   const minutes = String(Math.floor(remaining / 60)).padStart(2, '0');
   const seconds = String(remaining % 60).padStart(2, '0');
+  const total = getDemoTotal(props.occurrence, props.hold.selection);
+  return (
+    <section
+      className="studio-buyer-result"
+      aria-label={translate(props.locale, 'Оформление заказа')}
+    >
+      <h2>{translate(props.locale, 'Подтверждение покупки')}</h2>
+      <p>{translate(props.locale, 'Оплата в демо-режиме не требуется.')}</p>
+      <p className="studio-buyer-countdown">
+        {translate(props.locale, 'Осталось времени:')}{' '}
+        <time role="timer" aria-live="off">
+          {minutes}:{seconds}
+        </time>
+      </p>
+      <strong>
+        {translate(props.locale, 'Итого:')} {formatRubles(total, props.locale)}
+      </strong>
+      <div className="studio-buyer-result-actions">
+        <button
+          type="button"
+          disabled={
+            props.confirmPending || props.cancelPending || remaining === 0
+          }
+          onClick={() =>
+            void props
+              .onConfirm(props.occurrence.id, props.hold.id)
+              .catch(() => undefined)
+          }
+        >
+          {translate(
+            props.locale,
+            props.confirmPending ? 'Подтверждение…' : 'Подтвердить покупку',
+          )}
+        </button>
+        <button
+          type="button"
+          disabled={props.confirmPending || props.cancelPending}
+          onClick={() =>
+            void props
+              .onCancel(props.occurrence.id, props.hold.id)
+              .catch(() => undefined)
+          }
+        >
+          {translate(
+            props.locale,
+            props.cancelPending ? 'Отмена…' : 'Отменить',
+          )}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function AvailabilitySeatMap(props: {
+  occurrence: DemoOccurrence;
+  locale: string;
+  selection: SeatSelectionItem[];
+  onSelectionChange: (items: SeatSelectionItem[]) => void;
+  onBuy: (
+    occurrenceId: string,
+    selection: SeatSelectionItem[],
+  ) => Promise<unknown>;
+  onBuyStarted: () => void;
+}) {
+  const [expiryRevision, setExpiryRevision] = useState(0);
+  const availability = useMemo(
+    () => getDemoAvailability(props.occurrence),
+    [props.occurrence, expiryRevision],
+  );
+
+  useEffect(() => {
+    const refresh = () => setExpiryRevision((revision) => revision + 1);
+    const now = Date.now();
+    const nextExpiry = props.occurrence.holds.reduce<number | null>(
+      (nearest, hold) =>
+        hold.expiresAt > now && (nearest === null || hold.expiresAt < nearest)
+          ? hold.expiresAt
+          : nearest,
+      null,
+    );
+    const expiryTimer =
+      nextExpiry === null
+        ? undefined
+        : window.setTimeout(refresh, Math.max(0, nextExpiry - now + 1));
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      if (expiryTimer !== undefined) window.clearTimeout(expiryTimer);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [props.occurrence, expiryRevision]);
+
+  return (
+    <SeatView
+      layout={props.occurrence.layout}
+      occurrenceId={props.occurrence.id}
+      locale={props.locale}
+      availability={availability}
+      prices={props.occurrence.prices}
+      selection={props.selection}
+      onSelectionChange={props.onSelectionChange}
+      onBuyClick={(data) => {
+        props.onBuyStarted();
+        return props
+          .onBuy(data.occurrenceId, [...data.selection])
+          .then(() => undefined);
+      }}
+    />
+  );
+}
+
+export function BuyerPage(props: BuyerPageProps) {
+  const [locale, setLocale] = useState<'ru-RU' | 'en-US'>('ru-RU');
+  const tr = (russian: string) => translate(locale, russian);
+  const occurrence = props.occurrence;
+  const holdId = props.activeHoldId;
+  const hold = occurrence?.holds.find((item) => item.id === holdId);
+  const [expiredOccurrenceId, setExpiredOccurrenceId] = useState<string | null>(
+    null,
+  );
+  const markHoldExpired = useCallback((id: string) => {
+    setExpiredOccurrenceId(id);
+  }, []);
+  const clearExpiredNotice = useCallback(() => {
+    setExpiredOccurrenceId(null);
+  }, []);
+  const [confirmPending, cancelPending] = useUnit([
+    confirmDemoFx.pending,
+    cancelDemoFx.pending,
+  ]);
   return (
     <main className="studio-buyer-page">
       <header className="studio-buyer-top">
@@ -186,7 +328,10 @@ export function BuyerPage(props: BuyerPageProps) {
                 </p>
                 <strong>
                   {tr('Итого:')}{' '}
-                  {money(getDemoTotal(occurrence, props.receipt.selection))}
+                  {formatRubles(
+                    getDemoTotal(occurrence, props.receipt.selection),
+                    locale,
+                  )}
                 </strong>
                 <button
                   type="button"
@@ -196,66 +341,24 @@ export function BuyerPage(props: BuyerPageProps) {
                 </button>
               </section>
             ) : hold ? (
-              <section
-                className="studio-buyer-result"
-                aria-label={tr('Оформление заказа')}
-              >
-                <h2>{tr('Подтверждение покупки')}</h2>
-                <p>{tr('Оплата в демо-режиме не требуется.')}</p>
-                <p className="studio-buyer-countdown">
-                  {tr('Осталось времени:')}{' '}
-                  <time role="timer" aria-live="off">
-                    {minutes}:{seconds}
-                  </time>
-                </p>
-                <strong>
-                  {tr('Итого:')}{' '}
-                  {money(getDemoTotal(occurrence, hold.selection))}
-                </strong>
-                <div className="studio-buyer-result-actions">
-                  <button
-                    type="button"
-                    disabled={
-                      confirmPending || cancelPending || remaining === 0
-                    }
-                    onClick={() =>
-                      void props
-                        .onConfirm(occurrence.id, hold.id)
-                        .catch(() => undefined)
-                    }
-                  >
-                    {tr(
-                      confirmPending ? 'Подтверждение…' : 'Подтвердить покупку',
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={confirmPending || cancelPending}
-                    onClick={() =>
-                      void props
-                        .onCancel(occurrence.id, hold.id)
-                        .catch(() => undefined)
-                    }
-                  >
-                    {tr(cancelPending ? 'Отмена…' : 'Отменить')}
-                  </button>
-                </div>
-              </section>
-            ) : (
-              <SeatView
-                layout={occurrence.layout}
-                occurrenceId={occurrence.id}
+              <ActiveHoldPanel
+                occurrence={occurrence}
+                hold={hold}
                 locale={locale}
-                availability={getDemoAvailability(occurrence)}
-                prices={occurrence.prices}
+                confirmPending={confirmPending}
+                cancelPending={cancelPending}
+                onExpired={markHoldExpired}
+                onConfirm={props.onConfirm}
+                onCancel={props.onCancel}
+              />
+            ) : (
+              <AvailabilitySeatMap
+                occurrence={occurrence}
+                locale={locale}
                 selection={props.selection}
                 onSelectionChange={props.onSelectionChange}
-                onBuyClick={(data) => {
-                  setExpiredOccurrenceId(null);
-                  return props
-                    .onHold(data.occurrenceId, [...data.selection])
-                    .then(() => undefined);
-                }}
+                onBuyStarted={clearExpiredNotice}
+                onBuy={props.onHold}
               />
             )}
           </>

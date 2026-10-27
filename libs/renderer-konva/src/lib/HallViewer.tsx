@@ -104,6 +104,7 @@ export type HallViewerProps = {
       { width: number; height: number; canvas?: HTMLCanvasElement }
     >
   >;
+  readonly viewerMode?: 'edit' | 'view' | 'pick';
   readonly activeTool?: string;
   readonly polygonEditMode?: PolygonEditMode;
   readonly selectedTargets?: readonly HallTarget[];
@@ -139,7 +140,11 @@ type PointerIntent = {
 const farZoomTargets = new Set<HallTarget['kind']>(['zone']);
 const emptySeatAppearance = {};
 
-const DotSeatBatchShape = memo(function DotSeatBatchShape({ batch }: { batch: DotSeatBatch }) {
+const DotSeatBatchShape = memo(function DotSeatBatchShape({
+  batch,
+}: {
+  batch: DotSeatBatch;
+}) {
   const ref = useRef<Konva.Shape>(null);
   useLayoutEffect(() => {
     const shape = ref.current;
@@ -164,19 +169,42 @@ const DotSeatBatchShape = memo(function DotSeatBatchShape({ batch }: { batch: Do
       pixelRatio: 2,
     });
     shape.getLayer()?.batchDraw();
-    return () => { shape.clearCache(); };
+    return () => {
+      shape.clearCache();
+    };
   }, [batch]);
   return (
     <Shape
       ref={ref}
-      fill={batch.fill}
+      fill={batch.fills[0] ?? '#fff'}
       perfectDrawEnabled={false}
       sceneFunc={(context, shape) => {
+        for (let index = 0; index < batch.seats.length; index++) {
+          const seat = batch.seats[index];
+          if (!seat) continue;
+          const radius =
+            seat.visualKind === 'wheelchairBay'
+              ? 0.38
+              : seat.visualKind === 'armchair'
+                ? 0.35
+                : 0.3;
+          context.beginPath();
+          context.moveTo(seat.position.x + radius, seat.position.y);
+          context.arc(seat.position.x, seat.position.y, radius, 0, Math.PI * 2);
+          context.closePath();
+          context.setAttr('fillStyle', batch.fills[index] ?? '#fff');
+          context.fill();
+        }
+      }}
+      hitFunc={(context, shape) => {
         context.beginPath();
         for (const seat of batch.seats) {
-          const radius = seat.visualKind === 'wheelchairBay'
-            ? 0.38
-            : seat.visualKind === 'armchair' ? 0.35 : 0.3;
+          const radius =
+            seat.visualKind === 'wheelchairBay'
+              ? 0.38
+              : seat.visualKind === 'armchair'
+                ? 0.35
+                : 0.3;
           context.moveTo(seat.position.x + radius, seat.position.y);
           context.arc(seat.position.x, seat.position.y, radius, 0, Math.PI * 2);
           context.closePath();
@@ -219,6 +247,7 @@ export function HallViewer(props: HallViewerProps) {
     previewSeats = [],
     zoneBounds,
     backgroundPages,
+    viewerMode,
     activeTool,
     polygonEditMode,
     selectedTargets,
@@ -381,8 +410,15 @@ export function HallViewer(props: HallViewerProps) {
   const selectedKeys = new Set(
     selection.map((target) => `${target.kind}:${target.id}`),
   );
-  const editorMode = activeTool !== undefined;
-  const authoringMode = editorMode && activeTool !== 'pick';
+  const interactionMode =
+    viewerMode ??
+    (activeTool === undefined
+      ? 'view'
+      : activeTool === 'pick'
+        ? 'pick'
+        : 'edit');
+  const editorMode = interactionMode === 'edit';
+  const authoringMode = editorMode;
   const handles =
     editorMode && activeTool === 'select' && onHandleCommit
       ? selection.flatMap((target) =>
@@ -463,14 +499,21 @@ export function HallViewer(props: HallViewerProps) {
   // Include a screen-space margin so symbols and labels crossing an edge stay visible.
   const margin = Math.max(2, 100 / viewport.scale);
   const rendered = useMemo(
-    () => visibleHallScene(displayScene, {
-      minX: visibleWorld.minX - margin,
-      minY: visibleWorld.minY - margin,
-      maxX: visibleWorld.maxX + margin,
-      maxY: visibleWorld.maxY + margin,
-    }),
-    [displayScene, visibleWorld.minX, visibleWorld.minY,
-      visibleWorld.maxX, visibleWorld.maxY, margin],
+    () =>
+      visibleHallScene(displayScene, {
+        minX: visibleWorld.minX - margin,
+        minY: visibleWorld.minY - margin,
+        maxX: visibleWorld.maxX + margin,
+        maxY: visibleWorld.maxY + margin,
+      }),
+    [
+      displayScene,
+      visibleWorld.minX,
+      visibleWorld.minY,
+      visibleWorld.maxX,
+      visibleWorld.maxY,
+      margin,
+    ],
   );
   const gridStep = gridStepForScale(viewport.scale);
   const gridLines =
@@ -502,16 +545,22 @@ export function HallViewer(props: HallViewerProps) {
         )
       : [];
   const showSeats =
-    editorMode ||
+    interactionMode === 'edit' ||
     scene.seats.some(
       (seat) => seatLevelOfDetail(viewport.scale, seat.visualKind) !== 'dot',
     );
-  const visibleLabels = useMemo(() => visibleSeatLabelIds(rendered.seats, viewport.scale, {
-    x: viewport.x,
-    y: viewport.y,
-    width,
-    height,
-  }), [rendered.seats, viewport.scale, viewport.x, viewport.y, width, height]);
+  const hitTestKinds =
+    showSeats || interactionMode === 'pick' ? undefined : farZoomTargets;
+  const visibleLabels = useMemo(
+    () =>
+      visibleSeatLabelIds(rendered.seats, viewport.scale, {
+        x: viewport.x,
+        y: viewport.y,
+        width,
+        height,
+      }),
+    [rendered.seats, viewport.scale, viewport.x, viewport.y, width, height],
+  );
   const dotCachePixels = useMemo(() => {
     let minX = Infinity;
     let minY = Infinity;
@@ -523,21 +572,26 @@ export function HallViewer(props: HallViewerProps) {
       maxX = Math.max(maxX, seat.position.x);
       maxY = Math.max(maxY, seat.position.y);
     }
-    return scene.seats.length
-      ? (maxX - minX + 2) * (maxY - minY + 2) * 4
-      : 0;
+    return scene.seats.length ? (maxX - minX + 2) * (maxY - minY + 2) * 4 : 0;
   }, [scene.seats]);
-  const dotSeatSource = dotCachePixels <= 8_000_000
-    ? scene.seats
-    : rendered.seats;
-  const dotBatches = useMemo(
-    () => {
-      if (!showSeats || movingKeys.size > 0) return null;
-      return groupDotSeats(dotSeatSource, viewport.scale, seatAppearance ?? emptySeatAppearance, palette.seat);
-    },
-    [showSeats, movingKeys.size, dotSeatSource,
-      viewport.scale, seatAppearance, palette.seat],
-  );
+  const dotSeatSource =
+    dotCachePixels <= 8_000_000 ? scene.seats : rendered.seats;
+  const dotBatches = useMemo(() => {
+    if (!showSeats || movingKeys.size > 0) return null;
+    return groupDotSeats(
+      dotSeatSource,
+      viewport.scale,
+      seatAppearance ?? emptySeatAppearance,
+      palette.seat,
+    );
+  }, [
+    showSeats,
+    movingKeys.size,
+    dotSeatSource,
+    viewport.scale,
+    seatAppearance,
+    palette.seat,
+  ]);
 
   function handleFit() {
     setViewport(fitViewport(scene.bounds, width, height));
@@ -634,14 +688,14 @@ export function HallViewer(props: HallViewerProps) {
       scene,
       world,
       0,
-      showSeats ? undefined : farZoomTargets,
+      hitTestKinds,
     );
     const clickedSeat =
-      exactTarget?.kind === 'seat'
-        ? scene.seatsById.get(exactTarget.id)
-        : null;
+      exactTarget?.kind === 'seat' ? scene.seatsById.get(exactTarget.id) : null;
     const clickedSeatRowId =
-      clickedSeat?.placement.kind === 'row' ? clickedSeat.placement.rowId : null;
+      clickedSeat?.placement.kind === 'row'
+        ? clickedSeat.placement.rowId
+        : null;
     const parentRowTarget =
       clickedSeatRowId &&
       (native.altKey ||
@@ -653,22 +707,19 @@ export function HallViewer(props: HallViewerProps) {
         : null;
     const handleConflictsWithTarget = Boolean(
       nearbyHandle &&
-        exactTarget &&
-        `${nearbyHandle.target.kind}:${nearbyHandle.target.id}` !==
-          `${exactTarget.kind}:${exactTarget.id}`,
+      exactTarget &&
+      `${nearbyHandle.target.kind}:${nearbyHandle.target.id}` !==
+        `${exactTarget.kind}:${exactTarget.id}`,
     );
     const selectedHandle = Boolean(
       nearbyHandle &&
-        selectedKeys.has(
-          `${nearbyHandle.target.kind}:${nearbyHandle.target.id}`,
-        ),
+      selectedKeys.has(`${nearbyHandle.target.kind}:${nearbyHandle.target.id}`),
     );
-    const handle =
-      selectedHandle
-        ? nearbyHandle
-        : parentRowTarget || handleConflictsWithTarget
-          ? null
-          : nearbyHandle;
+    const handle = selectedHandle
+      ? nearbyHandle
+      : parentRowTarget || handleConflictsWithTarget
+        ? null
+        : nearbyHandle;
     const target =
       handle?.target ??
       parentRowTarget ??
@@ -677,7 +728,7 @@ export function HallViewer(props: HallViewerProps) {
         scene,
         world,
         (native.pointerType === 'touch' ? 10 : 3) / viewport.scale,
-        showSeats ? undefined : farZoomTargets,
+        hitTestKinds,
       );
     const pan =
       tool === 'pan' ||
@@ -685,6 +736,7 @@ export function HallViewer(props: HallViewerProps) {
       (native.altKey && !parentRowTarget);
     const create =
       !parentRowTarget &&
+      interactionMode === 'edit' &&
       activeTool !== undefined &&
       activeTool !== 'select' &&
       !pan;
@@ -695,6 +747,7 @@ export function HallViewer(props: HallViewerProps) {
       meta: native.metaKey,
     };
     const box =
+      interactionMode === 'edit' &&
       activeTool === 'select' &&
       !pan &&
       !handle &&
@@ -883,7 +936,7 @@ export function HallViewer(props: HallViewerProps) {
       screenToWorld(viewportRef.current, point),
       gridEnabled && authoringMode,
     );
-    if (intent.mode === 'create') {
+    if (intent.mode === 'create' || interactionMode === 'pick') {
       onCanvasClick?.(worldPoint, intent.target);
       return;
     }
@@ -1068,25 +1121,13 @@ export function HallViewer(props: HallViewerProps) {
     .map((target) => {
       switch (target.kind) {
         case 'seat':
-          return (
-            scene.seatsById.get(target.id)?.label ??
-            target.id
-          );
+          return scene.seatsById.get(target.id)?.label ?? target.id;
         case 'row':
-          return (
-            scene.rowsById.get(target.id)?.row.name ??
-            target.id
-          );
+          return scene.rowsById.get(target.id)?.row.name ?? target.id;
         case 'table':
-          return (
-            scene.tablesById.get(target.id)?.label ??
-            target.id
-          );
+          return scene.tablesById.get(target.id)?.label ?? target.id;
         case 'zone':
-          return (
-            scene.zonesById.get(target.id)?.zone.name ??
-            target.id
-          );
+          return scene.zonesById.get(target.id)?.zone.name ?? target.id;
         case 'decoration': {
           const decoration = scene.decorationsById.get(target.id);
           return decoration?.kind === 'label'
@@ -1106,7 +1147,7 @@ export function HallViewer(props: HallViewerProps) {
         role="toolbar"
         aria-label={ui.toolbar}
       >
-        {activeTool === undefined && (
+        {interactionMode === 'view' && (
           <button
             type="button"
             aria-pressed={tool === 'select'}
@@ -1116,7 +1157,7 @@ export function HallViewer(props: HallViewerProps) {
           </button>
         )}
 
-        {activeTool === undefined && (
+        {interactionMode === 'view' && (
           <button
             type="button"
             aria-pressed={tool === 'pan'}
@@ -1364,7 +1405,9 @@ export function HallViewer(props: HallViewerProps) {
           <Layer name="overlays" listening={false}>
             <Group name="interaction" />
             <Group name="moving-objects">
-              {movingSceneObjects.map(({ key, node }) => previewNode(key, node))}
+              {movingSceneObjects.map(({ key, node }) =>
+                previewNode(key, node),
+              )}
             </Group>
 
             <Group name="generation-preview">
@@ -1421,7 +1464,7 @@ export function HallViewer(props: HallViewerProps) {
                   strokeWidth={0.12}
                 />
               )}
-              {positionedHandles.map((handle) => (
+              {positionedHandles.map((handle) =>
                 handle.id.startsWith('bounds:') ? (
                   <Rect
                     key={`${handle.target.kind}:${handle.target.id}:${handle.id}`}
@@ -1444,8 +1487,8 @@ export function HallViewer(props: HallViewerProps) {
                     stroke={palette.ink}
                     strokeWidth={Math.max(0.06, 1 / viewport.scale)}
                   />
-                )
-              ))}
+                ),
+              )}
               {calibrationGuide && (
                 <Line
                   points={[

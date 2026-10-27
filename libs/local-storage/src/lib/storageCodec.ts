@@ -89,19 +89,11 @@ export function validateStoredDraft(value: unknown): StoredDraft {
     const draft = value as StoredDraft;
     return { ...draft, assets: draft.assets ?? {} };
   } catch (error) {
-    if (error instanceof HallStorageError) throw error;
-    const message = error instanceof Error ? error.message : String(error);
-    throw new HallStorageError(
-      message.includes('Unsupported hall draft schema version')
-        ? 'unsupported'
-        : 'corrupt',
-      `Stored hall draft is invalid: ${message}`,
-      { cause: error },
-    );
+    throw storedDraftFailure(error);
   }
 }
 
-export function validateStoredHall(value: unknown): StoredHallRecord {
+export function validateStoredHallEnvelope(value: unknown): StoredHallRecord {
   const record = object(value);
   if (
     typeof record.id !== 'string' ||
@@ -115,14 +107,31 @@ export function validateStoredHall(value: unknown): StoredHallRecord {
   ) {
     throw new HallStorageError('corrupt', 'Stored hall metadata is invalid');
   }
-  const draft = validateStoredDraft(record.draft);
+  const draft = object(record.draft);
   if (object(draft.snapshot).id !== record.id) {
     throw new HallStorageError(
       'corrupt',
       'Stored hall ID differs from draft ID',
     );
   }
-  return { ...(value as StoredHallRecord), draft };
+  return value as StoredHallRecord;
+}
+
+export function validateStoredHall(value: unknown): StoredHallRecord {
+  const record = validateStoredHallEnvelope(value);
+  return { ...record, draft: validateStoredDraft(record.draft) };
+}
+
+function storedDraftFailure(error: unknown): HallStorageError {
+  if (error instanceof HallStorageError) return error;
+  const message = error instanceof Error ? error.message : String(error);
+  return new HallStorageError(
+    message.includes('Unsupported hall draft schema version')
+      ? 'unsupported'
+      : 'corrupt',
+    `Stored hall draft is invalid: ${message}`,
+    { cause: error },
+  );
 }
 
 function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
@@ -164,9 +173,10 @@ export async function decodeStoredDraft(
   value: unknown,
   loadBlob: (key: string) => Promise<Blob | undefined>,
 ): Promise<HallLayoutDraft> {
-  const stored = validateStoredDraft(value);
+  draftWithValidationUrls(value);
+  const stored = value as StoredDraft;
   const assets: Record<string, HallLayoutDraft['assets'][string]> = {};
-  for (const [id, asset] of Object.entries(stored.assets)) {
+  for (const [id, asset] of Object.entries(stored.assets ?? {})) {
     if (asset.dataUrl.startsWith(REF_PREFIX)) {
       const blob = await loadBlob(asset.dataUrl);
       if (!(blob instanceof Blob)) {
@@ -177,7 +187,11 @@ export async function decodeStoredDraft(
       assets[id] = asset as HallLayoutDraft['assets'][string];
     }
   }
-  return parseHallLayoutDraft({ ...stored, assets });
+  try {
+    return parseHallLayoutDraft({ ...stored, assets });
+  } catch (error) {
+    throw storedDraftFailure(error);
+  }
 }
 
 export function assetReferences(draft: StoredDraft): Set<string> {

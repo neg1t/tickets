@@ -9,15 +9,15 @@ const seats = [
 ] as Seat[];
 
 describe('far zoom seat batches', () => {
-  it('batches consecutive dot seats by current appearance without changing draw order', () => {
+  it('keeps every dot seat in one ordered draw batch with its current appearance', () => {
     const batches = groupDotSeats(seats, 2, { b: { fill: '#f00' } }, '#fff');
     if (!batches) throw new Error('Expected dot batches');
-    expect(batches.map(({ fill, seats }) => [fill, seats.map((seat) => seat.id)])).toEqual([
-      ['#fff', ['a']],
-      ['#f00', ['b']],
-      ['#fff', ['c']],
-    ]);
-    expect(groupDotSeats(seats, 2, { b: { fill: '#0f0' } }, '#fff')?.[1]?.fill).toBe('#0f0');
+    expect(batches).toHaveLength(1);
+    expect(batches[0]?.seats.map((seat) => seat.id)).toEqual(['a', 'b', 'c']);
+    expect(batches[0]?.fills).toEqual(['#fff', '#f00', '#fff']);
+    expect(
+      groupDotSeats(seats, 2, { b: { fill: '#0f0' } }, '#fff')?.[0]?.fills,
+    ).toEqual(['#fff', '#0f0', '#fff']);
     expect(seats[1]?.position).toEqual({ x: 2, y: 0 });
   });
 

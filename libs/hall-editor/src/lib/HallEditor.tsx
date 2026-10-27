@@ -1076,6 +1076,7 @@ export function HallEditor(props: HallEditorProps) {
               }}
               height={canvasHeight}
               draft={draft}
+              viewerMode="edit"
               focusedFloorId={activeFloorId}
               previewSeats={previewSeats}
               onError={report}

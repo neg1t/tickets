@@ -4,9 +4,10 @@ import {
   layoutSnapshotSchema,
 } from '@hall-platform/domain';
 import {
-  createPerformanceHallSnapshot,
-  PERFORMANCE_HALL_ID,
-  PERFORMANCE_HALL_NAME,
+  createPerformanceHallDraft as createPerformanceHallFixtureDraft,
+  getPerformanceHallId,
+  PERFORMANCE_HALL_SEAT_COUNT,
+  type PerformanceHallSize,
 } from '@hall-platform/fixtures';
 import arena from '@hall-platform/fixtures/arena.json';
 import banquetHall from '@hall-platform/fixtures/banquet-hall.json';
@@ -29,6 +30,7 @@ import {
   type HallSummary,
   type HallExportPackage,
   type PublishedHallVersion,
+  type PublishedVersionMetadata,
   type StoredHall,
 } from '@hall-platform/local-storage';
 import type { SeatSelectionItem } from '@hall-platform/seat-view';
@@ -48,6 +50,12 @@ import {
 const repository = createLocalHallRepository();
 const activeHallKey = 'hall-platform-active-hall';
 const activeBuyerKey = 'hall-platform-active-demo-occurrence';
+function markPerformance(name: string): void {
+  if (typeof performance !== 'undefined') performance.mark(name);
+}
+function measurePerformance(name: string, start: string, end: string): void {
+  if (typeof performance !== 'undefined') performance.measure(name, start, end);
+}
 type BrowserStorageKind = 'local' | 'session';
 function browserStorage(kind: BrowserStorageKind): Storage {
   return kind === 'local' ? localStorage : sessionStorage;
@@ -89,16 +97,76 @@ const fixtures = [smallTheater, operaHall, arena, banquetHall].map(
 const sampleDraft = fixtures[0];
 if (!sampleDraft) throw new Error('Studio needs at least one fixture');
 
-function createPerformanceHallDraft(): HallLayoutDraft {
-  const snapshot = layoutSnapshotSchema.parse(createPerformanceHallSnapshot());
-  return createDraftFromSnapshot(PERFORMANCE_HALL_NAME, snapshot);
-}
-
 type OpenedHall = {
   record: StoredHall;
-  catalog: HallSummary[];
-  versions: PublishedHallVersion[];
+  catalog?: HallSummary[];
+  versions?: PublishedVersionMetadata[];
+  openSequence: number;
 };
+type HallMetadataResult = {
+  openSequence: number;
+  hallId: string;
+  catalog: HallSummary[];
+  versions: PublishedVersionMetadata[];
+};
+let nextOpenSequence = 0;
+let activeOpenSequence = 0;
+const pendingOpenMetadata = new Map<number, HallMetadataResult>();
+const pendingOpenMetadataFailures = new Map<number, unknown>();
+
+function publishOpenMetadata(result: HallMetadataResult): void {
+  if (result.openSequence === activeOpenSequence) {
+    pendingOpenMetadataFailures.delete(result.openSequence);
+    hallMetadataLoaded(result);
+    return;
+  }
+  if (result.openSequence < activeOpenSequence) return;
+  pendingOpenMetadata.set(result.openSequence, result);
+  while (pendingOpenMetadata.size > 8) {
+    const oldest = pendingOpenMetadata.keys().next().value;
+    if (oldest === undefined) break;
+    pendingOpenMetadata.delete(oldest);
+  }
+}
+
+function publishOpenMetadataFailure(
+  openSequence: number,
+  error: unknown,
+): void {
+  if (openSequence === activeOpenSequence) {
+    hallMetadataFailed({ openSequence, error });
+    return;
+  }
+  if (openSequence < activeOpenSequence) return;
+  pendingOpenMetadataFailures.set(openSequence, error);
+}
+
+function acceptOpenSequence(result: OpenedHall): void {
+  activeOpenSequence = result.openSequence;
+  for (const sequence of pendingOpenMetadata.keys()) {
+    if (sequence < activeOpenSequence) pendingOpenMetadata.delete(sequence);
+  }
+  const metadata = pendingOpenMetadata.get(activeOpenSequence);
+  if (metadata) {
+    pendingOpenMetadata.delete(activeOpenSequence);
+    hallMetadataLoaded(metadata);
+  }
+  const failure = pendingOpenMetadataFailures.get(activeOpenSequence);
+  if (pendingOpenMetadataFailures.has(activeOpenSequence)) {
+    pendingOpenMetadataFailures.delete(activeOpenSequence);
+    hallMetadataFailed({ openSequence: activeOpenSequence, error: failure });
+  }
+  for (const sequence of pendingOpenMetadataFailures.keys()) {
+    if (sequence < activeOpenSequence)
+      pendingOpenMetadataFailures.delete(sequence);
+  }
+}
+
+const hallMetadataLoaded = createEvent<HallMetadataResult>();
+const hallMetadataFailed = createEvent<{
+  openSequence: number;
+  error: unknown;
+}>();
 
 async function seedFixtures(): Promise<void> {
   for (const draft of fixtures) {
@@ -119,30 +187,72 @@ async function seedFixtures(): Promise<void> {
   }
 }
 
-async function openStoredHall(id: string): Promise<OpenedHall> {
-  const record = await repository.read(id);
+async function openStoredHall(
+  id: string,
+  existingRecord?: StoredHall | null,
+): Promise<OpenedHall> {
+  const openSequence = ++nextOpenSequence;
+  markPerformance('hall:open:start');
+  markPerformance('hall:open:record:start');
+  const record = existingRecord ?? (await repository.read(id));
+  markPerformance('hall:open:record:end');
+  measurePerformance(
+    'hall:open:record',
+    'hall:open:record:start',
+    'hall:open:record:end',
+  );
   if (!record) throw new Error('Зал не найден в локальном хранилище');
-  return {
-    record,
-    catalog: await repository.list(),
-    versions: await repository.listPublished(id),
-  };
+  markPerformance('hall:open:end');
+  measurePerformance('hall:open', 'hall:open:start', 'hall:open:end');
+  void Promise.all([
+    (async () => {
+      markPerformance('hall:open:catalog:start');
+      const catalog = await repository.list();
+      markPerformance('hall:open:catalog:end');
+      measurePerformance(
+        'hall:open:catalog',
+        'hall:open:catalog:start',
+        'hall:open:catalog:end',
+      );
+      return catalog;
+    })(),
+    (async () => {
+      markPerformance('hall:open:version-metadata:start');
+      const versions = await repository.listPublishedMetadata(id);
+      markPerformance('hall:open:version-metadata:end');
+      measurePerformance(
+        'hall:open:version-metadata',
+        'hall:open:version-metadata:start',
+        'hall:open:version-metadata:end',
+      );
+      return versions;
+    })(),
+  ])
+    .then(([catalog, versions]) =>
+      publishOpenMetadata({ openSequence, hallId: id, catalog, versions }),
+    )
+    .catch((error: unknown) => publishOpenMetadataFailure(openSequence, error));
+  return { record, openSequence };
 }
 
 let initialLoad: Promise<OpenedHall> | null = null;
 export const initializeFx = createEffect(() => {
   initialLoad ??= (async () => {
     await seedFixtures();
-    const catalog = await repository.list();
     const preferred = readBrowserStorage('local', activeHallKey);
-    const id = catalog.some((hall) => hall.id === preferred)
-      ? preferred
-      : catalog.some((hall) => hall.id === sampleDraft.snapshot.id)
-        ? sampleDraft.snapshot.id
-        : catalog[0]?.id;
-    if (!id)
-      throw new Error('Нет доступных залов. Проверьте локальное хранилище');
-    return openStoredHall(id);
+    if (preferred) {
+      try {
+        const preferredRecord = await repository.read(preferred);
+        if (preferredRecord) return openStoredHall(preferred, preferredRecord);
+      } catch (error) {
+        if (
+          !(error instanceof HallStorageError) ||
+          (error.code !== 'corrupt' && error.code !== 'unsupported')
+        )
+          throw error;
+      }
+    }
+    return openStoredHall(sampleDraft.snapshot.id);
   })().catch((error: unknown) => {
     initialLoad = null;
     throw error;
@@ -183,26 +293,61 @@ export const createPerformanceHallFx = createEffect(
   async ({
     epoch,
     requestId,
+    seatCount,
   }: {
     epoch: number;
     requestId: number;
+    seatCount: PerformanceHallSize;
   }): Promise<OpenedHall> => {
+    markPerformance(`hall:fixture:${seatCount}:start`);
     requireCurrentNavigation(requestId, epoch);
-    const existing = await repository.read(PERFORMANCE_HALL_ID);
+    const id = getPerformanceHallId(seatCount);
+    markPerformance(`hall:fixture:${seatCount}:lookup:start`);
+    const existing = await repository.read(id);
+    markPerformance(`hall:fixture:${seatCount}:lookup:end`);
+    measurePerformance(
+      `hall:fixture:${seatCount}:lookup`,
+      `hall:fixture:${seatCount}:lookup:start`,
+      `hall:fixture:${seatCount}:lookup:end`,
+    );
     requireCurrentNavigation(requestId, epoch);
     if (!existing) {
-      const draft = createPerformanceHallDraft();
+      markPerformance(`hall:fixture:${seatCount}:generation:start`);
+      const draft = createPerformanceHallFixtureDraft(seatCount);
+      markPerformance(`hall:fixture:${seatCount}:generation:end`);
+      measurePerformance(
+        `hall:fixture:${seatCount}:generation`,
+        `hall:fixture:${seatCount}:generation:start`,
+        `hall:fixture:${seatCount}:generation:end`,
+      );
       requireCurrentNavigation(requestId, epoch);
+      markPerformance(`hall:fixture:${seatCount}:save:start`);
       await repository.save(draft, 0);
+      markPerformance(`hall:fixture:${seatCount}:save:end`);
+      measurePerformance(
+        `hall:fixture:${seatCount}:save`,
+        `hall:fixture:${seatCount}:save:start`,
+        `hall:fixture:${seatCount}:save:end`,
+      );
     }
     requireCurrentNavigation(requestId, epoch);
-    return openStoredHall(PERFORMANCE_HALL_ID);
+    const opened = await openStoredHall(id);
+    markPerformance(`hall:fixture:${seatCount}:end`);
+    measurePerformance(
+      `hall:fixture:${seatCount}`,
+      `hall:fixture:${seatCount}:start`,
+      `hall:fixture:${seatCount}:end`,
+    );
+    return opened;
   },
 );
-export function requestCreatePerformanceHall(): Promise<OpenedHall> {
+export function requestCreatePerformanceHall(
+  seatCount: PerformanceHallSize = PERFORMANCE_HALL_SEAT_COUNT,
+): Promise<OpenedHall> {
   return createPerformanceHallFx({
     epoch: documentEpoch,
     requestId: beginNavigation(),
+    seatCount,
   });
 }
 const acceptedOpenHall = sample({
@@ -253,9 +398,14 @@ export const seatSelectionChanged = createEvent<SeatSelectionItem[]>();
 
 export const seedDemoOccurrencesFx = createEffect(async () => {
   for (const fixture of fixtures) {
-    let version: PublishedHallVersion | undefined;
+    let version: PublishedHallVersion | null | undefined;
     try {
-      version = (await repository.listPublished(fixture.snapshot.id))[0];
+      const summary = (
+        await repository.listPublishedMetadata(fixture.snapshot.id)
+      )[0];
+      version = summary
+        ? await repository.getPublished(summary.versionId)
+        : undefined;
     } catch (error) {
       if (
         error instanceof HallStorageError &&
@@ -275,14 +425,18 @@ export const seedDemoOccurrencesFx = createEffect(async () => {
   }
   return demoBookingRepository.list();
 });
-export const openBuyerFx = createEffect(async (version: PublishedHallVersion) =>
-  demoBookingRepository.ensure(
-    createDemoOccurrence(
-      `demo:${version.versionId}`,
-      version.layout,
-      version.hallId,
-    ),
-  ),
+export const openBuyerFx = createEffect(
+  async (summary: PublishedVersionMetadata) => {
+    const version = await repository.getPublished(summary.versionId);
+    if (!version) throw new Error('Опубликованная версия не найдена');
+    return demoBookingRepository.ensure(
+      createDemoOccurrence(
+        `demo:${version.versionId}`,
+        version.layout,
+        version.hallId,
+      ),
+    );
+  },
 );
 export const openDemoEventFx = createEffect(async (id: string) => {
   const occurrence = await demoBookingRepository.get(id);
@@ -354,7 +508,7 @@ export const publishDraftFx = createEffect(
       record,
       published,
       catalog: await repository.list(),
-      versions: await repository.listPublished(record.id),
+      versions: await repository.listPublishedMetadata(record.id),
       sourceDraft: draft,
     };
   },
@@ -408,8 +562,17 @@ export const importDraftFx = createEffect(
     epoch: number;
     requestId: number;
   }): Promise<OpenedHall> => {
+    markPerformance('hall:import:start');
     assertImportFile(file, 'json');
+    markPerformance('hall:import:file-read:start');
     const text = await file.text();
+    markPerformance('hall:import:file-read:end');
+    measurePerformance(
+      'hall:import:file-read',
+      'hall:import:file-read:start',
+      'hall:import:file-read:end',
+    );
+    markPerformance('hall:import:parse:start');
     assertImportBytes(new TextEncoder().encode(text).byteLength, 'json');
     let value: unknown;
     try {
@@ -417,6 +580,13 @@ export const importDraftFx = createEffect(
     } catch {
       throw new Error('Некорректный JSON-файл');
     }
+    markPerformance('hall:import:parse:end');
+    measurePerformance(
+      'hall:import:json-parse',
+      'hall:import:parse:start',
+      'hall:import:parse:end',
+    );
+    markPerformance('hall:import:validate:start');
     assertDraftImportLimits(value);
     let parsed: HallLayoutDraft;
     try {
@@ -424,12 +594,28 @@ export const importDraftFx = createEffect(
     } catch {
       throw new Error('JSON не соответствует схеме зала');
     }
+    markPerformance('hall:import:validate:end');
+    measurePerformance(
+      'hall:import:validation',
+      'hall:import:validate:start',
+      'hall:import:validate:end',
+    );
     const draft = (await repository.get(parsed.snapshot.id))
       ? duplicateHallDraft(parsed)
       : parsed;
     requireCurrentNavigation(requestId, epoch);
+    markPerformance('hall:import:save:start');
     await repository.save(draft, 0);
-    return openStoredHall(draft.snapshot.id);
+    markPerformance('hall:import:save:end');
+    measurePerformance(
+      'hall:import:save',
+      'hall:import:save:start',
+      'hall:import:save:end',
+    );
+    const opened = await openStoredHall(draft.snapshot.id);
+    markPerformance('hall:import:end');
+    measurePerformance('hall:import', 'hall:import:start', 'hall:import:end');
+    return opened;
   },
 );
 export function requestImportDraft(file: File): Promise<OpenedHall> {
@@ -711,6 +897,7 @@ const opened = [
   acceptedRestore,
   acceptedReset,
 ];
+for (const event of opened) event.watch(acceptOpenSequence);
 for (const event of opened)
   event.watch((result) =>
     writeBrowserStorage('local', activeHallKey, result.record.id),
@@ -729,10 +916,12 @@ for (const event of opened)
   $draft.on(event, (_, result) => result.record.draft);
 
 export const $catalog = createStore<HallSummary[]>([]);
-for (const event of opened) $catalog.on(event, (_, result) => result.catalog);
+for (const event of opened)
+  $catalog.on(event, (catalog, result) => result.catalog ?? catalog);
 $catalog
   .on(acceptedSave, (_, result) => result.catalog)
-  .on(acceptedPublish, (_, result) => result.catalog);
+  .on(acceptedPublish, (_, result) => result.catalog)
+  .on(hallMetadataLoaded, (_, result) => result.catalog);
 
 export const $ready = createStore(false).on(initializeFx.doneData, () => true);
 
@@ -744,10 +933,12 @@ export const $revision = createStore<number | null>(null)
 for (const event of opened)
   $revision.on(event, (_, result) => result.record.revision);
 
-export const $versions = createStore<PublishedHallVersion[]>([])
+export const $versions = createStore<PublishedVersionMetadata[]>([])
   .on(newHallRequested, () => [])
-  .on(acceptedPublish, (_, result) => result.versions);
-for (const event of opened) $versions.on(event, (_, result) => result.versions);
+  .on(acceptedPublish, (_, result) => result.versions)
+  .on(hallMetadataLoaded, (_, result) => result.versions);
+for (const event of opened)
+  $versions.on(event, (_, result) => result.versions ?? []);
 
 export const $mode = createStore<
   'catalog' | 'preview' | 'editor' | 'published' | 'buyer' | 'events'
@@ -963,7 +1154,12 @@ $error
   .reset(acceptedSave, acceptedPublish, acceptedImport, acceptedPackageImport);
 $error
   .on(acceptedOpenHallFailure, (_, error) => error.message)
-  .reset(acceptedOpenHall);
+  .on(hallMetadataFailed, (_, { error }) =>
+    error instanceof Error
+      ? error.message
+      : 'Не удалось загрузить каталог и опубликованные версии',
+  )
+  .reset(acceptedOpenHall, hallMetadataLoaded);
 $error.reset(newHallRequested);
 
 if (typeof window !== 'undefined') {
