@@ -23,6 +23,7 @@ import {
   updateSeatStatuses,
   type BufferRange,
   type SeatBuffers,
+  updateSeatFillColors,
 } from './seatBuffers.js';
 import { seatFragmentShader, seatVertexShader } from './seatShaders.js';
 import { hitTestSeatScene } from './seatHitTest.js';
@@ -44,6 +45,9 @@ type AttributeBinding = Readonly<{
   bufferName: string;
   size: number;
   divisor: number;
+  type: number;
+  normalized: boolean;
+  bytesPerElement: number;
 }>;
 
 const renderBlockSize = 64;
@@ -129,6 +133,7 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     this.buffers = createSeatBuffers(seats);
     this.basePositions = new Float32Array(this.buffers.positions);
     updateSeatStatuses(this.buffers, [...this.stylesById.values()]);
+    updateSeatFillColors(this.buffers, [...this.stylesById.values()]);
     updateSeatSelection(this.buffers, this.selection);
     this.uploadSeatBuffers();
     this.scheduleFrame();
@@ -138,8 +143,10 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     if (this.disposed) return;
     for (const update of updates) this.stylesById.set(update.id, update);
     const ranges = updateSeatStatuses(this.buffers, updates);
+    const colorRanges = updateSeatFillColors(this.buffers, updates);
     this.uploadRanges('statuses', this.buffers.statuses, ranges);
-    if (ranges.length > 0) this.scheduleFrame();
+    this.uploadRanges('fillColors', this.buffers.fillColors, colorRanges, 4);
+    if (ranges.length > 0 || colorRanges.length > 0) this.scheduleFrame();
   }
 
   setPreviewPositions(positions: readonly RendererSeatPositionUpdate[]): void {
@@ -339,12 +346,26 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
       this.buffers.selected,
       this.gl.DYNAMIC_DRAW,
     );
+    this.resources.uploadBuffer(
+      this.gl,
+      'fillColors',
+      this.buffers.fillColors,
+      this.gl.DYNAMIC_DRAW,
+    );
     this.bindAttribute('a_position', 'positions', 2, 1);
     this.bindAttribute('a_rotation', 'rotations', 1, 1);
     this.bindAttribute('a_symbolKind', 'symbolKinds', 1, 1);
     this.bindAttribute('a_diameter', 'diameters', 1, 1);
     this.bindAttribute('a_status', 'statuses', 1, 1);
     this.bindAttribute('a_selected', 'selected', 1, 1);
+    this.bindAttribute(
+      'a_fillColor',
+      'fillColors',
+      4,
+      1,
+      this.gl.UNSIGNED_BYTE,
+      true,
+    );
   }
 
   private bindAttribute(
@@ -352,6 +373,8 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     bufferName: string,
     size: number,
     divisor: number,
+    type: number = this.gl.FLOAT,
+    normalized = false,
   ): void {
     const location = this.gl.getAttribLocation(this.program!, name);
     if (location < 0) throw new Error(`Missing WebGL attribute: ${name}`);
@@ -359,14 +382,25 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     if (!buffer) throw new Error(`Missing WebGL buffer: ${bufferName}`);
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
     this.gl.enableVertexAttribArray(location);
-    this.gl.vertexAttribPointer(location, size, this.gl.FLOAT, false, 0, 0);
+    this.gl.vertexAttribPointer(location, size, type, normalized, 0, 0);
     this.gl.vertexAttribDivisor(location, divisor);
-    this.attributes.set(name, { location, bufferName, size, divisor });
+    this.attributes.set(name, {
+      location,
+      bufferName,
+      size,
+      divisor,
+      type,
+      normalized,
+      bytesPerElement:
+        type === this.gl.UNSIGNED_BYTE
+          ? Uint8Array.BYTES_PER_ELEMENT
+          : Float32Array.BYTES_PER_ELEMENT,
+    });
   }
 
   private uploadRanges(
     bufferName: string,
-    data: Float32Array,
+    data: Float32Array | Uint8Array,
     ranges: readonly Readonly<{ start: number; count: number }>[],
     components = 1,
   ): void {
@@ -375,7 +409,7 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
       this.resources.updateBuffer(
         this.gl,
         bufferName,
-        range.start * components * Float32Array.BYTES_PER_ELEMENT,
+        range.start * components * data.BYTES_PER_ELEMENT,
         data.subarray(
           range.start * components,
           (range.start + range.count) * components,
@@ -468,10 +502,10 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
       this.gl.vertexAttribPointer(
         binding.location,
         binding.size,
-        this.gl.FLOAT,
-        false,
+        binding.type,
+        binding.normalized,
         0,
-        instanceIndex * binding.size * Float32Array.BYTES_PER_ELEMENT,
+        instanceIndex * binding.size * binding.bytesPerElement,
       );
     }
   }

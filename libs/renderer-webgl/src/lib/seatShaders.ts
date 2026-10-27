@@ -8,6 +8,7 @@ in float a_symbolKind;
 in float a_diameter;
 in float a_status;
 in float a_selected;
+in vec4 a_fillColor;
 
 uniform vec2 u_resolution;
 uniform vec3 u_viewport;
@@ -17,6 +18,7 @@ out float v_symbolKind;
 out float v_diameterPixels;
 out float v_status;
 out float v_selected;
+out vec4 v_fillColor;
 
 void main() {
   vec2 local = a_corner * (a_diameter * 0.5 + 0.09);
@@ -34,6 +36,7 @@ void main() {
   v_diameterPixels = a_diameter * u_viewport.z;
   v_status = a_status;
   v_selected = a_selected;
+  v_fillColor = a_fillColor;
 }
 `;
 
@@ -45,6 +48,7 @@ in float v_symbolKind;
 in float v_diameterPixels;
 in float v_status;
 in float v_selected;
+in vec4 v_fillColor;
 out vec4 outColor;
 
 bool insideRect(vec2 point, vec2 minimum, vec2 maximum, float expansion) {
@@ -100,6 +104,10 @@ void main() {
   else if (!dotMode && v_status > 1.5 &&
            (abs(v_local.x - v_local.y) < 0.045 || abs(v_local.x + v_local.y) < 0.045))
     outColor = vec4(0.12, 0.16, 0.18, 1.0);
-  else outColor = statusColor(v_status);
+  else
+    outColor = vec4(
+      v_fillColor.a > 0.5 ? v_fillColor.rgb : statusColor(v_status).rgb,
+      1.0
+    );
 }
 `;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createSeatBuffers,
+  updateSeatFillColors,
   updateSeatSelection,
   updateSeatStatuses,
   type SeatBufferGeometry,
@@ -48,6 +49,17 @@ describe('WebGL seat instance buffers', () => {
 
     expect([...buffers.statuses]).toEqual([2, 1, 0]);
     expect(ranges).toEqual([{ start: 0, count: 2 }]);
+  });
+
+  it('packs per-seat fill colors and reports only changed instance ranges', () => {
+    const buffers = createSeatBuffers(seats);
+
+    const ranges = updateSeatFillColors(buffers, [
+      { id: 'seat-b', fillColor: '#2079a8' },
+    ]);
+
+    expect([...buffers.fillColors.slice(4, 8)]).toEqual([32, 121, 168, 255]);
+    expect(ranges).toEqual([{ start: 1, count: 1 }]);
   });
 
   it('coalesces alternating status updates to avoid one GPU call per seat', () => {

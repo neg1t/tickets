@@ -13,6 +13,7 @@ import {
   type RendererSeatUpdate,
   type Viewport,
 } from '@hall-platform/renderer-core';
+import { defaultHallCanvasPalette } from '@hall-platform/design-tokens';
 import {
   HallViewer,
   type HallTarget,
@@ -36,6 +37,7 @@ export type HallViewportProps = Omit<
   | 'hideSeatShapes'
   | 'seatRendererLayer'
   | 'onViewportChange'
+  | 'onSeatFillColorChange'
   | 'onSeatPreviewChange'
 > & {
   readonly renderer?: RendererPreference;
@@ -51,6 +53,7 @@ export function HallViewport(props: HallViewportProps) {
     focusedFloorId: requestedFloorId,
     onFloorChange,
     selectedTargets: controlledSelection,
+    seatAppearance,
     renderer = 'auto',
     webglEnabled = false,
     seatUpdates,
@@ -63,6 +66,9 @@ export function HallViewport(props: HallViewportProps) {
   const [viewport, setViewport] = useState<Viewport | null>(null);
   const [webglFailed, setWebglFailed] = useState(false);
   const [webglReadyKey, setWebglReadyKey] = useState('');
+  const [canvasSeatFillColor, setCanvasSeatFillColor] = useState(
+    defaultHallCanvasPalette.seat,
+  );
   const contextLosses = useRef(0);
   const [hoveredTarget, setHoveredTarget] = useState<HallTarget | null>(null);
   const [localSelection, setLocalSelection] = useState<HallTarget[]>([]);
@@ -98,8 +104,8 @@ export function HallViewport(props: HallViewportProps) {
       ),
     [snapshot.seats, floorId],
   );
-  const effectiveSeatUpdates = useMemo(
-    () =>
+  const effectiveSeatUpdates = useMemo(() => {
+    const updates: readonly RendererSeatUpdate[] =
       seatUpdates ??
       (engine === 'webgl'
         ? snapshot.seats.map((seat) => ({
@@ -107,9 +113,22 @@ export function HallViewport(props: HallViewportProps) {
             status: 'available',
             label: seat.label,
           }))
-        : noSeatUpdates),
-    [seatUpdates, snapshot.seats, engine],
-  );
+        : noSeatUpdates);
+    if (engine !== 'webgl') return updates;
+    return updates.map((update) => ({
+      ...update,
+      fillColor:
+        seatAppearance?.[update.id]?.fill ??
+        update.fillColor ??
+        canvasSeatFillColor,
+    }));
+  }, [
+    seatUpdates,
+    snapshot.seats,
+    engine,
+    seatAppearance,
+    canvasSeatFillColor,
+  ]);
   const selection = useMemo(() => {
     const targets = new Map(
       selectedTargets.map((target) => [
@@ -126,6 +145,9 @@ export function HallViewport(props: HallViewportProps) {
   }, [selectedTargets, hoveredTarget]);
   const handleViewportChange = useCallback((next: Viewport) => {
     setViewport(next);
+  }, []);
+  const handleSeatFillColorChange = useCallback((fillColor: string) => {
+    setCanvasSeatFillColor(fillColor);
   }, []);
   const handleFloorChange = useCallback(
     (next: string) => {
@@ -202,6 +224,7 @@ export function HallViewport(props: HallViewportProps) {
       onSelectionChange={handleSelectionChange}
       onHoverTarget={handleHoverTarget}
       onViewportChange={handleViewportChange}
+      onSeatFillColorChange={handleSeatFillColorChange}
       onSeatPreviewChange={setPreviewPositions}
       hideSeatShapes={webglReady}
       seatRendererLayer={rendererLayer}

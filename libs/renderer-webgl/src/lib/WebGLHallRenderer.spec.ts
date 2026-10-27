@@ -25,6 +25,7 @@ function fakeContext(): WebGL2RenderingContext {
     COMPILE_STATUS: 35713,
     LINK_STATUS: 35714,
     FLOAT: 5126,
+    UNSIGNED_BYTE: 5121,
     BLEND: 3042,
     SRC_ALPHA: 770,
     ONE_MINUS_SRC_ALPHA: 771,
@@ -163,6 +164,14 @@ describe('WebGL hall renderer contract', () => {
       false,
       0,
       2 * Float32Array.BYTES_PER_ELEMENT,
+    );
+    expect(gl.vertexAttribPointer).toHaveBeenCalledWith(
+      7,
+      4,
+      gl.UNSIGNED_BYTE,
+      true,
+      0,
+      2 * Uint8Array.BYTES_PER_ELEMENT * 4,
     );
 
     renderer.dispose();

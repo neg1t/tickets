@@ -420,6 +420,9 @@ importers:
 
   libs/hall-viewer:
     dependencies:
+      '@hall-platform/design-tokens':
+        specifier: workspace:*
+        version: link:../design-tokens
       '@hall-platform/domain':
         specifier: workspace:*
         version: link:../domain

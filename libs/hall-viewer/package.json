@@ -15,6 +15,7 @@
     }
   },
   "dependencies": {
+    "@hall-platform/design-tokens": "workspace:*",
     "@hall-platform/domain": "workspace:*",
     "@hall-platform/geometry": "workspace:*",
     "@hall-platform/renderer-core": "workspace:*",

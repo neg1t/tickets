@@ -142,6 +142,127 @@ test('resizes WebGL and Konva surfaces together when the viewport changes', asyn
     .toEqual([620, 620, 620, 620, 620]);
 });
 
+test('matches Canvas seat fill at the same seat center', async ({ page }) => {
+  await page.addInitScript(() => {
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (kind, ...args) {
+      if (kind !== 'webgl2') return getContext.call(this, kind, ...args);
+      const options = args[0];
+      return getContext.call(this, kind, {
+        ...(typeof options === 'object' && options !== null ? options : {}),
+        preserveDrawingBuffer: true,
+      });
+    };
+  });
+  await page.goto('/');
+  await page.evaluate(async () => {
+    document.body.classList.add('hall-theme-canvas');
+    const harness = await import('/src/e2e/hallViewportHarness.ts');
+    harness.mountHallViewportHarness(document.body, 'canvas');
+  });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  expect(
+    await page.evaluate(() =>
+      getComputedStyle(document.body)
+        .getPropertyValue('--hall-canvas-seat')
+        .trim(),
+    ),
+  ).toBe('#57b8d5');
+  const readCanvasFill = () =>
+    page.evaluate(() => {
+      const container = document.querySelector<HTMLElement>(
+        '.hall-viewer-canvas',
+      );
+      const stage = document.querySelector<HTMLElement>(
+        '#renderer-parity-stage',
+      );
+      const testWindow = window as Window & {
+        __hallSeatWorld?: { x: number; y: number };
+      };
+      if (!container || !stage || !testWindow.__hallSeatWorld)
+        throw new Error('Missing Canvas parity fixture');
+      const x =
+        Number(container.dataset.viewportX) +
+        testWindow.__hallSeatWorld.x * Number(container.dataset.viewportScale);
+      const y =
+        Number(container.dataset.viewportY) +
+        testWindow.__hallSeatWorld.y * Number(container.dataset.viewportScale);
+      const pixels = [...stage.querySelectorAll('canvas')].flatMap((canvas) => {
+        const context = canvas.getContext('2d');
+        if (!context || canvas.clientWidth === 0 || canvas.clientHeight === 0)
+          return [];
+        const pixelRatio = canvas.width / canvas.clientWidth;
+        const pixel = context.getImageData(
+          Math.floor(x * pixelRatio),
+          Math.floor(y * pixelRatio),
+          1,
+          1,
+        ).data;
+        return pixel[3] === 0 ? [] : [[pixel[0], pixel[1], pixel[2], pixel[3]]];
+      });
+      return (
+        pixels.find(
+          ([red, green, blue]) => red === 87 && green === 184 && blue === 213,
+        ) ?? null
+      );
+    });
+  await expect.poll(readCanvasFill).not.toBeNull();
+  const canvasFill = await readCanvasFill();
+  expect(canvasFill).toEqual([87, 184, 213, 255]);
+
+  await page.evaluate(async () => {
+    const harness = await import('/src/e2e/hallViewportHarness.ts');
+    harness.unmountHallViewportHarness(document.body);
+    harness.mountHallViewportHarness(document.body, 'webgl');
+  });
+  const webgl = page.locator('canvas[data-renderer="webgl2"]');
+  await expect(webgl).toBeVisible();
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  const webglFill = await page.evaluate(() => {
+    const container = document.querySelector<HTMLElement>(
+      '.hall-viewer-canvas',
+    );
+    const canvas = document.querySelector<HTMLCanvasElement>(
+      'canvas[data-renderer="webgl2"]',
+    );
+    const testWindow = window as Window & {
+      __hallSeatWorld?: { x: number; y: number };
+    };
+    const gl = canvas?.getContext('webgl2');
+    if (!container || !canvas || !testWindow.__hallSeatWorld || !gl)
+      throw new Error('Missing WebGL parity fixture');
+    const x =
+      Number(container.dataset.viewportX) +
+      testWindow.__hallSeatWorld.x * Number(container.dataset.viewportScale);
+    const y =
+      Number(container.dataset.viewportY) +
+      testWindow.__hallSeatWorld.y * Number(container.dataset.viewportScale);
+    const pixel = new Uint8Array(4);
+    gl.finish();
+    gl.readPixels(
+      Math.floor(x),
+      canvas.height - Math.floor(y),
+      1,
+      1,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      pixel,
+    );
+    return [...pixel];
+  });
+  expect(webglFill.slice(0, 3)).toEqual(canvasFill?.slice(0, 3));
+});
+
 test('editor drag previews move WebGL seat buffers and commit once on release', async ({
   page,
 }) => {

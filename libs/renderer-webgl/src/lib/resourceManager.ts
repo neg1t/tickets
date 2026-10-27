@@ -6,7 +6,7 @@ export class WebGLResourceManager {
   uploadBuffer(
     gl: WebGL2RenderingContext,
     key: string,
-    data: Float32Array,
+    data: Float32Array | Uint8Array,
     usage: number = gl.STATIC_DRAW,
   ): WebGLBuffer {
     const previous = this.buffers.get(key);
@@ -23,7 +23,7 @@ export class WebGLResourceManager {
     gl: WebGL2RenderingContext,
     key: string,
     byteOffset: number,
-    data: Float32Array,
+    data: Float32Array | Uint8Array,
   ): void {
     const buffer = this.buffers.get(key);
     if (!buffer) throw new Error(`Unknown WebGL buffer: ${key}`);

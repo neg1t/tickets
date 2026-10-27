@@ -11,11 +11,24 @@
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "references": [
-    { "path": "../domain/tsconfig.lib.json" },
-    { "path": "../geometry/tsconfig.lib.json" },
-    { "path": "../renderer-core/tsconfig.lib.json" },
-    { "path": "../renderer-konva/tsconfig.lib.json" },
-    { "path": "../renderer-webgl/tsconfig.lib.json" }
+    {
+      "path": "../renderer-webgl/tsconfig.lib.json"
+    },
+    {
+      "path": "../renderer-konva/tsconfig.lib.json"
+    },
+    {
+      "path": "../renderer-core/tsconfig.lib.json"
+    },
+    {
+      "path": "../geometry/tsconfig.lib.json"
+    },
+    {
+      "path": "../domain/tsconfig.lib.json"
+    },
+    {
+      "path": "../design-tokens/tsconfig.lib.json"
+    }
   ],
   "exclude": [
     "src/**/*.spec.ts",

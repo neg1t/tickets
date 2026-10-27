@@ -135,6 +135,7 @@ export type HallViewerProps = {
   readonly hideSeatShapes?: boolean;
   readonly seatRendererLayer?: ReactNode;
   readonly onViewportChange?: (viewport: Viewport) => void;
+  readonly onSeatFillColorChange?: (fillColor: string) => void;
   readonly onSeatPreviewChange?: (
     positions: readonly RendererSeatPositionUpdate[],
   ) => void;
@@ -268,6 +269,7 @@ export function HallViewer(props: HallViewerProps) {
     hideSeatShapes = false,
     seatRendererLayer,
     onViewportChange,
+    onSeatFillColorChange,
     onSeatPreviewChange,
   } = props;
   const ui = { ...defaultLabels, ...labels };
@@ -302,7 +304,11 @@ export function HallViewer(props: HallViewerProps) {
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const update = () => setPalette(readHallCanvasPalette(container));
+    const update = () => {
+      const next = readHallCanvasPalette(container);
+      setPalette(next);
+      onSeatFillColorChange?.(next.seat);
+    };
     update();
     const observer = new MutationObserver(update);
     for (let node: Element | null = container; node; node = node.parentElement)
@@ -311,7 +317,7 @@ export function HallViewer(props: HallViewerProps) {
         attributeFilter: ['class', 'style'],
       });
     return () => observer.disconnect();
-  }, []);
+  }, [onSeatFillColorChange]);
   const observedWidth = useRef(width);
   const sceneRef = useRef(scene);
   const previousFitKey = useRef(fitKey);

@@ -22,6 +22,7 @@ export type SeatBuffers = Readonly<{
   diameters: Float32Array;
   statuses: Float32Array;
   selected: Float32Array;
+  fillColors: Uint8Array;
   selectedIndices: Set<number>;
 }>;
 
@@ -70,6 +71,7 @@ export function createSeatBuffers(
   const diameters = new Float32Array(seats.length);
   const statuses = new Float32Array(seats.length);
   const selected = new Float32Array(seats.length);
+  const fillColors = new Uint8Array(seats.length * 4);
 
   seats.forEach((seat, index) => {
     if (indexById.has(seat.id))
@@ -97,8 +99,61 @@ export function createSeatBuffers(
     diameters,
     statuses,
     selected,
+    fillColors,
     selectedIndices: new Set(),
   };
+}
+
+function parseFillColor(
+  value: string,
+): readonly [number, number, number] | null {
+  const color = value.trim();
+  const hex = /^#([\da-f]{3}|[\da-f]{6})$/i.exec(color)?.[1];
+  if (hex) {
+    const full =
+      hex.length === 3
+        ? [...hex].map((component) => `${component}${component}`).join('')
+        : hex;
+    return [0, 2, 4].map((offset) =>
+      Number.parseInt(full.slice(offset, offset + 2), 16),
+    ) as [number, number, number];
+  }
+
+  const rgb = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i.exec(color);
+  if (!rgb) return null;
+  const channels = rgb.slice(1, 4).map(Number);
+  if (channels.some((channel) => !Number.isFinite(channel))) return null;
+  return channels.map((channel) =>
+    Math.round(Math.min(255, Math.max(0, channel))),
+  ) as [number, number, number];
+}
+
+export function updateSeatFillColors(
+  buffers: SeatBuffers,
+  updates: readonly Pick<RendererSeatUpdate, 'id' | 'fillColor'>[],
+): BufferRange[] {
+  const changed: number[] = [];
+  for (const update of updates) {
+    const index = buffers.indexById.get(update.id);
+    if (index === undefined || update.fillColor === undefined) continue;
+    const parsed =
+      update.fillColor === null ? null : parseFillColor(update.fillColor);
+    if (update.fillColor !== null && !parsed) continue;
+    const next = parsed ? [...parsed, 255] : [0, 0, 0, 0];
+    const offset = index * 4;
+    if (
+      next.every(
+        (channel, component) =>
+          buffers.fillColors[offset + component] === channel,
+      )
+    )
+      continue;
+    next.forEach((channel, component) => {
+      buffers.fillColors[offset + component] = channel;
+    });
+    changed.push(index);
+  }
+  return rangesForIndices(changed);
 }
 
 export function updateSeatStatuses(

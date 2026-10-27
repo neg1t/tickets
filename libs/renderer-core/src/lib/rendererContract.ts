@@ -16,6 +16,8 @@ export type RendererSeatUpdate = Readonly<{
   status: string;
   price?: number | null;
   label?: string;
+  /** CSS hex or rgb() fill override used to match a host renderer palette. */
+  fillColor?: string | null;
 }>;
 
 export type RendererSeatPositionUpdate = Readonly<{
