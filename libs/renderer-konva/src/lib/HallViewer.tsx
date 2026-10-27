@@ -1174,6 +1174,146 @@ export function HallViewer(props: HallViewerProps) {
     })
     .join(', ');
 
+  const overlaysLayer = (
+    <Layer name="overlays" listening={false}>
+      <Group name="interaction" />
+      <Group name="moving-objects">
+        {movingSceneObjects.map(({ key, node }) => previewNode(key, node))}
+      </Group>
+
+      <Group name="generation-preview">
+        {previewSeats.map((seat, index) => (
+          <Circle
+            key={index}
+            x={seat.x}
+            y={seat.y}
+            radius={0.7}
+            fill="#f8b84e"
+            stroke="#8b5600"
+            strokeWidth={0.15}
+            opacity={0.65}
+          />
+        ))}
+      </Group>
+
+      <Group name="selection">
+        {selection.flatMap((target) => {
+          const bounds = targetBounds(displayScene, target);
+          return bounds && !(hideSeatShapes && target.kind === 'seat')
+            ? [
+                previewNode(
+                  `${target.kind}:${target.id}`,
+                  <SelectionOverlay
+                    key={`${target.kind}:${target.id}`}
+                    bounds={bounds}
+                    color={palette.selected}
+                  />,
+                ),
+              ]
+            : [];
+        })}
+      </Group>
+
+      <Group name="guides">
+        {hoverTarget &&
+          !selectedKeys.has(`${hoverTarget.kind}:${hoverTarget.id}`) &&
+          (() => {
+            const bounds = targetBounds(displayScene, hoverTarget);
+            return bounds ? (
+              <SelectionOverlay bounds={bounds} color={palette.row} />
+            ) : null;
+          })()}
+        {boxBounds && (
+          <Rect
+            x={boxBounds.minX}
+            y={boxBounds.minY}
+            width={boxBounds.maxX - boxBounds.minX}
+            height={boxBounds.maxY - boxBounds.minY}
+            fill={palette.selected}
+            opacity={0.12}
+            stroke={palette.selected}
+            strokeWidth={0.12}
+          />
+        )}
+        {positionedHandles.map((handle) =>
+          handle.id.startsWith('bounds:') ? (
+            <Rect
+              key={`${handle.target.kind}:${handle.target.id}:${handle.id}`}
+              x={handle.point.x - Math.max(0.16, 5 / viewport.scale)}
+              y={handle.point.y - Math.max(0.16, 5 / viewport.scale)}
+              width={Math.max(0.32, 10 / viewport.scale)}
+              height={Math.max(0.32, 10 / viewport.scale)}
+              cornerRadius={0.06}
+              fill="#fff"
+              stroke={palette.selected}
+              strokeWidth={Math.max(0.06, 1 / viewport.scale)}
+            />
+          ) : (
+            <Circle
+              key={`${handle.target.kind}:${handle.target.id}:${handle.id}`}
+              x={handle.point.x}
+              y={handle.point.y}
+              radius={Math.max(0.15, 6 / viewport.scale)}
+              fill={palette.selected}
+              stroke={palette.ink}
+              strokeWidth={Math.max(0.06, 1 / viewport.scale)}
+            />
+          ),
+        )}
+        {calibrationGuide && (
+          <Line
+            points={[
+              calibrationGuide.first.x,
+              calibrationGuide.first.y,
+              calibrationGuide.second.x,
+              calibrationGuide.second.y,
+            ]}
+            stroke={palette.selected}
+            strokeWidth={Math.max(0.1, 2 / viewport.scale)}
+            dash={[0.4, 0.3]}
+          />
+        )}
+        {gridEnabled &&
+          preview?.dragging &&
+          (renderIntent?.mode === 'edit' ||
+            renderIntent?.mode === 'handle' ||
+            renderIntent?.mode === 'create') &&
+          (() => {
+            const point = snapPoint(
+              screenToWorld(viewport, preview.screen),
+              true,
+            );
+            return (
+              <Group>
+                <Line
+                  points={[
+                    point.x,
+                    visibleWorld.minY,
+                    point.x,
+                    visibleWorld.maxY,
+                  ]}
+                  stroke={palette.selected}
+                  strokeWidth={0.06}
+                  dash={[0.3, 0.2]}
+                />
+                <Line
+                  points={[
+                    visibleWorld.minX,
+                    point.y,
+                    visibleWorld.maxX,
+                    point.y,
+                  ]}
+                  stroke={palette.selected}
+                  strokeWidth={0.06}
+                  dash={[0.3, 0.2]}
+                />
+              </Group>
+            );
+          })()}
+      </Group>
+    </Layer>
+  );
+
   return (
     <section className="hall-viewer" aria-label={`${ui.hall} ${hallName}`}>
       <div
@@ -1444,145 +1584,147 @@ export function HallViewer(props: HallViewerProps) {
             <Group name="rows-seats-tables">{staticSceneObjects}</Group>
           </Layer>
 
-          <Layer name="overlays" listening={false}>
-            <Group name="interaction" />
-            <Group name="moving-objects">
-              {movingSceneObjects.map(({ key, node }) =>
-                previewNode(key, node),
-              )}
-            </Group>
+          {!hideSeatShapes && (
+            <Layer name="overlays" listening={false}>
+              <Group name="interaction" />
+              <Group name="moving-objects">
+                {movingSceneObjects.map(({ key, node }) =>
+                  previewNode(key, node),
+                )}
+              </Group>
 
-            <Group name="generation-preview">
-              {previewSeats.map((seat, index) => (
-                <Circle
-                  key={index}
-                  x={seat.x}
-                  y={seat.y}
-                  radius={0.7}
-                  fill="#f8b84e"
-                  stroke="#8b5600"
-                  strokeWidth={0.15}
-                  opacity={0.65}
-                />
-              ))}
-            </Group>
-
-            <Group name="selection">
-              {selection.flatMap((target) => {
-                const bounds = targetBounds(displayScene, target);
-                return bounds && !(hideSeatShapes && target.kind === 'seat')
-                  ? [
-                      previewNode(
-                        `${target.kind}:${target.id}`,
-                        <SelectionOverlay
-                          key={`${target.kind}:${target.id}`}
-                          bounds={bounds}
-                          color={palette.selected}
-                        />,
-                      ),
-                    ]
-                  : [];
-              })}
-            </Group>
-
-            <Group name="guides">
-              {hoverTarget &&
-                !selectedKeys.has(`${hoverTarget.kind}:${hoverTarget.id}`) &&
-                (() => {
-                  const bounds = targetBounds(displayScene, hoverTarget);
-                  return bounds ? (
-                    <SelectionOverlay bounds={bounds} color={palette.row} />
-                  ) : null;
-                })()}
-              {boxBounds && (
-                <Rect
-                  x={boxBounds.minX}
-                  y={boxBounds.minY}
-                  width={boxBounds.maxX - boxBounds.minX}
-                  height={boxBounds.maxY - boxBounds.minY}
-                  fill={palette.selected}
-                  opacity={0.12}
-                  stroke={palette.selected}
-                  strokeWidth={0.12}
-                />
-              )}
-              {positionedHandles.map((handle) =>
-                handle.id.startsWith('bounds:') ? (
-                  <Rect
-                    key={`${handle.target.kind}:${handle.target.id}:${handle.id}`}
-                    x={handle.point.x - Math.max(0.16, 5 / viewport.scale)}
-                    y={handle.point.y - Math.max(0.16, 5 / viewport.scale)}
-                    width={Math.max(0.32, 10 / viewport.scale)}
-                    height={Math.max(0.32, 10 / viewport.scale)}
-                    cornerRadius={0.06}
-                    fill="#fff"
-                    stroke={palette.selected}
-                    strokeWidth={Math.max(0.06, 1 / viewport.scale)}
-                  />
-                ) : (
+              <Group name="generation-preview">
+                {previewSeats.map((seat, index) => (
                   <Circle
-                    key={`${handle.target.kind}:${handle.target.id}:${handle.id}`}
-                    x={handle.point.x}
-                    y={handle.point.y}
-                    radius={Math.max(0.15, 6 / viewport.scale)}
-                    fill={palette.selected}
-                    stroke={palette.ink}
-                    strokeWidth={Math.max(0.06, 1 / viewport.scale)}
+                    key={index}
+                    x={seat.x}
+                    y={seat.y}
+                    radius={0.7}
+                    fill="#f8b84e"
+                    stroke="#8b5600"
+                    strokeWidth={0.15}
+                    opacity={0.65}
                   />
-                ),
-              )}
-              {calibrationGuide && (
-                <Line
-                  points={[
-                    calibrationGuide.first.x,
-                    calibrationGuide.first.y,
-                    calibrationGuide.second.x,
-                    calibrationGuide.second.y,
-                  ]}
-                  stroke={palette.selected}
-                  strokeWidth={Math.max(0.1, 2 / viewport.scale)}
-                  dash={[0.4, 0.3]}
-                />
-              )}
-              {gridEnabled &&
-                preview?.dragging &&
-                (renderIntent?.mode === 'edit' ||
-                  renderIntent?.mode === 'handle' ||
-                  renderIntent?.mode === 'create') &&
-                (() => {
-                  const point = snapPoint(
-                    screenToWorld(viewport, preview.screen),
-                    true,
-                  );
-                  return (
-                    <Group>
-                      <Line
-                        points={[
-                          point.x,
-                          visibleWorld.minY,
-                          point.x,
-                          visibleWorld.maxY,
-                        ]}
-                        stroke={palette.selected}
-                        strokeWidth={0.06}
-                        dash={[0.3, 0.2]}
-                      />
-                      <Line
-                        points={[
-                          visibleWorld.minX,
-                          point.y,
-                          visibleWorld.maxX,
-                          point.y,
-                        ]}
-                        stroke={palette.selected}
-                        strokeWidth={0.06}
-                        dash={[0.3, 0.2]}
-                      />
-                    </Group>
-                  );
-                })()}
-            </Group>
-          </Layer>
+                ))}
+              </Group>
+
+              <Group name="selection">
+                {selection.flatMap((target) => {
+                  const bounds = targetBounds(displayScene, target);
+                  return bounds && !(hideSeatShapes && target.kind === 'seat')
+                    ? [
+                        previewNode(
+                          `${target.kind}:${target.id}`,
+                          <SelectionOverlay
+                            key={`${target.kind}:${target.id}`}
+                            bounds={bounds}
+                            color={palette.selected}
+                          />,
+                        ),
+                      ]
+                    : [];
+                })}
+              </Group>
+
+              <Group name="guides">
+                {hoverTarget &&
+                  !selectedKeys.has(`${hoverTarget.kind}:${hoverTarget.id}`) &&
+                  (() => {
+                    const bounds = targetBounds(displayScene, hoverTarget);
+                    return bounds ? (
+                      <SelectionOverlay bounds={bounds} color={palette.row} />
+                    ) : null;
+                  })()}
+                {boxBounds && (
+                  <Rect
+                    x={boxBounds.minX}
+                    y={boxBounds.minY}
+                    width={boxBounds.maxX - boxBounds.minX}
+                    height={boxBounds.maxY - boxBounds.minY}
+                    fill={palette.selected}
+                    opacity={0.12}
+                    stroke={palette.selected}
+                    strokeWidth={0.12}
+                  />
+                )}
+                {positionedHandles.map((handle) =>
+                  handle.id.startsWith('bounds:') ? (
+                    <Rect
+                      key={`${handle.target.kind}:${handle.target.id}:${handle.id}`}
+                      x={handle.point.x - Math.max(0.16, 5 / viewport.scale)}
+                      y={handle.point.y - Math.max(0.16, 5 / viewport.scale)}
+                      width={Math.max(0.32, 10 / viewport.scale)}
+                      height={Math.max(0.32, 10 / viewport.scale)}
+                      cornerRadius={0.06}
+                      fill="#fff"
+                      stroke={palette.selected}
+                      strokeWidth={Math.max(0.06, 1 / viewport.scale)}
+                    />
+                  ) : (
+                    <Circle
+                      key={`${handle.target.kind}:${handle.target.id}:${handle.id}`}
+                      x={handle.point.x}
+                      y={handle.point.y}
+                      radius={Math.max(0.15, 6 / viewport.scale)}
+                      fill={palette.selected}
+                      stroke={palette.ink}
+                      strokeWidth={Math.max(0.06, 1 / viewport.scale)}
+                    />
+                  ),
+                )}
+                {calibrationGuide && (
+                  <Line
+                    points={[
+                      calibrationGuide.first.x,
+                      calibrationGuide.first.y,
+                      calibrationGuide.second.x,
+                      calibrationGuide.second.y,
+                    ]}
+                    stroke={palette.selected}
+                    strokeWidth={Math.max(0.1, 2 / viewport.scale)}
+                    dash={[0.4, 0.3]}
+                  />
+                )}
+                {gridEnabled &&
+                  preview?.dragging &&
+                  (renderIntent?.mode === 'edit' ||
+                    renderIntent?.mode === 'handle' ||
+                    renderIntent?.mode === 'create') &&
+                  (() => {
+                    const point = snapPoint(
+                      screenToWorld(viewport, preview.screen),
+                      true,
+                    );
+                    return (
+                      <Group>
+                        <Line
+                          points={[
+                            point.x,
+                            visibleWorld.minY,
+                            point.x,
+                            visibleWorld.maxY,
+                          ]}
+                          stroke={palette.selected}
+                          strokeWidth={0.06}
+                          dash={[0.3, 0.2]}
+                        />
+                        <Line
+                          points={[
+                            visibleWorld.minX,
+                            point.y,
+                            visibleWorld.maxX,
+                            point.y,
+                          ]}
+                          stroke={palette.selected}
+                          strokeWidth={0.06}
+                          dash={[0.3, 0.2]}
+                        />
+                      </Group>
+                    );
+                  })()}
+              </Group>
+            </Layer>
+          )}
         </HallStage>
         {seatRendererLayer && (
           <div
@@ -1592,11 +1734,32 @@ export function HallViewer(props: HallViewerProps) {
               position: 'absolute',
               inset: 0,
               zIndex: 2,
+              opacity: hideSeatShapes ? 1 : 0,
               pointerEvents: 'none',
             }}
           >
             {seatRendererLayer}
           </div>
+        )}
+        {hideSeatShapes && (
+          <HallStage
+            id={`${stageId ?? 'hall-stage'}-overlays`}
+            width={width}
+            height={height}
+            x={viewport.x}
+            y={viewport.y}
+            scaleX={viewport.scale}
+            scaleY={viewport.scale}
+            listening={false}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 3,
+              pointerEvents: 'none',
+            }}
+          >
+            {overlaysLayer}
+          </HallStage>
         )}
       </div>
 

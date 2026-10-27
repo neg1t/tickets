@@ -30,11 +30,35 @@ test('forced WebGL replaces only the seat layer and preserves CPU picking', asyn
     const harness = await import('/src/e2e/hallViewportHarness.ts');
     harness.mountHallViewportHarness(document.body, 'webgl');
   });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as Window & { __hallRendererMode?: string })
+          .__hallRendererMode,
+      ),
+    )
+    .toBe('webgl');
 
+  await expect(page.locator('canvas[data-renderer="webgl2"]')).toBeVisible();
   await expect(page.locator('.hall-viewer-canvas')).toHaveAttribute(
     'data-seat-renderer',
     'external',
   );
+  expect(
+    await page
+      .locator('.hall-viewer-canvas')
+      .evaluate((container) =>
+        [...container.children].map((child) =>
+          child.id === 'renderer-parity-stage'
+            ? 'base'
+            : child.id === 'renderer-parity-stage-overlays'
+              ? 'overlays'
+              : child.hasAttribute('data-seat-renderer-layer')
+                ? 'seats'
+                : child.tagName.toLowerCase(),
+        ),
+      ),
+  ).toEqual(['base', 'seats', 'overlays']);
   await expect(page.locator('canvas[data-renderer="webgl2"]')).toBeVisible();
   const seatPoint = await page.evaluate(() => {
     const container = document.querySelector<HTMLElement>(
@@ -206,6 +230,75 @@ test('restores once and falls back after the context is lost again', async ({
     );
     if (!target) throw new Error('WebGL canvas was not mounted');
     target.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+  });
+  await expect(page.locator('.hall-viewer-canvas')).toHaveAttribute(
+    'data-seat-renderer',
+    'canvas',
+  );
+  await expect(page.locator('canvas[data-renderer="webgl2"]')).toHaveCount(0);
+});
+
+test('recovers a real WebGL context loss and falls back after the next loss', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.evaluate(async () => {
+    const harness = await import('/src/e2e/hallViewportHarness.ts');
+    harness.mountHallViewportHarness(document.body, 'webgl');
+  });
+  const canvas = page.locator('canvas[data-renderer="webgl2"]');
+  await expect(canvas).toBeVisible();
+  const extensionAvailable = await page.evaluate(() => {
+    const target = document.querySelector<HTMLCanvasElement>(
+      'canvas[data-renderer="webgl2"]',
+    );
+    return Boolean(
+      target?.getContext('webgl2')?.getExtension('WEBGL_lose_context'),
+    );
+  });
+  test.skip(!extensionAvailable, 'WEBGL_lose_context is unavailable');
+
+  const restored = await page.evaluate(
+    () =>
+      new Promise<boolean>((resolve) => {
+        const target = document.querySelector<HTMLCanvasElement>(
+          'canvas[data-renderer="webgl2"]',
+        );
+        const context = target?.getContext('webgl2');
+        const extension = context?.getExtension('WEBGL_lose_context');
+        if (!target || !context || !extension) return resolve(false);
+        const timeout = window.setTimeout(() => resolve(false), 4000);
+        target.addEventListener(
+          'webglcontextlost',
+          () => window.setTimeout(() => extension.restoreContext(), 50),
+          { once: true },
+        );
+        target.addEventListener(
+          'webglcontextrestored',
+          () => {
+            window.clearTimeout(timeout);
+            resolve(!context.isContextLost());
+          },
+          { once: true },
+        );
+        extension.loseContext();
+      }),
+  );
+  expect(restored).toBe(true);
+  await expect(canvas).toBeVisible();
+  await expect(page.locator('.hall-viewer-canvas')).toHaveAttribute(
+    'data-seat-renderer',
+    'external',
+  );
+
+  await page.evaluate(() => {
+    const target = document.querySelector<HTMLCanvasElement>(
+      'canvas[data-renderer="webgl2"]',
+    );
+    target
+      ?.getContext('webgl2')
+      ?.getExtension('WEBGL_lose_context')
+      ?.loseContext();
   });
   await expect(page.locator('.hall-viewer-canvas')).toHaveAttribute(
     'data-seat-renderer',
