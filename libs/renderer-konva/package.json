@@ -19,6 +19,7 @@
     "@hall-platform/design-tokens": "workspace:*",
     "@hall-platform/domain": "workspace:*",
     "@hall-platform/geometry": "workspace:*",
+    "@hall-platform/renderer-core": "workspace:*",
     "konva": "10.9.0",
     "react": "19.3.1",
     "react-konva": "19.3.0",

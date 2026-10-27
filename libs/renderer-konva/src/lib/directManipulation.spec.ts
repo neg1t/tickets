@@ -1,9 +1,13 @@
-import { layoutDocumentSchema, rowCurveSchema, worldPointSchema } from '@hall-platform/domain';
+import {
+  layoutDocumentSchema,
+  rowCurveSchema,
+  worldPointSchema,
+} from '@hall-platform/domain';
 import smallTheater from '@hall-platform/fixtures/small-theater.json' with { type: 'json' };
 import banquetHall from '@hall-platform/fixtures/banquet-hall.json' with { type: 'json' };
 import { describe, expect, it } from 'vitest';
 
-import { buildHallScene } from './hallScene.js';
+import { buildHallScene, targetBounds } from './hallScene.js';
 import {
   boxSelectedTargets,
   editHandleGeometry,
@@ -25,7 +29,7 @@ describe('direct canvas manipulation', () => {
     const seat = snapshot.seats[0];
     if (!seat) throw new Error('Missing fixture seat');
     const scene = buildHallScene(snapshot, seat.floorId);
-    const bounds = scene.index.get(`seat:${seat.id}`)?.bounds;
+    const bounds = targetBounds(scene, { kind: 'seat', id: seat.id });
     if (!bounds) throw new Error('Missing seat bounds');
     const selection = boxSelectedTargets(scene, {
       minX: bounds.minX - 0.1,
@@ -93,9 +97,11 @@ describe('direct canvas manipulation', () => {
     ].map((point) => worldPointSchema.parse(point));
     const source = { ...snapshot, zones: [{ ...zone, polygon }] };
     const scene = buildHallScene(source, zone.floorId);
-    expect(handlesForTarget(scene, { kind: 'zone', id: zone.id }).map((handle) => handle.id)).toEqual([
-      'bounds:nw', 'bounds:ne', 'bounds:se', 'bounds:sw',
-    ]);
+    expect(
+      handlesForTarget(scene, { kind: 'zone', id: zone.id }).map(
+        (handle) => handle.id,
+      ),
+    ).toEqual(['bounds:nw', 'bounds:ne', 'bounds:se', 'bounds:sw']);
     const preview = editHandleGeometry(
       source,
       { [zone.id]: { minX: 0, minY: 0, maxX: 10, maxY: 10 } },
@@ -104,7 +110,9 @@ describe('direct canvas manipulation', () => {
       { x: 15, y: 20 },
     );
     expect(preview.snapshot.zones[0]?.polygon).toEqual([
-      { x: 0, y: 0 }, { x: 15, y: 0 }, { x: 0, y: 20 },
+      { x: 0, y: 0 },
+      { x: 15, y: 0 },
+      { x: 0, y: 20 },
     ]);
     expect(source.zones[0]?.polygon).toEqual(polygon);
   });

@@ -137,14 +137,14 @@ export function boxSelectedTargets(
   scene: HallScene,
   bounds: SpatialBounds,
 ): HallTarget[] {
-  return scene.index
+  return scene.index.index
     .search(bounds)
-    .flatMap(({ value, bounds: item }) =>
-      item.minX >= bounds.minX &&
-      item.maxX <= bounds.maxX &&
-      item.minY >= bounds.minY &&
-      item.maxY <= bounds.maxY
-        ? [value]
+    .flatMap(({ value: item, bounds: itemBounds }) =>
+      itemBounds.minX >= bounds.minX &&
+      itemBounds.maxX <= bounds.maxX &&
+      itemBounds.minY >= bounds.minY &&
+      itemBounds.maxY <= bounds.maxY
+        ? [item.geometry]
         : [],
     );
 }

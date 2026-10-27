@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "../../dist/out-tsc/renderer-core-spec",
+    "tsBuildInfoFile": "../../dist/out-tsc/renderer-core-spec/tsconfig.spec.tsbuildinfo",
+    "types": ["vitest/globals", "node"]
+  },
+  "include": ["src/**/*.spec.ts", "src/**/*.test.ts"],
+  "references": [
+    { "path": "./tsconfig.lib.json" },
+    { "path": "../geometry/tsconfig.lib.json" }
+  ]
+}

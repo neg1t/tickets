@@ -19,6 +19,9 @@
       "path": "./libs/renderer-konva"
     },
     {
+      "path": "./libs/renderer-core"
+    },
+    {
       "path": "./libs/fixtures"
     },
     {

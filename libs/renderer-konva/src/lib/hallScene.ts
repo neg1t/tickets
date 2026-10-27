@@ -7,12 +7,18 @@ import type {
   Zone,
 } from '@hall-platform/domain';
 import {
+  createRendererScene,
+  hitTestScene,
+  sceneItemKey,
+  type RendererScene,
+  type SceneItem,
+} from '@hall-platform/renderer-core';
+import {
   arcPointAtFraction,
   bezierPointAtParameter,
   distanceBetweenVectors,
   distanceToSegment,
   isPointInPolygon,
-  SpatialIndex,
   type SpatialBounds,
   type Vector2,
 } from '@hall-platform/geometry';
@@ -54,7 +60,7 @@ export type HallScene = Readonly<{
   decorationsById: ReadonlyMap<string, Decoration>;
   targetOrderById: ReadonlyMap<string, number>;
   bounds: SpatialBounds;
-  index: SpatialIndex<HallTarget>;
+  index: RendererScene<HallTarget>;
 }>;
 
 export type VisibleHallScene = Pick<
@@ -175,8 +181,9 @@ export function buildHallScene(
   backgroundPageSizes: Readonly<Record<string, BackgroundPageSize>> = {},
 ): HallScene {
   const measuredBuild = snapshot.seats.length >= 5_000;
+  const revision = ++sceneBuildSequence;
   const buildName = measuredBuild
-    ? `hall:scene-index:${snapshot.id}:${floorId}:${++sceneBuildSequence}`
+    ? `hall:scene-index:${snapshot.id}:${floorId}:${revision}`
     : '';
   if (measuredBuild) globalThis.performance?.mark(`${buildName}:start`);
   const seats = snapshot.seats.filter((seat) => seat.floorId === floorId);
@@ -190,7 +197,7 @@ export function buildHallScene(
   const decorations = snapshot.decorations.filter(
     (item) => item.floorId === floorId,
   );
-  const index = new SpatialIndex<HallTarget>(8);
+  const sceneItems: SceneItem<HallTarget>[] = [];
   const memberBounds = new Map<string, SpatialBounds>();
   const targetOrderById = new Map<string, number>();
   const allBounds: SpatialBounds[] = [];
@@ -218,7 +225,8 @@ export function buildHallScene(
     zoneId?: string,
   ): void {
     const key = `${kind}:${id}`;
-    index.upsert(key, bounds, { kind, id });
+    const target = { kind, id };
+    sceneItems.push({ id, floorId, kind, bounds, geometry: target });
     targetOrderById.set(key, nextTargetOrder++);
     if (kind !== 'zone') allBounds.push(bounds);
     if (zoneId) {
@@ -285,6 +293,7 @@ export function buildHallScene(
     allBounds.length > 0
       ? allBounds.reduce(mergeBounds)
       : pointBounds({ x: 0, y: 0 }, 10);
+  const index = createRendererScene(revision, sceneItems);
   if (measuredBuild) {
     globalThis.performance?.mark(`${buildName}:end`);
     globalThis.performance?.measure(
@@ -328,8 +337,10 @@ export function visibleHallScene(
   delta?: Vector2,
 ): VisibleHallScene {
   const visibleTargets = new Map<string, HallTarget>();
-  for (const { id, value } of scene.index.search(bounds))
-    visibleTargets.set(id, value);
+  for (const { value } of scene.index.index.search(bounds)) {
+    const target = value.geometry;
+    visibleTargets.set(`${target.kind}:${target.id}`, target);
+  }
   if (movingKeys && delta) {
     const originalBounds = {
       minX: bounds.minX - delta.x,
@@ -337,8 +348,10 @@ export function visibleHallScene(
       maxX: bounds.maxX - delta.x,
       maxY: bounds.maxY - delta.y,
     };
-    for (const { id, value } of scene.index.search(originalBounds)) {
-      if (movingKeys.has(id)) visibleTargets.set(id, value);
+    for (const { value } of scene.index.index.search(originalBounds)) {
+      const target = value.geometry;
+      const key = `${target.kind}:${target.id}`;
+      if (movingKeys.has(key)) visibleTargets.set(key, target);
     }
   }
   const orderedTargets = [...visibleTargets.entries()].sort(
@@ -413,90 +426,90 @@ export function hitTestHallScene(
   tolerance = 0,
   allowedKinds?: ReadonlySet<HallTarget['kind']>,
 ): HallTarget | null {
-  const candidates = scene.index.search(
-    expandBounds(pointBounds(point), tolerance),
+  const hit = hitTestScene(
+    scene.index,
+    point,
+    (item, hitPoint, hitTolerance) => {
+      const value = item.geometry;
+      switch (value.kind) {
+        case 'seat': {
+          const seat = scene.seatsById.get(value.id);
+          return Boolean(seat && hitSeatSymbol(seat, hitPoint, hitTolerance));
+        }
+        case 'table': {
+          const table = scene.tablesById.get(value.id);
+          return Boolean(table && isInsideTable(table, hitPoint));
+        }
+        case 'row': {
+          const row = scene.rowsById.get(value.id);
+          return Boolean(
+            row?.points.some((start, index) => {
+              const end = row.points[index + 1];
+              return (
+                end &&
+                distanceToSegment({ start, end }, hitPoint) <=
+                  rowTolerance + hitTolerance
+              );
+            }),
+          );
+        }
+        case 'zone': {
+          const zone = scene.zonesById.get(value.id);
+          return Boolean(
+            zone &&
+            (zone.zone.polygon
+              ? isPointInPolygon(zone.zone.polygon, hitPoint)
+              : hitPoint.x >= zone.bounds.minX &&
+                hitPoint.x <= zone.bounds.maxX &&
+                hitPoint.y >= zone.bounds.minY &&
+                hitPoint.y <= zone.bounds.maxY),
+          );
+        }
+        case 'decoration': {
+          const decoration = scene.decorationsById.get(value.id);
+          return Boolean(
+            decoration &&
+            (decoration.kind === 'label'
+              ? distanceBetweenVectors(decoration.position, hitPoint) <=
+                1.2 + hitTolerance
+              : isPointInPolygon(decoration.polygon, hitPoint)),
+          );
+        }
+      }
+    },
+    {
+      floorId: scene.floorId,
+      tolerance,
+      ...(allowedKinds ? { allowedKinds } : {}),
+      kindPriority: ['seat', 'table', 'row', 'decoration', 'zone'],
+      compareWithinKind: (first, second) => {
+        if (first.kind !== 'seat' || second.kind !== 'seat') return 0;
+        const firstSeat = scene.seatsById.get(first.id);
+        const secondSeat = scene.seatsById.get(second.id);
+        if (!firstSeat || !secondSeat) return 0;
+        return (
+          distanceBetweenVectors(firstSeat.position, point) -
+          distanceBetweenVectors(secondSeat.position, point)
+        );
+      },
+    },
   );
-  const priority = { seat: 0, table: 1, row: 2, decoration: 3, zone: 4 };
-  candidates.sort((first, second) => {
-    const kindOrder = priority[first.value.kind] - priority[second.value.kind];
-    if (
-      kindOrder !== 0 ||
-      first.value.kind !== 'seat' ||
-      second.value.kind !== 'seat'
-    )
-      return kindOrder;
-    const a = scene.seatsById.get(first.value.id);
-    const b = scene.seatsById.get(second.value.id);
-    if (!a || !b) return 0;
-    return (
-      distanceBetweenVectors(a.position, point) -
-      distanceBetweenVectors(b.position, point)
-    );
-  });
-  for (const { value } of candidates) {
-    if (allowedKinds && !allowedKinds.has(value.kind)) continue;
-    switch (value.kind) {
-      case 'seat': {
-        const seat = scene.seatsById.get(value.id);
-        if (seat && hitSeatSymbol(seat, point, tolerance)) return value;
-        break;
-      }
-      case 'table': {
-        const table = scene.tablesById.get(value.id);
-        if (table && isInsideTable(table, point)) return value;
-        break;
-      }
-      case 'row': {
-        const row = scene.rowsById.get(value.id);
-        if (
-          row?.points.some((start, index) => {
-            const end = row.points[index + 1];
-            return (
-              end &&
-              distanceToSegment({ start, end }, point) <=
-                rowTolerance + tolerance
-            );
-          })
-        )
-          return value;
-        break;
-      }
-      case 'zone': {
-        const zone = scene.zonesById.get(value.id);
-        if (
-          zone &&
-          (zone.zone.polygon
-            ? isPointInPolygon(zone.zone.polygon, point)
-            : point.x >= zone.bounds.minX &&
-              point.x <= zone.bounds.maxX &&
-              point.y >= zone.bounds.minY &&
-              point.y <= zone.bounds.maxY)
-        )
-          return value;
-        break;
-      }
-      case 'decoration': {
-        const decoration = scene.decorationsById.get(value.id);
-        if (
-          decoration &&
-          (decoration.kind === 'label'
-            ? distanceBetweenVectors(decoration.position, point) <=
-              1.2 + tolerance
-            : isPointInPolygon(decoration.polygon, point))
-        )
-          return value;
-        break;
-      }
-    }
-  }
-  return null;
+  return hit?.geometry ?? null;
 }
 
 export function targetBounds(
   scene: HallScene,
   target: HallTarget,
 ): SpatialBounds | null {
-  return scene.index.get(`${target.kind}:${target.id}`)?.bounds ?? null;
+  return (
+    scene.index.index.get(
+      sceneItemKey({
+        floorId: scene.floorId,
+        kind: target.kind,
+        id: target.id,
+      }),
+    )?.bounds ?? null
+  );
 }
 
 export function selectionBounds(

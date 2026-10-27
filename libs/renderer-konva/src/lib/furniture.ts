@@ -1,5 +1,10 @@
 import type { Seat } from '@hall-platform/domain';
+import {
+  levelOfDetailForPixels,
+  type SeatLevelOfDetail,
+} from '@hall-platform/renderer-core';
 import type { SpatialBounds, Vector2 } from '@hall-platform/geometry';
+export type { SeatLevelOfDetail } from '@hall-platform/renderer-core';
 
 export type SeatVisualKind = NonNullable<Seat['visualKind']>;
 export type SeatFurniture = Readonly<{
@@ -87,7 +92,6 @@ export function seatSymbolBounds(seat: SeatFurniture): SpatialBounds {
   };
 }
 
-export type SeatLevelOfDetail = 'dot' | 'silhouette' | 'full';
 export function seatSymbolDiameter(kind: SeatVisualKind = 'chair'): number {
   return kind === 'wheelchairBay' ? 1.6 : 1.5;
 }
@@ -101,11 +105,10 @@ export function seatLevelOfDetail(
   kind: SeatVisualKind = 'chair',
 ): SeatLevelOfDetail {
   const projectedDiameter = seatSymbolDiameter(kind) * scale;
-  return projectedDiameter < 6
-    ? 'dot'
-    : projectedDiameter < 22
-      ? 'silhouette'
-      : 'full';
+  return levelOfDetailForPixels(projectedDiameter, {
+    silhouette: 6,
+    full: 22,
+  });
 }
 
 export function shouldShowSeatLabel(

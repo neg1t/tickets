@@ -15,6 +15,9 @@
       "path": "../geometry/tsconfig.lib.json"
     },
     {
+      "path": "../renderer-core/tsconfig.lib.json"
+    },
+    {
       "path": "../domain/tsconfig.lib.json"
     },
     {

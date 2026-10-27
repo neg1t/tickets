@@ -15,6 +15,11 @@ import {
   readHallCanvasPalette,
 } from '@hall-platform/design-tokens';
 import type { SpatialBounds, Vector2 } from '@hall-platform/geometry';
+import {
+  advancePinchViewport,
+  pinchGestureFromPointers,
+  type PinchGesture,
+} from '@hall-platform/renderer-core';
 import type Konva from 'konva';
 import {
   Circle,
@@ -303,7 +308,7 @@ export function HallViewer(props: HallViewerProps) {
   const intentRef = useRef<PointerIntent | null>(null);
   const [renderIntent, setRenderIntent] = useState<PointerIntent | null>(null);
   const pointersRef = useRef(new Map<number, Vector2>());
-  const pinchRef = useRef<{ center: Vector2; distance: number } | null>(null);
+  const pinchRef = useRef<PinchGesture | null>(null);
   const viewportRef = useRef(viewport);
   const dotBatcherRef = useRef<DotSeatBatcher | null>(null);
   dotBatcherRef.current ??= new DotSeatBatcher();
@@ -650,13 +655,8 @@ export function HallViewer(props: HallViewerProps) {
       : null;
   }
 
-  function pinchGesture(): { center: Vector2; distance: number } | null {
-    const [first, second] = [...pointersRef.current.values()];
-    if (!first || !second) return null;
-    return {
-      center: { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 },
-      distance: Math.hypot(first.x - second.x, first.y - second.y),
-    };
+  function pinchGesture(): PinchGesture | null {
+    return pinchGestureFromPointers([...pointersRef.current.values()]);
   }
 
   function handlePointerDown(native: PointerEvent) {
@@ -825,14 +825,10 @@ export function HallViewer(props: HallViewerProps) {
       const previous = pinchRef.current;
       const current = pinchGesture();
       if (previous && current) {
-        const moved = panViewportBy(viewportRef.current, {
-          x: current.center.x - previous.center.x,
-          y: current.center.y - previous.center.y,
-        });
-        const next = zoomViewportAt(
-          moved,
-          current.center,
-          previous.distance > 0 ? current.distance / previous.distance : 1,
+        const next = advancePinchViewport(
+          viewportRef.current,
+          previous,
+          current,
         );
         viewportRef.current = next;
         setViewport(next);
