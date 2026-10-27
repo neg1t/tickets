@@ -31,7 +31,19 @@ test('creates and reopens the 50,000-seat performance hall', async ({
   );
   const createAndOpenMs = performance.now() - createStarted;
   await waitForPaint(page);
-  const initialCanvasNodes = await page.locator('.hall-viewer-canvas').count();
+  const activeFloorSeatCount = Number(
+    await page
+      .locator('.hall-viewer-canvas')
+      .getAttribute('data-floor-seat-count'),
+  );
+  const initialSeatRenderNodes = Number(
+    await page
+      .locator('.hall-viewer-canvas')
+      .getAttribute('data-seat-render-nodes'),
+  );
+  expect(activeFloorSeatCount).toBeGreaterThan(10_000);
+  expect(initialSeatRenderNodes).toBeGreaterThan(0);
+  expect(initialSeatRenderNodes).toBeLessThan(1_000);
 
   await page.getByRole('button', { name: 'К списку залов' }).click();
   const performanceHall = page
@@ -72,10 +84,11 @@ test('creates and reopens the 50,000-seat performance hall', async ({
     buildMode: 'Vite production preview',
     fixture: 'performance-hall-50000',
     seatCount: 50_000,
+    activeFloorSeatCount,
     viewport: { width: 1280, height: 800 },
     createAndOpenMs: Math.round(createAndOpenMs),
     reopenMs: Math.round(reopenMs),
-    initialCanvasNodes,
+    initialSeatRenderNodes,
     panFrameP95Ms: Math.round(percentile(frames, 0.95) * 100) / 100,
     panFrameMaxMs: Math.round(Math.max(...frames) * 100) / 100,
     panFrameSamples: frames.length,

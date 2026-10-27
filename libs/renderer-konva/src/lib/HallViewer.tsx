@@ -30,7 +30,7 @@ import {
 import { HallStage } from './HallStage.js';
 import { SeatLabel } from './FurnitureSymbols.js';
 import { seatLevelOfDetail, visibleSeatLabelIds } from './furniture.js';
-import { groupDotSeats, type DotSeatBatch } from './seatBatches.js';
+import { DotSeatBatcher, type DotSeatBatch } from './seatBatches.js';
 import { ObjectRenderer } from './ObjectRenderer.js';
 import { SelectionOverlay } from './SelectionOverlay.js';
 import {
@@ -149,23 +149,14 @@ const DotSeatBatchShape = memo(function DotSeatBatchShape({
   useLayoutEffect(() => {
     const shape = ref.current;
     if (!shape || batch.seats.length === 0) return;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const seat of batch.seats) {
-      minX = Math.min(minX, seat.position.x);
-      minY = Math.min(minY, seat.position.y);
-      maxX = Math.max(maxX, seat.position.x);
-      maxY = Math.max(maxY, seat.position.y);
-    }
-    const cachePixels = (maxX - minX + 2) * (maxY - minY + 2) * 4;
-    if (batch.seats.length < 100 || cachePixels > 8_000_000) return;
+    const { minX, minY, maxX, maxY } = batch.bounds;
+    const cachePixels = (maxX - minX + 1) * (maxY - minY + 1) * 4;
+    if (batch.seats.length < 16 || cachePixels > 8_000_000) return;
     shape.cache({
-      x: minX - 1,
-      y: minY - 1,
-      width: maxX - minX + 2,
-      height: maxY - minY + 2,
+      x: minX - 0.5,
+      y: minY - 0.5,
+      width: maxX - minX + 1,
+      height: maxY - minY + 1,
       pixelRatio: 2,
     });
     shape.getLayer()?.batchDraw();
@@ -314,6 +305,8 @@ export function HallViewer(props: HallViewerProps) {
   const pointersRef = useRef(new Map<number, Vector2>());
   const pinchRef = useRef<{ center: Vector2; distance: number } | null>(null);
   const viewportRef = useRef(viewport);
+  const dotBatcherRef = useRef<DotSeatBatcher | null>(null);
+  dotBatcherRef.current ??= new DotSeatBatcher();
   useEffect(() => {
     viewportRef.current = viewport;
   }, [viewport]);
@@ -574,23 +567,37 @@ export function HallViewer(props: HallViewerProps) {
     }
     return scene.seats.length ? (maxX - minX + 2) * (maxY - minY + 2) * 4 : 0;
   }, [scene.seats]);
-  const dotSeatSource =
-    dotCachePixels <= 8_000_000 ? scene.seats : rendered.seats;
   const dotBatches = useMemo(() => {
     if (!showSeats || movingKeys.size > 0) return null;
-    return groupDotSeats(
-      dotSeatSource,
+    const visibleBounds =
+      dotCachePixels > 8_000_000
+        ? {
+            minX: visibleWorld.minX - margin,
+            minY: visibleWorld.minY - margin,
+            maxX: visibleWorld.maxX + margin,
+            maxY: visibleWorld.maxY + margin,
+          }
+        : undefined;
+    return dotBatcherRef.current?.build(
+      scene.seats,
       viewport.scale,
       seatAppearance ?? emptySeatAppearance,
       palette.seat,
+      visibleBounds,
     );
   }, [
     showSeats,
     movingKeys.size,
-    dotSeatSource,
+    scene.seats,
     viewport.scale,
     seatAppearance,
     palette.seat,
+    dotCachePixels,
+    visibleWorld.minX,
+    visibleWorld.minY,
+    visibleWorld.maxX,
+    visibleWorld.maxY,
+    margin,
   ]);
 
   function handleFit() {
@@ -684,12 +691,7 @@ export function HallViewer(props: HallViewerProps) {
             (native.pointerType === 'touch' ? 14 : 8) / viewport.scale,
           )
         : null;
-    const exactTarget = hitTestHallScene(
-      scene,
-      world,
-      0,
-      hitTestKinds,
-    );
+    const exactTarget = hitTestHallScene(scene, world, 0, hitTestKinds);
     const clickedSeat =
       exactTarget?.kind === 'seat' ? scene.seatsById.get(exactTarget.id) : null;
     const clickedSeatRowId =
@@ -1064,10 +1066,10 @@ export function HallViewer(props: HallViewerProps) {
         });
     }
     if (dotBatches) {
-      for (const [index, batch] of dotBatches.entries())
+      for (const batch of dotBatches)
         nodes.push({
-          key: `dots:${index}`,
-          node: <DotSeatBatchShape key={`dots:${index}`} batch={batch} />,
+          key: `dots:${batch.key}`,
+          node: <DotSeatBatchShape key={`dots:${batch.key}`} batch={batch} />,
         });
     } else if (showSeats) {
       for (const seat of rendered.seats)
@@ -1275,6 +1277,10 @@ export function HallViewer(props: HallViewerProps) {
         }}
         data-visible-seats={showSeats}
         data-preview-seats={previewSeats.length}
+        data-floor-seat-count={scene.seats.length}
+        data-seat-render-nodes={
+          dotBatches?.length ?? (showSeats ? rendered.seats.length : 0)
+        }
         data-viewport-x={viewport.x}
         data-viewport-y={viewport.y}
         data-viewport-scale={viewport.scale}
