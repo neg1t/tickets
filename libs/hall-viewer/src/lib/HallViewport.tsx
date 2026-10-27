@@ -20,6 +20,7 @@ import {
   type HallViewerProps,
 } from '@hall-platform/renderer-konva';
 import {
+  createSceneForRenderer,
   selectRendererEngine,
   type RendererPreference,
 } from './rendererSelection.js';
@@ -85,24 +86,26 @@ export function HallViewport(props: HallViewportProps) {
   const webglReady = engine === 'webgl' && webglReadyKey === rendererKey;
   const seatScene = useMemo(
     () =>
-      createSeatScene(
-        1,
-        snapshot.seats
-          .filter((seat) => seat.floorId === floorId)
-          .map((seat) => ({
-            id: seat.id,
-            floorId: seat.floorId,
-            position: seat.position,
-            ...(seat.rotationRadians !== undefined
-              ? { rotationRadians: seat.rotationRadians }
-              : {}),
-            ...(seat.visualKind !== undefined
-              ? { visualKind: seat.visualKind }
-              : {}),
-          })),
-        floorId,
+      createSceneForRenderer(engine, () =>
+        createSeatScene(
+          1,
+          snapshot.seats
+            .filter((seat) => seat.floorId === floorId)
+            .map((seat) => ({
+              id: seat.id,
+              floorId: seat.floorId,
+              position: seat.position,
+              ...(seat.rotationRadians !== undefined
+                ? { rotationRadians: seat.rotationRadians }
+                : {}),
+              ...(seat.visualKind !== undefined
+                ? { visualKind: seat.visualKind }
+                : {}),
+            })),
+          floorId,
+        ),
       ),
-    [snapshot.seats, floorId],
+    [snapshot.seats, floorId, engine],
   );
   const effectiveSeatUpdates = useMemo(() => {
     const updates: readonly RendererSeatUpdate[] =
@@ -185,7 +188,7 @@ export function HallViewport(props: HallViewportProps) {
     setWebglReadyKey(rendererKey);
   }, [rendererKey]);
   const rendererLayer =
-    engine === 'webgl' && viewport ? (
+    engine === 'webgl' && viewport && seatScene ? (
       <WebGLErrorBoundary key={renderer} onError={handleWebGLError}>
         <Suspense fallback={null}>
           <LazyWebGLHallCanvas
