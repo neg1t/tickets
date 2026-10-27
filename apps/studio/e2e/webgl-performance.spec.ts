@@ -25,6 +25,14 @@ test('WebGL culls offscreen instances at 50,000 and 100,000 seats', async ({
     expect(result.metrics.drawCalls).toBeGreaterThan(0);
     expect(result.metrics.visibleInstances).toBeGreaterThan(0);
     expect(result.metrics.visibleInstances).toBeLessThan(seatCount);
+    expect(result.metrics.singleStatusBytes).toBe(
+      Float32Array.BYTES_PER_ELEMENT,
+    );
+    expect(result.metrics.singleStatusCalls).toBe(1);
+    expect(result.metrics.bulkStatusBytes).toBeLessThanOrEqual(
+      seatCount * Float32Array.BYTES_PER_ELEMENT,
+    );
+    expect(result.metrics.bulkStatusCalls).toBeLessThanOrEqual(1);
     await test.info().attach(`webgl-${seatCount}-metrics.json`, {
       body: JSON.stringify(result.metrics, null, 2),
       contentType: 'application/json',

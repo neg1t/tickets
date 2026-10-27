@@ -17,6 +17,11 @@ type WebGLBenchmarkMetrics = Readonly<{
   firstFrameMs: number;
   drawCalls: number;
   visibleInstances: number;
+  singleStatusBytes: number;
+  singleStatusCalls: number;
+  bulkStatusBytes: number;
+  bulkStatusCalls: number;
+  bulkStatusCpuMs: number;
   renderer: string;
 }>;
 
@@ -98,12 +103,24 @@ export async function mountWebGLPerformanceHarness(
 
   let drawCalls = 0;
   let visibleInstances = 0;
+  let bufferSubDataBytes = 0;
+  let bufferSubDataCalls = 0;
   const drawArraysInstanced = gl.drawArraysInstanced.bind(gl);
+  const bufferSubData = gl.bufferSubData.bind(gl);
   gl.drawArraysInstanced = (mode, first, vertexCount, instanceCount) => {
     drawCalls += 1;
     visibleInstances += instanceCount;
     drawArraysInstanced(mode, first, vertexCount, instanceCount);
   };
+  gl.bufferSubData = ((target: number, offset: number, data: BufferSource) => {
+    bufferSubDataCalls += 1;
+    bufferSubDataBytes += ArrayBuffer.isView(data)
+      ? data.byteLength
+      : data instanceof ArrayBuffer
+        ? data.byteLength
+        : 0;
+    bufferSubData(target, offset, data);
+  }) as typeof gl.bufferSubData;
 
   const fixtureStarted = performance.now();
   const seats = Array.from({ length: seatCount }, (_, index) => ({
@@ -131,15 +148,44 @@ export async function mountWebGLPerformanceHarness(
   const rendererSetupMs = performance.now() - rendererStarted;
   const firstFrameStarted = performance.now();
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  const firstFrameMs =
+    Math.round((performance.now() - firstFrameStarted) * 100) / 100;
+  const drawCallsAtFirstFrame = drawCalls;
+  const visibleInstancesAtFirstFrame = visibleInstances;
+
+  const singleBytesBefore = bufferSubDataBytes;
+  const singleCallsBefore = bufferSubDataCalls;
+  renderer.updateSeats([{ id: 'webgl-bench-0', status: 'sold' }]);
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  const singleStatusBytes = bufferSubDataBytes - singleBytesBefore;
+  const singleStatusCalls = bufferSubDataCalls - singleCallsBefore;
+
+  const alternatingUpdates = seats.map(({ id }, index) => ({
+    id,
+    status: index % 2 === 0 ? 'sold' : 'available',
+  }));
+  const bulkBytesBefore = bufferSubDataBytes;
+  const bulkCallsBefore = bufferSubDataCalls;
+  const bulkStarted = performance.now();
+  renderer.updateSeats(alternatingUpdates);
+  const bulkStatusCpuMs =
+    Math.round((performance.now() - bulkStarted) * 100) / 100;
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  const bulkStatusBytes = bufferSubDataBytes - bulkBytesBefore;
+  const bulkStatusCalls = bufferSubDataCalls - bulkCallsBefore;
   const metrics: WebGLBenchmarkMetrics = {
     seatCount,
     fixtureMs: Math.round(fixtureMs * 100) / 100,
     sceneBuildMs: Math.round(sceneBuildMs * 100) / 100,
     rendererSetupMs: Math.round(rendererSetupMs * 100) / 100,
-    firstFrameMs:
-      Math.round((performance.now() - firstFrameStarted) * 100) / 100,
-    drawCalls,
-    visibleInstances,
+    firstFrameMs,
+    drawCalls: drawCallsAtFirstFrame,
+    visibleInstances: visibleInstancesAtFirstFrame,
+    singleStatusBytes,
+    singleStatusCalls,
+    bulkStatusBytes,
+    bulkStatusCalls,
+    bulkStatusCpuMs,
     renderer: rendererName,
   };
   const testWindow = window as WebGLTestWindow;

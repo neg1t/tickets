@@ -50,6 +50,24 @@ describe('WebGL seat instance buffers', () => {
     expect(ranges).toEqual([{ start: 0, count: 2 }]);
   });
 
+  it('coalesces alternating status updates to avoid one GPU call per seat', () => {
+    const alternatingSeats = Array.from({ length: 100 }, (_, index) => ({
+      id: `seat-${index}`,
+      position: { x: index * 2, y: 0 },
+    }));
+    const buffers = createSeatBuffers(alternatingSeats);
+
+    const ranges = updateSeatStatuses(
+      buffers,
+      alternatingSeats
+        .filter((_, index) => index % 2 === 0)
+        .map(({ id }) => ({ id, status: 'sold' })),
+    );
+
+    expect(ranges).toEqual([{ start: 0, count: 99 }]);
+    expect(ranges.length).toBeLessThan(100);
+  });
+
   it('changes only the selected instances', () => {
     const buffers = createSeatBuffers(seats);
 

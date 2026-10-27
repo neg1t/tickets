@@ -36,14 +36,17 @@ function statusCode(status: string): number {
   return statusCodes[status] ?? statusCodes.unavailable ?? 4;
 }
 
-function rangesForIndices(indices: readonly number[]): BufferRange[] {
+function rangesForIndices(
+  indices: readonly number[],
+  mergeGap = 0,
+): BufferRange[] {
   if (indices.length === 0) return [];
   const sorted = [...new Set(indices)].sort((first, second) => first - second);
   const ranges: BufferRange[] = [];
   let start = sorted[0] ?? 0;
   let previous = start;
   for (const index of sorted.slice(1)) {
-    if (index === previous + 1) {
+    if (index - previous <= mergeGap + 1) {
       previous = index;
       continue;
     }
@@ -110,7 +113,7 @@ export function updateSeatStatuses(
     buffers.statuses[index] = next;
     changed.push(index);
   }
-  return rangesForIndices(changed);
+  return rangesForIndices(changed, 1);
 }
 
 export function updateSeatSelection(
