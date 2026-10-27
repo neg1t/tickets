@@ -908,7 +908,11 @@ export function HallViewer(props: HallViewerProps) {
       handleSelection([intentRef.current.target]);
       intentRef.current.selectionReady = true;
     }
-    if (next?.dragging && intentRef.current?.mode === 'pan') {
+    const intent = intentRef.current;
+    const panPickDrag =
+      interactionMode === 'pick' && intent?.mode === 'pick';
+    const shouldPan = intent?.mode === 'pan' || panPickDrag;
+    if (next?.dragging && shouldPan) {
       const moved = panViewportBy(viewportRef.current, {
         x: point.x - previous.x,
         y: point.y - previous.y,
