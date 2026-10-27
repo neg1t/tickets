@@ -6,6 +6,8 @@ import {
 import { WebGLHallRenderer } from './WebGLHallRenderer.js';
 
 let frames: FrameRequestCallback[];
+let documentHidden: boolean;
+let mockDocument: Document;
 
 function fakeContext(): WebGL2RenderingContext {
   const locations = new Map<string, number>();
@@ -91,11 +93,13 @@ function seatScene() {
 describe('WebGL hall renderer contract', () => {
   beforeEach(() => {
     frames = [];
-    vi.stubGlobal('document', {
-      hidden: false,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
+    documentHidden = false;
+    mockDocument = new EventTarget() as Document;
+    Object.defineProperty(mockDocument, 'hidden', {
+      configurable: true,
+      get: () => documentHidden,
     });
+    vi.stubGlobal('document', mockDocument);
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       frames.push(callback);
       return frames.length;
@@ -211,6 +215,31 @@ describe('WebGL hall renderer contract', () => {
       [10, 20],
       [0, 0],
     ]);
+    renderer.dispose();
+  });
+
+  it('pauses pending frames in the background and resumes on return', () => {
+    const gl = fakeContext();
+    const target = Object.assign(new EventTarget(), {
+      width: 0,
+      height: 0,
+      getContext: vi.fn(() => gl),
+    }) as unknown as HTMLCanvasElement;
+    const renderer = new WebGLHallRenderer(target);
+    renderer.setScene(seatScene());
+    expect(frames).toHaveLength(1);
+
+    documentHidden = true;
+    mockDocument.dispatchEvent(new Event('visibilitychange'));
+    renderer.setViewport({ x: 5, y: 10, scale: 2 });
+
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(1);
+    expect(frames).toHaveLength(1);
+
+    documentHidden = false;
+    mockDocument.dispatchEvent(new Event('visibilitychange'));
+
+    expect(frames).toHaveLength(2);
     renderer.dispose();
   });
 });

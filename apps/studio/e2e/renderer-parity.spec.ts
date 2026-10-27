@@ -33,8 +33,9 @@ test('forced WebGL replaces only the seat layer and preserves CPU picking', asyn
   await expect
     .poll(() =>
       page.evaluate(
-        () => (window as Window & { __hallRendererMode?: string })
-          .__hallRendererMode,
+        () =>
+          (window as Window & { __hallRendererMode?: string })
+            .__hallRendererMode,
       ),
     )
     .toBe('webgl');
@@ -93,6 +94,52 @@ test('forced WebGL replaces only the seat layer and preserves CPU picking', asyn
       ),
     )
     .toMatchObject({ kind: 'seat' });
+});
+
+test('resizes WebGL and Konva surfaces together when the viewport changes', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.evaluate(async () => {
+    const harness = await import('/src/e2e/hallViewportHarness.ts');
+    harness.mountHallViewportHarness(document.body, 'webgl');
+  });
+  const container = page.locator('.hall-viewer-canvas');
+  await expect(page.locator('canvas[data-renderer="webgl2"]')).toBeVisible();
+  await expect(container).toHaveAttribute('data-seat-renderer', 'external');
+
+  await container.evaluate((element) => {
+    element.style.width = '620px';
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const viewer = document.querySelector<HTMLElement>(
+          '.hall-viewer-canvas',
+        );
+        const webgl = document.querySelector<HTMLCanvasElement>(
+          'canvas[data-renderer="webgl2"]',
+        );
+        const labels = document.querySelector<HTMLCanvasElement>(
+          'canvas[data-renderer="seat-labels"]',
+        );
+        const stage = document.querySelector<HTMLCanvasElement>(
+          '#renderer-parity-stage canvas',
+        );
+        const overlays = document.querySelector<HTMLCanvasElement>(
+          '#renderer-parity-stage-overlays canvas',
+        );
+        if (!viewer || !webgl || !labels || !stage || !overlays) return null;
+        return [
+          viewer.clientWidth,
+          webgl.width,
+          labels.width,
+          stage.width,
+          overlays.width,
+        ];
+      }),
+    )
+    .toEqual([620, 620, 620, 620, 620]);
 });
 
 test('editor drag previews move WebGL seat buffers and commit once on release', async ({
