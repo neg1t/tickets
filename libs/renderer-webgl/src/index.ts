@@ -5,4 +5,5 @@ export * from './lib/contextLifecycle.js';
 export * from './lib/resourceManager.js';
 export * from './lib/seatBuffers.js';
 export * from './lib/seatHitTest.js';
+export * from './lib/seatLabels.js';
 export * from './lib/seatShaders.js';

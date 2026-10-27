@@ -72,6 +72,13 @@ function seatScene() {
       geometry: { position: { x: 0, y: 0 } },
     },
     {
+      id: 'seat-offscreen',
+      floorId: 'main',
+      kind: 'seat',
+      bounds: { minX: 999.2, minY: -0.8, maxX: 1000.8, maxY: 0.8 },
+      geometry: { position: { x: 1000, y: 0 } },
+    },
+    {
       id: 'seat-b',
       floorId: 'main',
       kind: 'seat',
@@ -120,7 +127,7 @@ describe('WebGL hall renderer contract', () => {
     expect(gl.bufferSubData).toHaveBeenNthCalledWith(
       1,
       gl.ARRAY_BUFFER,
-      Float32Array.BYTES_PER_ELEMENT,
+      2 * Float32Array.BYTES_PER_ELEMENT,
       new Float32Array([2]),
     );
     expect(gl.bufferSubData).toHaveBeenNthCalledWith(
@@ -130,7 +137,29 @@ describe('WebGL hall renderer contract', () => {
       new Float32Array([1]),
     );
     expect(gl.bufferData).toHaveBeenCalledTimes(fullUploadsBeforeUpdates);
-    expect(gl.drawArraysInstanced).toHaveBeenCalledWith(gl.TRIANGLES, 0, 6, 2);
+    expect(gl.drawArraysInstanced).toHaveBeenCalledTimes(2);
+    expect(gl.drawArraysInstanced).toHaveBeenNthCalledWith(
+      1,
+      gl.TRIANGLES,
+      0,
+      6,
+      1,
+    );
+    expect(gl.drawArraysInstanced).toHaveBeenNthCalledWith(
+      2,
+      gl.TRIANGLES,
+      0,
+      6,
+      1,
+    );
+    expect(gl.vertexAttribPointer).toHaveBeenCalledWith(
+      4,
+      1,
+      gl.FLOAT,
+      false,
+      0,
+      2 * Float32Array.BYTES_PER_ELEMENT,
+    );
 
     renderer.dispose();
   });

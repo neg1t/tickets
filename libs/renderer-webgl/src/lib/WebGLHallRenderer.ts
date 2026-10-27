@@ -1,4 +1,5 @@
 import type { Vector2 } from '@hall-platform/geometry';
+import { SpatialIndex, type SpatialBounds } from '@hall-platform/geometry';
 import {
   screenToWorld,
   type RendererContract,
@@ -7,6 +8,7 @@ import {
   type RendererSeatGeometry,
   type RendererSeatUpdate,
   type RendererTargetRef,
+  type SceneItem,
   type Viewport,
 } from '@hall-platform/renderer-core';
 import { canvasPixelSize } from './canvasSize.js';
@@ -16,6 +18,7 @@ import {
   createSeatBuffers,
   updateSeatSelection,
   updateSeatStatuses,
+  type BufferRange,
   type SeatBuffers,
 } from './seatBuffers.js';
 import { seatFragmentShader, seatVertexShader } from './seatShaders.js';
@@ -32,6 +35,15 @@ type Uniforms = Readonly<{
   viewport: WebGLUniformLocation | null;
 }>;
 
+type AttributeBinding = Readonly<{
+  location: number;
+  bufferName: string;
+  size: number;
+  divisor: number;
+}>;
+
+const renderBlockSize = 64;
+
 const cornerVertices = new Float32Array([
   -1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1,
 ]);
@@ -41,7 +53,11 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
   private readonly resources = new WebGLResourceManager();
   private readonly stylesById = new Map<string, RendererSeatUpdate>();
   private scene: RendererScene<RendererSeatGeometry> | null = null;
+  private readonly renderIndex = new SpatialIndex<
+    SceneItem<RendererSeatGeometry>
+  >(renderBlockSize);
   private buffers: SeatBuffers = createSeatBuffers([]);
+  private readonly attributes = new Map<string, AttributeBinding>();
   private viewport: Viewport = { x: 0, y: 0, scale: 1 };
   private width = 1;
   private height = 1;
@@ -79,13 +95,15 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
   setScene(scene: RendererScene<RendererSeatGeometry>): void {
     if (this.disposed) return;
     this.scene = scene;
-    const seats = scene.items
-      .filter(
-        (item) =>
-          item.kind === 'seat' &&
-          (!scene.floorId || item.floorId === scene.floorId),
-      )
-      .map((item) => ({ id: item.id, ...item.geometry }));
+    this.renderIndex.clear();
+    const seatItems = scene.items.filter(
+      (item) =>
+        item.kind === 'seat' &&
+        (!scene.floorId || item.floorId === scene.floorId),
+    );
+    for (const item of seatItems)
+      this.renderIndex.upsert(item.id, item.bounds, item);
+    const seats = seatItems.map((item) => ({ id: item.id, ...item.geometry }));
     const nextSeatIds = new Set(seats.map(({ id }) => id));
     for (const id of this.stylesById.keys())
       if (!nextSeatIds.has(id)) this.stylesById.delete(id);
@@ -180,6 +198,8 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     this.resources.dispose(this.gl);
     this.eventHandler = null;
     this.scene = null;
+    this.renderIndex.clear();
+    this.attributes.clear();
     this.stylesById.clear();
   }
 
@@ -284,6 +304,7 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     this.gl.enableVertexAttribArray(location);
     this.gl.vertexAttribPointer(location, size, this.gl.FLOAT, false, 0, 0);
     this.gl.vertexAttribDivisor(location, divisor);
+    this.attributes.set(name, { location, bufferName, size, divisor });
   }
 
   private uploadRanges(
@@ -336,13 +357,62 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
         this.viewport.y * this.pixelRatio,
         this.viewport.scale * this.pixelRatio,
       );
-    if (this.buffers.ids.length > 0)
-      this.gl.drawArraysInstanced(
-        this.gl.TRIANGLES,
+    for (const range of this.visibleSeatRanges()) {
+      this.bindInstanceAttributesAt(range.start);
+      this.gl.drawArraysInstanced(this.gl.TRIANGLES, 0, 6, range.count);
+    }
+  }
+
+  private visibleSeatRanges(): BufferRange[] {
+    if (!this.scene || this.buffers.ids.length === 0) return [];
+    const scale = Math.max(0.0001, this.viewport.scale);
+    const bounds: SpatialBounds = {
+      minX: -this.viewport.x / scale,
+      minY: -this.viewport.y / scale,
+      maxX: (this.width - this.viewport.x) / scale,
+      maxY: (this.height - this.viewport.y) / scale,
+    };
+    const indexes: number[] = [];
+    for (const entry of this.renderIndex.search(bounds)) {
+      const index = this.buffers.indexById.get(entry.value.id);
+      if (index !== undefined) indexes.push(index);
+    }
+    if (indexes.length === 0) return [];
+    if (indexes.length === this.buffers.ids.length)
+      return [{ start: 0, count: indexes.length }];
+
+    indexes.sort((first, second) => first - second);
+    const ranges: BufferRange[] = [];
+    let start = indexes[0] ?? 0;
+    let previous = start;
+    for (const index of indexes.slice(1)) {
+      if (index === previous + 1) {
+        previous = index;
+        continue;
+      }
+      ranges.push({ start, count: previous - start + 1 });
+      start = index;
+      previous = index;
+    }
+    ranges.push({ start, count: previous - start + 1 });
+    return ranges;
+  }
+
+  private bindInstanceAttributesAt(instanceIndex: number): void {
+    for (const binding of this.attributes.values()) {
+      if (binding.divisor === 0) continue;
+      const buffer = this.resources.buffer(binding.bufferName);
+      if (!buffer) continue;
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
+      this.gl.vertexAttribPointer(
+        binding.location,
+        binding.size,
+        this.gl.FLOAT,
+        false,
         0,
-        6,
-        this.buffers.ids.length,
+        instanceIndex * binding.size * Float32Array.BYTES_PER_ELEMENT,
       );
+    }
   }
 
   private handleContextLost(): void {

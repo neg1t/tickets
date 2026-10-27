@@ -96,3 +96,38 @@ test('WebGL renderer draws seats, updates styles, and dispatches CPU picks', asy
     target: { id: 'webgl-seat-center' },
   });
 });
+
+test('WebGL canvas keeps seat labels on a visible-area 2D overlay', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.evaluate(async () => {
+    const harness = await import('/src/e2e/webglHarness.ts');
+    harness.mountWebGLLabelsHarness(document.body);
+  });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+
+  const labelPixelCount = await page.evaluate(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>(
+      'canvas[data-renderer="seat-labels"]',
+    );
+    const context = canvas?.getContext('2d');
+    if (!canvas || !context) throw new Error('Missing seat label canvas');
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let count = 0;
+    for (let alpha = 3; alpha < pixels.length; alpha += 4)
+      if ((pixels[alpha] ?? 0) > 0) count += 1;
+    return count;
+  });
+
+  expect(labelPixelCount).toBeGreaterThan(0);
+  await page.evaluate(async () => {
+    const harness = await import('/src/e2e/webglHarness.ts');
+    harness.unmountWebGLLabelsHarness(document.body);
+  });
+});
