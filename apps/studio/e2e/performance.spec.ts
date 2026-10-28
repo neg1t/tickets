@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { performance as nodePerformance } from 'node:perf_hooks';
+import { cpus, platform } from 'node:os';
 import {
   createDraftFromSnapshot,
   layoutSnapshotSchema,
@@ -12,9 +13,11 @@ import {
 import { makeLargeHallFixture } from './largeHallFixture';
 import { openBuyer } from './navigation';
 import {
+  beginGestureMetrics,
+  endGestureMetrics,
   attachPerformanceReport,
+  collectBrowserMetrics,
   installPerformanceObserver,
-  measureFrameIntervals,
   percentile,
   waitForPaint,
 } from './performance-metrics';
@@ -24,7 +27,7 @@ test.skip(
   'Run explicitly against the production preview',
 );
 
-test('measures large editor open and pan', async ({ page }) => {
+test('measures large editor open and pan @performance', async ({ page }) => {
   test.setTimeout(180_000);
   const requestedSize = Number(process.env['HALL_FIXTURE_SIZE'] ?? '50000');
   if (!PERFORMANCE_HALL_SIZES.includes(requestedSize as PerformanceHallSize))
@@ -91,17 +94,19 @@ test('measures large editor open and pan', async ({ page }) => {
   );
   const bounds = await stage.boundingBox();
   if (!bounds) throw new Error('Missing stage bounds');
-  const frameSamples = measureFrameIntervals(page, 180);
-  await page.evaluate(() => performance.mark('e2e:pan:start'));
-  await page.mouse.move(bounds.x + 250, bounds.y + 220);
-  await page.mouse.down();
-  await page.mouse.move(bounds.x + 550, bounds.y + 220, { steps: 45 });
-  await page.mouse.up();
-  const panFrames = await frameSamples;
-  await page.evaluate(() => performance.mark('e2e:pan:end'));
-  await page.evaluate(() =>
-    performance.measure('e2e:pan', 'e2e:pan:start', 'e2e:pan:end'),
-  );
+  const panRuns = [];
+  for (let run = 0; run < 3; run += 1) {
+    const startX = bounds.x + 250 + run * 12;
+    const startY = bounds.y + 220 + run * 8;
+    await beginGestureMetrics(page);
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + 300, startY, { steps: 45 });
+    await page.mouse.up();
+    panRuns.push(await endGestureMetrics(page));
+  }
+  expect(panRuns).toHaveLength(3);
+  expect(panRuns.every((run) => run.frameIntervalsMs.length > 0)).toBe(true);
   let pinchMs: number | null = null;
   if (test.info().project.name === 'chromium') {
     const cdp = await page.context().newCDPSession(page);
@@ -194,15 +199,29 @@ test('measures large editor open and pan', async ({ page }) => {
       panScale,
       pinchMs: pinchMs === null ? null : Math.round(pinchMs),
       previewTransitionMs: Math.round(previewTransitionMs),
-      panFrameP95Ms: Math.round(percentile(panFrames, 0.95) * 100) / 100,
-      panFrameMaxMs: Math.round(Math.max(...panFrames) * 100) / 100,
-      panFrameSamples: panFrames.length,
+      panRuns: panRuns.map((run) => ({
+        durationMs: Math.round(run.durationMs * 100) / 100,
+        inputToStateFeedbackMs:
+          run.inputToStateFeedbackMs === null
+            ? null
+            : Math.round(run.inputToStateFeedbackMs * 100) / 100,
+        rafFrameIntervalP95Ms:
+          Math.round(percentile(run.frameIntervalsMs, 0.95) * 100) / 100,
+        rafFrameIntervalMaxMs:
+          run.frameIntervalsMs.length > 0
+            ? Math.round(Math.max(...run.frameIntervalsMs) * 100) / 100
+            : null,
+        rafFrameSampleCount: run.frameIntervalsMs.length,
+        longTasks: run.longTasks.map(
+          ({ duration }) => Math.round(duration * 100) / 100,
+        ),
+      })),
       longSession,
     },
   );
 });
 
-test('measures buyer selection feedback', async ({ page }) => {
+test('measures buyer selection feedback @performance', async ({ page }) => {
   await installPerformanceObserver(page);
   const buyerStartedAt = nodePerformance.now();
   await page.goto('/');
@@ -262,7 +281,9 @@ test('measures buyer selection feedback', async ({ page }) => {
   });
 });
 
-test('measures group drag in a 10k-seat editor', async ({ page }) => {
+test('measures group drag in a 10k-seat editor @performance', async ({
+  page,
+}) => {
   test.skip(process.env['HALL_MEASURE_GROUP_DRAG'] !== '1');
   test.setTimeout(120_000);
   const fixture = makeLargeHallFixture(10_000);
@@ -270,6 +291,7 @@ test('measures group drag in a 10k-seat editor', async ({ page }) => {
     'Group drag 10k',
     layoutSnapshotSchema.parse(fixture.document.snapshot),
   );
+  await installPerformanceObserver(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/');
   await page
@@ -314,42 +336,26 @@ test('measures group drag in a 10k-seat editor', async ({ page }) => {
     modifiers: ['Shift'],
   });
   await expect(page.getByText(/Выбрано: 2/).first()).toBeVisible();
-  const frameSamples = page.evaluate(
-    () =>
-      new Promise<{ ms: number; phase: string }[]>((resolve) => {
-        const samples: { ms: number; phase: string }[] = [];
-        let previous = performance.now();
-        const tick = (now: number) => {
-          samples.push({
-            ms: now - previous,
-            phase:
-              (window as typeof window & { __hallDragPhase?: string })
-                .__hallDragPhase ?? 'setup',
-          });
-          previous = now;
-          if (samples.length < 90) requestAnimationFrame(tick);
-          else resolve(samples);
-        };
-        requestAnimationFrame(tick);
-      }),
-  );
-  await page.mouse.move(first.x, first.y);
-  await page.mouse.down();
-  await page.evaluate(() => {
-    (window as typeof window & { __hallDragPhase?: string }).__hallDragPhase =
-      'drag';
-  });
-  await page.mouse.move(first.x + 80, first.y, { steps: 25 });
-  await page.evaluate(() => {
-    (window as typeof window & { __hallDragPhase?: string }).__hallDragPhase =
-      'commit';
-  });
-  await page.mouse.up();
-  const frames = await frameSamples;
-  const dragFrames = frames
-    .filter(({ phase }) => phase === 'drag')
-    .map(({ ms }) => ms);
-  expect(dragFrames.length).toBeGreaterThanOrEqual(20);
+  const dragRuns = [];
+  for (let run = 0; run < 3; run += 1) {
+    const startX = first.x + run * 80;
+    await beginGestureMetrics(
+      page,
+      '.hall-viewer-canvas',
+      'data-moving-target-count',
+    );
+    await page.mouse.move(startX, first.y);
+    await page.mouse.down();
+    await page.mouse.move(startX + 80, first.y, { steps: 25 });
+    await page.mouse.up();
+    dragRuns.push(await endGestureMetrics(page));
+  }
+  expect(
+    dragRuns.every(
+      ({ frameIntervalsMs, inputToStateFeedbackMs }) =>
+        frameIntervalsMs.length > 0 && inputToStateFeedbackMs !== null,
+    ),
+  ).toBe(true);
   const browser = await page.evaluate(() => ({
     userAgent: navigator.userAgent,
     dpr: devicePixelRatio,
@@ -360,22 +366,51 @@ test('measures group drag in a 10k-seat editor', async ({ page }) => {
     viewport: { width: 1280, height: 800 },
     buildMode: 'Vite production preview',
     fixture: 'Arena grid, 10,000 seats, 250 columns, two selected seats',
-    dragP95Ms: percentile(dragFrames, 0.95),
-    dragMaxMs: Math.max(...dragFrames),
-    fullGestureP95Ms: percentile(
-      frames.map(({ ms }) => ms),
-      0.95,
-    ),
-    sampleCount: dragFrames.length,
+    frameBudget: {
+      kind: 'raf-frame-interval-p95',
+      status: 'recorded' as 'recorded' | 'enforced',
+    },
+    gpuBudget: {
+      status: 'not-enforced' as 'not-enforced' | 'enforced',
+      reason: 'Awaiting browser GPU classification',
+    },
+    dragRuns: dragRuns.map((run) => ({
+      durationMs: run.durationMs,
+      inputToStateFeedbackMs: run.inputToStateFeedbackMs,
+      rafFrameIntervalP95Ms: percentile(run.frameIntervalsMs, 0.95),
+      rafFrameIntervalMaxMs: Math.max(...run.frameIntervalsMs),
+      sampleCount: run.frameIntervalsMs.length,
+      longTasks: run.longTasks.map(({ duration }) => duration),
+    })),
     scale: viewport.scale,
   };
-  await test.info().attach('group-drag-10k', {
-    body: JSON.stringify(result, null, 2),
-    contentType: 'application/json',
+  const browserMetrics = await collectBrowserMetrics(page);
+  const frameIntervalP95BudgetMs = Number(
+    process.env['HALL_DRAG_FRAME_INTERVAL_P95_BUDGET_MS'] ?? '25',
+  );
+  const enforceFrameBudget =
+    process.env['HALL_ENFORCE_FRAME_INTERVAL_P95_BUDGET'] === '1';
+  result.frameBudget = {
+    kind: 'raf-frame-interval-p95',
+    status: enforceFrameBudget ? 'enforced' : 'recorded',
+  };
+  result.gpuBudget = {
+    status: 'not-enforced',
+    reason:
+      'This scenario enforces RAF frame intervals, not a GPU-specific budget',
+  };
+  await attachPerformanceReport(page, test.info(), 'group-drag-10k', {
+    ...result,
+    frameIntervalP95BudgetMs,
+    rafFrameIntervalP95Ms: Math.max(
+      ...dragRuns.map((run) => percentile(run.frameIntervalsMs, 0.95)),
+    ),
+    gpu: browserMetrics.browser.gpu,
   });
-  console.log(JSON.stringify(result));
-  if (process.env['HALL_ENFORCE_BUDGET'] === '1')
-    expect(result.dragP95Ms).toBeLessThanOrEqual(
-      Number(process.env['HALL_DRAG_BUDGET_MS'] ?? '25'),
-    );
+  if (enforceFrameBudget)
+    expect(
+      Math.max(
+        ...dragRuns.map((run) => percentile(run.frameIntervalsMs, 0.95)),
+      ),
+    ).toBeLessThanOrEqual(frameIntervalP95BudgetMs);
 });

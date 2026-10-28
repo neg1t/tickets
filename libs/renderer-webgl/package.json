@@ -17,7 +17,9 @@
   "dependencies": {
     "@hall-platform/geometry": "workspace:*",
     "@hall-platform/renderer-core": "workspace:*",
-    "react": "19.3.1",
     "tslib": "^2.3.0"
+  },
+  "peerDependencies": {
+    "react": ">=19.0.0 <20"
   }
 }

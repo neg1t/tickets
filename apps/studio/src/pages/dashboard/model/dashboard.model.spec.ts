@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type {
   HallSummary,
-  PublishedHallVersion,
   PublishedVersionMetadata,
   StoredHall,
 } from '@hall-platform/local-storage';
@@ -30,6 +29,8 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+
+let testOpenSequence = 0;
 
 describe('dashboard async identity', () => {
   it('opens the selected hall before catalog and publication reads finish', async () => {
@@ -87,14 +88,17 @@ describe('dashboard async identity', () => {
         },
         catalog: [],
         versions: [],
-      }) as Awaited<ReturnType<typeof openHallFx>>;
+        openSequence: ++testOpenSequence,
+      }) satisfies Awaited<ReturnType<typeof openHallFx>>;
     try {
       openHallFx.use(({ id }) => (id === 'A' ? first.promise : second.promise));
       const pendingA = requestOpenHall('A');
       const pendingB = requestOpenHall('B');
-      second.resolve(makeResult('B'));
+      const resultA = makeResult('A');
+      const resultB = makeResult('B');
+      second.resolve(resultB);
       await pendingB;
-      first.resolve(makeResult('A'));
+      first.resolve(resultA);
       await pendingA;
       expect($draft.getState().hallName).toBe('B');
     } finally {
@@ -155,6 +159,7 @@ describe('dashboard async identity', () => {
       },
       catalog: [],
       versions: [],
+      openSequence: ++testOpenSequence,
     });
     try {
       saveDraftFx.use(() => saved.promise);
@@ -238,6 +243,7 @@ describe('dashboard async identity', () => {
       },
       catalog: [],
       versions: [],
+      openSequence: ++testOpenSequence,
     });
     try {
       duplicateHallFx.use(() => duplicated.promise);

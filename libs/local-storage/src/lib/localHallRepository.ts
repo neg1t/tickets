@@ -348,7 +348,7 @@ export function createLocalHallRepository(
   const ensureCatalogMetadata = async (): Promise<void> => {
     catalogMetadataMigration ??= (async () => {
       const db = await database();
-      const migrationKey = 'hall-summary-migration-v1';
+      const migrationKey = 'hall-summary-migration-v2';
       const migrated = await readStore<{ key: string }>(
         db,
         'repositoryMetadata',

@@ -8,7 +8,7 @@ import {
 } from './furniture.js';
 
 describe('seat furniture', () => {
-  it('rotates chair bounds with its facing direction', () => {
+  it('keeps circular bounds and hit targets independent of seat rotation', () => {
     const seat = {
       position: { x: 10, y: 20 },
       visualKind: 'chair' as const,
@@ -17,13 +17,14 @@ describe('seat furniture', () => {
     const bounds = seatSymbolBounds(seat);
     expect(bounds.minX).toBeCloseTo(9.25);
     expect(bounds.maxX).toBeCloseTo(10.75);
-    expect(bounds.minY).toBeCloseTo(19.35);
-    expect(bounds.maxY).toBeCloseTo(20.65);
+    expect(bounds.minY).toBeCloseTo(19.25);
+    expect(bounds.maxY).toBeCloseTo(20.75);
     expect(hitSeatSymbol(seat, { x: 10.7, y: 20 }, 0)).toBe(true);
     expect(hitSeatSymbol(seat, { x: 10.9, y: 20 }, 0)).toBe(false);
+    expect(hitSeatSymbol(seat, { x: 10.65, y: 20.65 }, 0)).toBe(false);
   });
 
-  it('uses silhouette and touch tolerance for armchairs and wheelchair bays', () => {
+  it('uses circular hit targets and touch tolerance for every seat kind', () => {
     const armchair = {
       position: { x: 0, y: 0 },
       visualKind: 'armchair' as const,
@@ -35,7 +36,8 @@ describe('seat furniture', () => {
       position: { x: 0, y: 0 },
       visualKind: 'wheelchairBay' as const,
     };
-    expect(hitSeatSymbol(bay, { x: 0.78, y: 0.78 }, 0)).toBe(true);
+    expect(hitSeatSymbol(bay, { x: 0.78, y: 0.78 }, 0)).toBe(false);
+    expect(hitSeatSymbol(bay, { x: 0.78, y: 0 }, 0)).toBe(true);
   });
 
   it('selects detail by projected furniture size and suppresses colliding labels', () => {

@@ -294,7 +294,26 @@ importers:
         specifier: ~5.0.1
         version: 5.0.5(@types/node@24.19.2)(@vitest/coverage-v8@5.0.5)(@vitest/ui@5.0.5)(jsdom@27.4.0(supports-color@7.2.0))(vite@8.3.5(@types/node@24.19.2)(jiti@2.4.2)(yaml@2.9.0))
 
-  apps/embed: {}
+  apps/embed:
+    dependencies:
+      '@hall-platform/design-tokens':
+        specifier: workspace:*
+        version: link:../../libs/design-tokens
+      '@hall-platform/domain':
+        specifier: workspace:*
+        version: link:../../libs/domain
+      '@hall-platform/fixtures':
+        specifier: workspace:*
+        version: link:../../libs/fixtures
+      '@hall-platform/seat-view':
+        specifier: workspace:*
+        version: link:../../libs/seat-view
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+      react-dom:
+        specifier: 19.3.1
+        version: 19.3.1(react@19.3.1)
 
   apps/studio:
     dependencies:
@@ -399,6 +418,9 @@ importers:
       '@hall-platform/pdf':
         specifier: workspace:*
         version: link:../pdf
+      '@hall-platform/renderer-core':
+        specifier: workspace:*
+        version: link:../renderer-core
       '@hall-platform/renderer-konva':
         specifier: workspace:*
         version: link:../renderer-konva
@@ -409,14 +431,21 @@ importers:
         specifier: ^23.3.0
         version: 23.3.0(effector@23.4.4)(react@19.3.1)
       react:
-        specifier: 19.3.1
+        specifier: '>=19.0.0 <20'
         version: 19.3.1
+      react-dom:
+        specifier: '>=19.0.0 <20'
+        version: 19.3.1(react@19.3.1)
       tslib:
         specifier: ^2.3.0
         version: 2.8.1
       zod:
         specifier: ^4.3.6
         version: 4.6.7
+    devDependencies:
+      '@hall-platform/fixtures':
+        specifier: workspace:*
+        version: link:../fixtures
 
   libs/hall-viewer:
     dependencies:
@@ -439,7 +468,7 @@ importers:
         specifier: workspace:*
         version: link:../renderer-webgl
       react:
-        specifier: 19.3.1
+        specifier: '>=19.0.0 <20'
         version: 19.3.1
       tslib:
         specifier: ^2.3.0
@@ -490,7 +519,7 @@ importers:
         specifier: 10.9.0
         version: 10.9.0
       react:
-        specifier: 19.3.1
+        specifier: '>=19.0.0 <20'
         version: 19.3.1
       react-konva:
         specifier: 19.3.0
@@ -512,7 +541,7 @@ importers:
         specifier: workspace:*
         version: link:../renderer-core
       react:
-        specifier: 19.3.1
+        specifier: '>=19.0.0 <20'
         version: 19.3.1
       tslib:
         specifier: ^2.3.0
@@ -542,8 +571,11 @@ importers:
         specifier: ^23.3.0
         version: 23.3.0(effector@23.4.4)(react@19.3.1)
       react:
-        specifier: 19.3.1
+        specifier: '>=19.0.0 <20'
         version: 19.3.1
+      react-dom:
+        specifier: '>=19.0.0 <20'
+        version: 19.3.1(react@19.3.1)
       tslib:
         specifier: ^2.3.0
         version: 2.8.1

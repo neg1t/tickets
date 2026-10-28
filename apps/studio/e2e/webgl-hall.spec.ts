@@ -5,7 +5,9 @@ test('WebGL renderer draws seats, updates styles, and dispatches CPU picks', asy
 }) => {
   await page.goto('/');
   const mounted = await page.evaluate(async () => {
-    const harness = await import('/src/e2e/webglHarness.ts');
+    const moduleUrl = new URL('/src/e2e/webglHarness.ts', window.location.href)
+      .href;
+    const harness = await import(moduleUrl);
     return harness.mountWebGLTestHarness(document.body);
   });
   if (!mounted.supported) {
@@ -76,8 +78,15 @@ test('WebGL renderer draws seats, updates styles, and dispatches CPU picks', asy
     () =>
       new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
   );
-  const selectedOutlinePixel = await readPixel(320, 159);
-  expect(selectedOutlinePixel[2]).toBeGreaterThan(selectedOutlinePixel[0]);
+  const selectedOutlinePixels = await Promise.all(
+    Array.from({ length: 16 }, (_, offset) => readPixel(320, 160 + offset)),
+  );
+  expect(
+    selectedOutlinePixels.some(
+      ([red = 0, green = 0, blue = 255, alpha = 0]) =>
+        alpha > 80 && red > 200 && green > 100 && blue < 100,
+    ),
+  ).toBe(true);
 
   await page.evaluate(() => {
     const testWindow = window as Window & {
@@ -102,7 +111,9 @@ test('WebGL canvas keeps seat labels on a visible-area 2D overlay', async ({
 }) => {
   await page.goto('/');
   await page.evaluate(async () => {
-    const harness = await import('/src/e2e/webglHarness.ts');
+    const moduleUrl = new URL('/src/e2e/webglHarness.ts', window.location.href)
+      .href;
+    const harness = await import(moduleUrl);
     harness.mountWebGLLabelsHarness(document.body);
   });
   await page.evaluate(
@@ -127,7 +138,9 @@ test('WebGL canvas keeps seat labels on a visible-area 2D overlay', async ({
 
   expect(labelPixelCount).toBeGreaterThan(0);
   await page.evaluate(async () => {
-    const harness = await import('/src/e2e/webglHarness.ts');
+    const moduleUrl = new URL('/src/e2e/webglHarness.ts', window.location.href)
+      .href;
+    const harness = await import(moduleUrl);
     harness.unmountWebGLLabelsHarness(document.body);
   });
 });

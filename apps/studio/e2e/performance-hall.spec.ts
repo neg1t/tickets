@@ -1,14 +1,15 @@
 import { expect, test } from '@playwright/test';
 import { openCatalogServices } from './navigation';
 import {
+  beginGestureMetrics,
+  endGestureMetrics,
   attachPerformanceReport,
   installPerformanceObserver,
-  measureFrameIntervals,
   percentile,
   waitForPaint,
 } from './performance-metrics';
 
-test('creates and reopens the 50,000-seat performance hall', async ({
+test('creates and reopens the 50,000-seat performance hall @performance', async ({
   page,
 }) => {
   test.setTimeout(180_000);
@@ -72,12 +73,19 @@ test('creates and reopens the 50,000-seat performance hall', async ({
   const stage = page.locator('#hall-stage');
   const bounds = await stage.boundingBox();
   if (!bounds) throw new Error('Missing performance hall stage bounds');
-  const frameIntervals = measureFrameIntervals(page, 180);
-  await page.mouse.move(bounds.x + 250, bounds.y + 220);
-  await page.mouse.down();
-  await page.mouse.move(bounds.x + 550, bounds.y + 220, { steps: 45 });
-  await page.mouse.up();
-  const frames = await frameIntervals;
+  const panRuns = [];
+  for (let run = 0; run < 3; run += 1) {
+    const startX = bounds.x + 220 + run * 10;
+    const startY = bounds.y + 220 + run * 8;
+    await beginGestureMetrics(page);
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + 180, startY + 35, { steps: 30 });
+    await page.mouse.up();
+    panRuns.push(await endGestureMetrics(page));
+  }
+  expect(panRuns).toHaveLength(3);
+  expect(panRuns.every((run) => run.frameIntervalsMs.length > 0)).toBe(true);
 
   await attachPerformanceReport(page, test.info(), 'performance-hall-50000', {
     scenario: 'create, reopen, and pan 50,000-seat editor',
@@ -89,8 +97,22 @@ test('creates and reopens the 50,000-seat performance hall', async ({
     createAndOpenMs: Math.round(createAndOpenMs),
     reopenMs: Math.round(reopenMs),
     initialSeatRenderNodes,
-    panFrameP95Ms: Math.round(percentile(frames, 0.95) * 100) / 100,
-    panFrameMaxMs: Math.round(Math.max(...frames) * 100) / 100,
-    panFrameSamples: frames.length,
+    panRuns: panRuns.map((run) => ({
+      durationMs: Math.round(run.durationMs * 100) / 100,
+      inputToStateFeedbackMs:
+        run.inputToStateFeedbackMs === null
+          ? null
+          : Math.round(run.inputToStateFeedbackMs * 100) / 100,
+      frameP95Ms:
+        Math.round(percentile(run.frameIntervalsMs, 0.95) * 100) / 100,
+      frameMaxMs:
+        run.frameIntervalsMs.length > 0
+          ? Math.round(Math.max(...run.frameIntervalsMs) * 100) / 100
+          : null,
+      frameSamples: run.frameIntervalsMs.length,
+      longTasks: run.longTasks.map(
+        ({ duration }) => Math.round(duration * 100) / 100,
+      ),
+    })),
   });
 });

@@ -2,7 +2,9 @@ export {
   defaultViewport,
   fitViewport,
   panViewportBy,
+  resizeViewportPreservingCenter,
   screenToWorld,
+  wheelZoomFactor,
   worldToScreen,
   zoomViewportAt,
 } from '@hall-platform/renderer-core';

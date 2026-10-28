@@ -20,8 +20,8 @@ import {
 import {
   buildHallScene,
   targetBounds,
-  type HallTarget,
 } from '@hall-platform/renderer-konva';
+import type { HallTarget } from '@hall-platform/renderer-core';
 import type { EditorCommand, EditorPatch } from './editorCommands.js';
 import type { HallLayoutDraft } from './editorDraft.js';
 import {
@@ -923,16 +923,28 @@ export function selectionCenterValue(
   targets: readonly HallTarget[],
   axis: 'x' | 'y',
 ): number | null {
+  return selectionCenterValues(draft, targets)[axis];
+}
+
+export function selectionCenterValues(
+  draft: HallLayoutDraft,
+  targets: readonly HallTarget[],
+): Readonly<{ x: number | null; y: number | null }> {
   const items = targetGeometry(draft, targets);
-  if (items.length === 0) return null;
-  const start = axis === 'x' ? 'minX' : 'minY';
-  const end = axis === 'x' ? 'maxX' : 'maxY';
-  const centers = items.map(({ bounds }) => (bounds[start] + bounds[end]) / 2);
-  const first = centers[0];
-  return first !== undefined &&
-    centers.every((value) => Math.abs(value - first) < 0.000001)
-    ? first
-    : null;
+  if (items.length === 0) return { x: null, y: null };
+  const commonCenter = (axis: 'x' | 'y') => {
+    const start = axis === 'x' ? 'minX' : 'minY';
+    const end = axis === 'x' ? 'maxX' : 'maxY';
+    const centers = items.map(
+      ({ bounds }) => (bounds[start] + bounds[end]) / 2,
+    );
+    const first = centers[0];
+    return first !== undefined &&
+      centers.every((value) => Math.abs(value - first) < 0.000001)
+      ? first
+      : null;
+  };
+  return { x: commonCenter('x'), y: commonCenter('y') };
 }
 
 export function setSelectionCenter(

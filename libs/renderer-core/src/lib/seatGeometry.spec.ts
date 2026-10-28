@@ -6,7 +6,7 @@ import {
 } from './seatGeometry.js';
 
 describe('renderer-neutral seat geometry', () => {
-  it('calculates rotated bounds and uses them for precise symbol hits', () => {
+  it('uses circular bounds and hit targets regardless of facing rotation', () => {
     const seat = {
       position: { x: 10, y: 20 },
       rotationRadians: Math.PI / 2,
@@ -16,10 +16,11 @@ describe('renderer-neutral seat geometry', () => {
 
     expect(bounds.minX).toBeCloseTo(9.25);
     expect(bounds.maxX).toBeCloseTo(10.75);
-    expect(bounds.minY).toBeCloseTo(19.35);
-    expect(bounds.maxY).toBeCloseTo(20.65);
-    expect(hitSeatSymbol(seat, { x: 10.6, y: 19.4 })).toBe(true);
-    expect(hitSeatSymbol(seat, { x: 10.7, y: 20.7 })).toBe(false);
+    expect(bounds.minY).toBeCloseTo(19.25);
+    expect(bounds.maxY).toBeCloseTo(20.75);
+    expect(hitSeatSymbol(seat, { x: 10.5, y: 19.7 })).toBe(true);
+    expect(hitSeatSymbol(seat, { x: 10.65, y: 20.65 })).toBe(false);
+    expect(seatSymbolBounds({ ...seat, rotationRadians: 0 })).toEqual(bounds);
   });
 
   it('uses shared projected-size thresholds for seat detail', () => {

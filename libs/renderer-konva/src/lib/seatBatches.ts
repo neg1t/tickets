@@ -77,6 +77,7 @@ export class DotSeatBatcher {
     appearance: SeatAppearance,
     defaultFill: string,
     visibleBounds?: SpatialBounds,
+    excludedSeatIds: ReadonlySet<string> = new Set(),
   ): readonly DotSeatBatch[] | null {
     if (this.lodSeats !== seats || this.lodScale !== scale) {
       this.isDotDetail = !seats.some(
@@ -122,11 +123,29 @@ export class DotSeatBatcher {
       this.defaultFill = defaultFill;
     }
 
-    return visibleBounds
+    const visibleBatches = visibleBounds
       ? this.batches.filter((batch) =>
           boundsIntersect(batch.bounds, visibleBounds),
         )
       : this.batches;
+    if (excludedSeatIds.size === 0) return visibleBatches;
+
+    return visibleBatches.flatMap((batch) => {
+      if (!batch.seats.some((seat) => excludedSeatIds.has(seat.id)))
+        return [batch];
+      const filteredSeats: Seat[] = [];
+      const filteredFills: string[] = [];
+      for (let index = 0; index < batch.seats.length; index += 1) {
+        const seat = batch.seats[index];
+        if (!seat || excludedSeatIds.has(seat.id)) continue;
+        filteredSeats.push(seat);
+        const fill = batch.fills[index];
+        if (fill !== undefined) filteredFills.push(fill);
+      }
+      return filteredSeats.length > 0
+        ? [{ ...batch, seats: filteredSeats, fills: filteredFills }]
+        : [];
+    });
   }
 
   private buildGeometry(

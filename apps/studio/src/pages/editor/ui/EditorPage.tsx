@@ -3,6 +3,7 @@ import {
   PdfHallViewer,
   type HallLayoutDraft,
 } from '@hall-platform/hall-editor';
+import { seatIdSchema } from '@hall-platform/domain';
 import type { PublishedVersionMetadata } from '@hall-platform/local-storage';
 import { Menu } from '@hall-platform/ui';
 import type { RecoveryAutosaveStatus } from '../../dashboard/model/recoveryAutosave.js';
@@ -49,7 +50,7 @@ export function EditorPage(props: EditorPageProps) {
         ? 'Просмотр зала'
         : 'Редактор зала';
   return (
-    <main className="studio-editor-page">
+    <main className="studio-editor-page" data-change-count={props.changeCount}>
       <header className="studio-editor-topbar">
         <button
           type="button"
@@ -75,39 +76,47 @@ export function EditorPage(props: EditorPageProps) {
             : props.notice}
         </span>
         <div className="studio-editor-top-actions">
-          <button
-            type="button"
-            onClick={props.onEditor}
-            aria-current={props.mode === 'editor' ? 'page' : undefined}
-          >
-            Редактор
-          </button>
-          <button
-            type="button"
-            onClick={props.onPreview}
-            aria-current={props.mode === 'preview' ? 'page' : undefined}
-          >
-            Просмотр
-          </button>
-          <button
-            type="button"
-            onClick={props.onBuyer}
-            disabled={props.versions.length === 0}
-          >
-            Покупательская схема
-          </button>
-          <button type="button" onClick={props.onExport}>
-            Экспорт JSON
-          </button>
-          {props.hasSavedHall && (
+          <nav className="studio-editor-mode-actions" aria-label="Режимы схемы">
             <button
               type="button"
-              onClick={props.onExportPackage}
-              disabled={props.dirty}
+              onClick={props.onEditor}
+              aria-current={props.mode === 'editor' ? 'page' : undefined}
             >
-              Экспорт пакета
+              Редактор
             </button>
-          )}
+            <button
+              type="button"
+              onClick={props.onPreview}
+              aria-current={props.mode === 'preview' ? 'page' : undefined}
+            >
+              Просмотр
+            </button>
+            <button
+              type="button"
+              onClick={props.onBuyer}
+              disabled={props.versions.length === 0}
+            >
+              Покупательская схема
+            </button>
+          </nav>
+          <div
+            className="studio-editor-export-actions"
+            role="group"
+            aria-label="Экспорт схемы"
+          >
+            <button type="button" onClick={props.onExport}>
+              Экспорт JSON
+            </button>
+            {props.hasSavedHall && (
+              <button
+                type="button"
+                onClick={props.onExportPackage}
+                disabled={props.dirty}
+              >
+                Экспорт пакета
+              </button>
+            )}
+          </div>
           <Menu label="Демо и обслуживание">
             <button type="button" role="menuitem" onClick={props.onSample}>
               Открыть тестовый зал
@@ -149,21 +158,16 @@ export function EditorPage(props: EditorPageProps) {
       )}
       <section className="studio-editor-content" aria-label={title}>
         {props.mode === 'editor' ? (
-          <>
-            <span className="studio-editor-change-count">
-              Изменений через onChange: {props.changeCount}
-            </span>
-            <HallEditor
-              value={props.draft}
-              publishedSeatIds={props.versions.flatMap(
-                (version) => version.seatIds,
-              )}
-              onChange={props.onChange}
-              saving={props.saving}
-              onSave={props.onSave}
-              onPublish={props.onPublish}
-            />
-          </>
+          <HallEditor
+            value={props.draft}
+            publishedSeatIds={props.versions.flatMap((version) =>
+              version.seatIds.map((id) => seatIdSchema.parse(id)),
+            )}
+            onChange={props.onChange}
+            saving={props.saving}
+            onSave={props.onSave}
+            onPublish={props.onPublish}
+          />
         ) : (
           <div className="studio-preview-content">
             {published && (

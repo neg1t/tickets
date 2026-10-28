@@ -40,4 +40,32 @@ describe('hall catalog metadata', () => {
       }),
     ).toBeNull();
   });
+
+  it('stores a bounded thumbnail derived from actual seat positions', () => {
+    const summary = readHallMetadata({
+      id: 'hall-2',
+      updatedAt: '2026-10-27T00:00:00.000Z',
+      revision: 1,
+      publishedVersionNumber: 0,
+      draft: {
+        hallName: 'Small hall',
+        snapshot: {
+          seats: [
+            { position: { x: 0, y: 0 } },
+            { position: { x: 10, y: 2 } },
+            { position: { x: 4, y: 9 } },
+          ],
+          zones: [],
+        },
+      },
+    });
+
+    expect(summary?.thumbnailDataUrl).toMatch(/^data:image\/svg\+xml,/);
+    expect(summary?.thumbnailDataUrl?.length).toBeLessThan(32_768);
+    const svg = decodeURIComponent(
+      summary?.thumbnailDataUrl?.slice('data:image/svg+xml,'.length) ?? '',
+    );
+    expect(svg).toContain('<circle');
+    expect(svg).toContain('viewBox="0 0 240 120"');
+  });
 });

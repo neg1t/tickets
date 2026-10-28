@@ -27,6 +27,7 @@ const bayParts: readonly Rect[] = [
   { left: -0.8, right: 0.8, top: -0.8, bottom: 0.8 },
 ];
 
+/** @deprecated Seat symbols are circles; use seatSymbolDiameter instead. */
 export function seatSymbolParts(
   kind: SeatVisualKind = 'chair',
 ): readonly Rect[] {
@@ -37,59 +38,25 @@ export function seatSymbolParts(
       : chairParts;
 }
 
-function localPoint(seat: SeatFurniture, point: Vector2): Vector2 {
-  const angle = seat.rotationRadians ?? 0;
-  const cosine = Math.cos(angle);
-  const sine = Math.sin(angle);
-  const dx = point.x - seat.position.x;
-  const dy = point.y - seat.position.y;
-  return { x: dx * cosine + dy * sine, y: -dx * sine + dy * cosine };
-}
-
 export function hitSeatSymbol(
   seat: SeatFurniture,
   point: Vector2,
   tolerance = 0,
 ): boolean {
-  const local = localPoint(seat, point);
-  return seatSymbolParts(seat.visualKind).some(
-    (part) =>
-      local.x >= part.left - tolerance &&
-      local.x <= part.right + tolerance &&
-      local.y >= part.top - tolerance &&
-      local.y <= part.bottom + tolerance,
-  );
-}
-
-function boundsOfPoints(points: readonly Vector2[]): SpatialBounds {
-  const first = points[0] ?? { x: 0, y: 0 };
-  return points.slice(1).reduce<SpatialBounds>(
-    (bounds, point) => ({
-      minX: Math.min(bounds.minX, point.x),
-      minY: Math.min(bounds.minY, point.y),
-      maxX: Math.max(bounds.maxX, point.x),
-      maxY: Math.max(bounds.maxY, point.y),
-    }),
-    { minX: first.x, minY: first.y, maxX: first.x, maxY: first.y },
+  const radius = seatSymbolDiameter(seat.visualKind) / 2 + tolerance;
+  return (
+    Math.hypot(point.x - seat.position.x, point.y - seat.position.y) <= radius
   );
 }
 
 export function seatSymbolBounds(seat: SeatFurniture): SpatialBounds {
-  const angle = seat.rotationRadians ?? 0;
-  const cosine = Math.cos(angle);
-  const sine = Math.sin(angle);
-  const corners = seatSymbolParts(seat.visualKind).flatMap((part) =>
-    [
-      [part.left, part.top],
-      [part.right, part.top],
-      [part.right, part.bottom],
-      [part.left, part.bottom],
-    ].map(([x = 0, y = 0]) => ({
-      x: seat.position.x + x * cosine - y * sine,
-      y: seat.position.y + x * sine + y * cosine,
-    })),
-  );
-  return boundsOfPoints(corners);
+  const radius = seatSymbolDiameter(seat.visualKind) / 2;
+  return {
+    minX: seat.position.x - radius,
+    minY: seat.position.y - radius,
+    maxX: seat.position.x + radius,
+    maxY: seat.position.y + radius,
+  };
 }
 
 export function seatSymbolDiameter(kind: SeatVisualKind = 'chair'): number {

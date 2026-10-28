@@ -190,8 +190,8 @@ describe('validateSelection', () => {
   });
 
   it('uses memoized identity sets instead of scanning the layout for every selection', () => {
-    const forbidArrayScan = <T>(items: readonly T[]): readonly T[] =>
-      new Proxy(items, {
+    const forbidArrayScan = <T>(items: readonly T[]): T[] =>
+      new Proxy([...items], {
         get(target, property, receiver) {
           if (property === 'map' || property === Symbol.iterator)
             throw new Error('validateSelection rescanned the layout');

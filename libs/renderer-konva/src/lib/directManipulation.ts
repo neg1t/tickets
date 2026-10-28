@@ -282,17 +282,7 @@ export function handlesForTarget(
     point,
     target,
   });
-  if (target.kind === 'seat') {
-    const seat = scene.seatsById.get(target.id);
-    return seat
-      ? [
-          handle(
-            'rotate',
-            rotatedPoint(seat.position, 1.7, 0, seat.rotationRadians ?? 0),
-          ),
-        ]
-      : [];
-  }
+  if (target.kind === 'seat') return [];
   if (target.kind === 'row') {
     const curve = scene.rowsById.get(target.id)?.row.curve;
     if (!curve) return [];
@@ -426,25 +416,6 @@ export function editHandleGeometry(
   zoneBounds: Readonly<Record<string, SpatialBounds>>;
 } {
   const worldPoint = worldPointSchema.parse(point);
-  if (target.kind === 'seat' && handleId === 'rotate') {
-    return {
-      snapshot: {
-        ...snapshot,
-        seats: snapshot.seats.map((seat) =>
-          seat.id === target.id
-            ? {
-                ...seat,
-                rotationRadians: Math.atan2(
-                  point.y - seat.position.y,
-                  point.x - seat.position.x,
-                ),
-              }
-            : seat,
-        ),
-      },
-      zoneBounds,
-    };
-  }
   if (target.kind === 'row') {
     const rows = snapshot.rows.map((row) => {
       if (row.id !== target.id) return row;

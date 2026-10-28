@@ -187,3 +187,70 @@ export function validateLayout(
   }
   return issues;
 }
+
+/** Cheap, synchronous checks used while the complete diagnostic runs off-thread. */
+export function validateLayoutImmediate(
+  draft: HallLayoutDraft,
+): LayoutIssue[] {
+  const issues: LayoutIssue[] = [];
+  const snapshot = draft.snapshot;
+  const occupiedRows = new Set<string>();
+  const gaZoneIds = new Set(
+    snapshot.zones.filter((zone) => zone.kind === 'ga').map((zone) => zone.id),
+  );
+  const numbers = new Map<string, string>();
+
+  for (const seat of snapshot.seats) {
+    if (seat.placement.kind === 'row') occupiedRows.add(seat.placement.rowId);
+    if (seat.zoneId && gaZoneIds.has(seat.zoneId))
+      issues.push({
+        code: 'ga-seat',
+        severity: 'error',
+        message: `Место ${seat.label} привязано к GA-зоне`,
+        targetId: seat.id,
+      });
+    const key = `${numberingScope(seat)}:${seat.label.trim().toLocaleLowerCase()}`;
+    if (numbers.has(key))
+      issues.push({
+        code: 'duplicate-number',
+        severity: 'error',
+        message: `Повтор номера ${seat.label} в одной области`,
+        targetId: seat.id,
+      });
+    else numbers.set(key, seat.id);
+  }
+
+  for (const row of snapshot.rows) {
+    if (!occupiedRows.has(row.id))
+      issues.push({
+        code: 'empty-row',
+        severity: 'warning',
+        message: `Ряд «${row.name}» не содержит мест`,
+        targetId: row.id,
+      });
+    if (rowIsDegenerate(row))
+      issues.push({
+        code: 'degenerate-row',
+        severity: 'error',
+        message: `Ряд «${row.name}» имеет нулевую длину`,
+        targetId: row.id,
+      });
+  }
+  for (const zone of snapshot.zones)
+    if (zone.polygon && polygonArea(zone.polygon) < 0.001)
+      issues.push({
+        code: 'degenerate-polygon',
+        severity: 'error',
+        message: `Зона «${zone.name}» имеет вырожденный полигон`,
+        targetId: zone.id,
+      });
+  for (const decoration of snapshot.decorations)
+    if (decoration.kind !== 'label' && polygonArea(decoration.polygon) < 0.001)
+      issues.push({
+        code: 'degenerate-polygon',
+        severity: 'error',
+        message: 'Декорация имеет вырожденный полигон',
+        targetId: decoration.id,
+      });
+  return issues;
+}

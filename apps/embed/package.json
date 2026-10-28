@@ -1,5 +1,13 @@
 {
   "name": "@hall-platform/embed",
   "version": "0.0.1",
-  "private": true
+  "private": true,
+  "dependencies": {
+    "@hall-platform/design-tokens": "workspace:*",
+    "@hall-platform/domain": "workspace:*",
+    "@hall-platform/fixtures": "workspace:*",
+    "@hall-platform/seat-view": "workspace:*",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  }
 }

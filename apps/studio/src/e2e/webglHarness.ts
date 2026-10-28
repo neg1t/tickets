@@ -23,6 +23,8 @@ type WebGLBenchmarkMetrics = Readonly<{
   bulkStatusCalls: number;
   bulkStatusCpuMs: number;
   renderer: string;
+  vendor: string;
+  devicePixelRatio: number;
 }>;
 
 type WebGLTestWindow = Window & {
@@ -86,6 +88,7 @@ export async function mountWebGLPerformanceHarness(
   const canvas = document.createElement('canvas');
   canvas.width = 640;
   canvas.height = 480;
+  canvas.dataset.renderer = 'webgl2';
   canvas.style.width = '640px';
   canvas.style.height = '480px';
   container.replaceChildren(canvas);
@@ -97,6 +100,9 @@ export async function mountWebGLPerformanceHarness(
   });
   if (!gl) return { supported: false };
   const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+  const vendor = debugInfo
+    ? String(gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL))
+    : 'vendor details unavailable';
   const rendererName = debugInfo
     ? String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL))
     : 'renderer details unavailable';
@@ -187,6 +193,8 @@ export async function mountWebGLPerformanceHarness(
     bulkStatusCalls,
     bulkStatusCpuMs,
     renderer: rendererName,
+    vendor,
+    devicePixelRatio: window.devicePixelRatio,
   };
   const testWindow = window as WebGLTestWindow;
   testWindow.__webglTestRenderer = renderer;

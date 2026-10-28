@@ -1,12 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import type { Seat } from '@hall-platform/domain';
+import { seatSchema, type Seat } from '@hall-platform/domain';
 import { DotSeatBatcher, groupDotSeats } from './seatBatches.js';
 
+function createSeat(
+  id: string,
+  x: number,
+  y: number,
+  visualKind: Seat['visualKind'] = 'chair',
+): Seat {
+  return seatSchema.parse({
+    id,
+    floorId: 'floor-ground',
+    label: id,
+    position: { x, y },
+    placement: { kind: 'standalone' },
+    visualKind,
+  });
+}
+
 const seats = [
-  { id: 'a', position: { x: 0, y: 0 }, visualKind: 'chair' },
-  { id: 'b', position: { x: 2, y: 0 }, visualKind: 'wheelchairBay' },
-  { id: 'c', position: { x: 4, y: 0 }, visualKind: 'chair' },
-] as Seat[];
+  createSeat('a', 0, 0),
+  createSeat('b', 2, 0, 'wheelchairBay'),
+  createSeat('c', 4, 0),
+];
 
 describe('far zoom seat batches', () => {
   it('keeps every dot seat in one ordered draw batch with its current appearance', () => {
@@ -28,9 +44,9 @@ describe('far zoom seat batches', () => {
   it('updates only the spatial batch whose seat appearance changed', () => {
     const batcher = new DotSeatBatcher();
     const separatedSeats = [
-      { ...seats[0]!, position: { x: 0, y: 0 } },
-      { ...seats[1]!, position: { x: 512, y: 0 } },
-      { ...seats[2]!, position: { x: 2, y: 0 } },
+      createSeat('a', 0, 0),
+      createSeat('b', 512, 0, 'wheelchairBay'),
+      createSeat('c', 2, 0),
     ];
     const initial = batcher.build(separatedSeats, 2, {}, '#fff');
     if (!initial) throw new Error('Expected spatial dot batches');
@@ -51,12 +67,67 @@ describe('far zoom seat batches', () => {
     expect(updated[1]?.fills).toEqual(['#f00']);
   });
 
+  it('excludes moving seats from only their affected batches', () => {
+    const batcher = new DotSeatBatcher();
+    const separatedSeats = [
+      createSeat('moving', 0, 0),
+      createSeat('stationary-nearby', 2, 0),
+      createSeat('stationary-elsewhere', 512, 0),
+    ];
+    const initial = batcher.build(separatedSeats, 2, {}, '#fff');
+    if (!initial) throw new Error('Expected spatial dot batches');
+
+    const duringDrag = batcher.build(
+      separatedSeats,
+      2,
+      {},
+      '#fff',
+      undefined,
+      new Set(['moving']),
+    );
+    if (!duringDrag) throw new Error('Expected spatial dot batches');
+
+    expect(
+      duringDrag.map((batch) => batch.seats.map((seat) => seat.id)),
+    ).toEqual([['stationary-nearby'], ['stationary-elsewhere']]);
+    expect(duringDrag[0]).not.toBe(initial[0]);
+    expect(duringDrag[1]).toBe(initial[1]);
+  });
+
+  it('keeps a large stationary batch when 1,000 seats move as a group', () => {
+    const batcher = new DotSeatBatcher();
+    const largeSeatSet = Array.from({ length: 2_000 }, (_, index) =>
+      createSeat(`seat-${index}`, index * 2, 0),
+    );
+    const movingKeys = new Set(
+      Array.from({ length: 1_000 }, (_, index) => `seat-${index}`),
+    );
+    const duringDrag = batcher.build(
+      largeSeatSet,
+      2,
+      {},
+      '#fff',
+      undefined,
+      movingKeys,
+    );
+    if (!duringDrag) throw new Error('Expected spatial dot batches');
+
+    const batchedIds = duringDrag.flatMap((batch) =>
+      batch.seats.map((seat) => seat.id),
+    );
+    expect(batchedIds).toHaveLength(1_000);
+    expect(batchedIds.some((id) => movingKeys.has(id))).toBe(false);
+    expect(batchedIds[0]).toBe('seat-1000');
+    expect(batchedIds.at(-1)).toBe('seat-1999');
+    expect(duringDrag.length).toBeLessThan(10);
+  });
+
   it('keeps cross-block overlapping seats in source order', () => {
     const batcher = new DotSeatBatcher();
     const overlappingSeats = [
-      { ...seats[0]!, id: 'left', position: { x: 255.9, y: 0 } },
-      { ...seats[1]!, id: 'far', position: { x: 700, y: 0 } },
-      { ...seats[2]!, id: 'right', position: { x: 256.1, y: 0 } },
+      createSeat('left', 255.9, 0),
+      createSeat('far', 700, 0, 'wheelchairBay'),
+      createSeat('right', 256.1, 0),
     ];
     const batches = batcher.build(overlappingSeats, 2, {}, '#fff');
     if (!batches) throw new Error('Expected spatial dot batches');
@@ -72,8 +143,8 @@ describe('far zoom seat batches', () => {
   it('returns only spatial batches intersecting the requested view', () => {
     const batcher = new DotSeatBatcher();
     const separatedSeats = [
-      { ...seats[0]!, position: { x: 0, y: 0 } },
-      { ...seats[1]!, position: { x: 512, y: 0 } },
+      createSeat('a', 0, 0),
+      createSeat('b', 512, 0, 'wheelchairBay'),
     ];
     const visible = batcher.build(separatedSeats, 2, {}, '#fff', {
       minX: -1,

@@ -7,6 +7,7 @@ export type HallCanvasPalette = Readonly<{
   row: string;
   table: string;
   selected: string;
+  hover: string;
 }>;
 
 export const defaultHallCanvasPalette: HallCanvasPalette = {
@@ -18,6 +19,7 @@ export const defaultHallCanvasPalette: HallCanvasPalette = {
   row: '#65869b',
   table: '#c3dbe6',
   selected: '#ed8936',
+  hover: '#f3b66d',
 };
 
 const variables: Record<keyof HallCanvasPalette, string> = {
@@ -29,6 +31,7 @@ const variables: Record<keyof HallCanvasPalette, string> = {
   row: '--hall-canvas-row',
   table: '--hall-canvas-table',
   selected: '--hall-canvas-selected',
+  hover: '--hall-canvas-hover',
 };
 
 export function readHallCanvasPalette(element: Element | null): HallCanvasPalette {

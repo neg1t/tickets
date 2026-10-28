@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { LayoutSnapshot } from '@hall-platform/domain';
+import type { HallCanvasPalette } from '@hall-platform/design-tokens';
 import {
   defaultHallCanvasPalette,
   readHallCanvasPalette,
@@ -19,9 +20,11 @@ import type { SpatialBounds, Vector2 } from '@hall-platform/geometry';
 import type { RendererSeatPositionUpdate } from '@hall-platform/renderer-core';
 import {
   advancePinchViewport,
+  CameraController,
   pinchGestureFromPointers,
   type PinchGesture,
 } from '@hall-platform/renderer-core';
+import type { HallTarget } from '@hall-platform/renderer-core';
 import type Konva from 'konva';
 import {
   Circle,
@@ -46,18 +49,19 @@ import {
   selectionBounds,
   targetBounds,
   visibleHallScene,
-  type HallTarget,
 } from './hallScene.js';
 import {
   fitViewport,
+  wheelZoomFactor,
   panViewportBy,
+  resizeViewportPreservingCenter,
   screenToWorld,
   zoomViewportAt,
-  type Viewport,
 } from './viewport.js';
 import { DragPreview } from './interaction/DragPreview.js';
 import { movedTargetKeys } from './interaction/movedTargetKeys.js';
 import { usePointerInteraction } from './interaction/usePointerInteraction.js';
+import { useViewportController } from './interaction/useViewportController.js';
 import {
   boxSelectedTargets,
   editHandleGeometry,
@@ -71,6 +75,30 @@ import {
 } from './directManipulation.js';
 
 const noPreviewPositions: readonly RendererSeatPositionUpdate[] = [];
+const noTargetKeys: ReadonlySet<string> = new Set();
+
+function filterHiddenObjects(
+  snapshot: LayoutSnapshot,
+  hiddenTargets: ReadonlySet<string>,
+): LayoutSnapshot {
+  if (hiddenTargets.size === 0) return snapshot;
+  return {
+    ...snapshot,
+    zones: snapshot.zones.filter(
+      (zone) => !hiddenTargets.has(`zone:${zone.id}`),
+    ),
+    rows: snapshot.rows.filter((row) => !hiddenTargets.has(`row:${row.id}`)),
+    tables: snapshot.tables.filter(
+      (table) => !hiddenTargets.has(`table:${table.id}`),
+    ),
+    seats: snapshot.seats.filter(
+      (seat) => !hiddenTargets.has(`seat:${seat.id}`),
+    ),
+    decorations: snapshot.decorations.filter(
+      (item) => !hiddenTargets.has(`decoration:${item.id}`),
+    ),
+  };
+}
 
 export type { PolygonEditMode } from './directManipulation.js';
 
@@ -117,6 +145,10 @@ export type HallViewerProps = {
   readonly activeTool?: string;
   readonly polygonEditMode?: PolygonEditMode;
   readonly selectedTargets?: readonly HallTarget[];
+  /** Hidden keys include the descendants of any hidden parent object. */
+  readonly hiddenTargets?: ReadonlySet<string>;
+  /** Locked keys include descendants and remain selectable but not movable. */
+  readonly lockedTargets?: ReadonlySet<string>;
   readonly onCanvasClick?: (point: Vector2, target: HallTarget | null) => void;
   readonly onObjectMove?: (target: HallTarget, delta: Vector2) => void;
   readonly onObjectsMove?: (
@@ -135,8 +167,10 @@ export type HallViewerProps = {
   readonly calibrationGuide?: Readonly<{ first: Vector2; second: Vector2 }>;
   readonly hideSeatShapes?: boolean;
   readonly seatRendererLayer?: ReactNode;
-  readonly onViewportChange?: (viewport: Viewport) => void;
+  readonly rendererEngine?: 'canvas' | 'webgl';
+  readonly cameraController?: CameraController;
   readonly onSeatFillColorChange?: (fillColor: string) => void;
+  readonly onRendererPaletteChange?: (palette: HallCanvasPalette) => void;
   readonly onSeatPreviewChange?: (
     positions: readonly RendererSeatPositionUpdate[],
   ) => void;
@@ -221,6 +255,18 @@ const DotSeatBatchShape = memo(function DotSeatBatchShape({
     />
   );
 });
+
+const StaticSceneObjectsLayer = memo(function StaticSceneObjectsLayer({
+  children,
+}: {
+  readonly children: ReactNode;
+}) {
+  return (
+    <Layer name="objects" listening={false}>
+      <Group name="rows-seats-tables">{children}</Group>
+    </Layer>
+  );
+});
 const defaultLabels: HallViewerLabels = {
   hall: 'Схема зала',
   toolbar: 'Управление схемой',
@@ -258,6 +304,8 @@ export function HallViewer(props: HallViewerProps) {
     activeTool,
     polygonEditMode,
     selectedTargets,
+    hiddenTargets = noTargetKeys,
+    lockedTargets = noTargetKeys,
     onCanvasClick,
     onObjectMove,
     onObjectsMove,
@@ -269,8 +317,10 @@ export function HallViewer(props: HallViewerProps) {
     calibrationGuide,
     hideSeatShapes = false,
     seatRendererLayer,
-    onViewportChange,
+    rendererEngine,
+    cameraController: sharedCameraController,
     onSeatFillColorChange,
+    onRendererPaletteChange,
     onSeatPreviewChange,
   } = props;
   const ui = { ...defaultLabels, ...labels };
@@ -283,20 +333,34 @@ export function HallViewer(props: HallViewerProps) {
   )
     ? requestedFloorId
     : (snapshot.floors[0]?.id ?? '');
+  const visibleSnapshot = useMemo(
+    () => filterHiddenObjects(snapshot, hiddenTargets),
+    [snapshot, hiddenTargets],
+  );
   const scene = useMemo(
-    () => buildHallScene(snapshot, activeFloorId, zoneBounds, backgroundPages),
-    [snapshot, activeFloorId, zoneBounds, backgroundPages],
+    () =>
+      buildHallScene(
+        visibleSnapshot,
+        activeFloorId,
+        zoneBounds,
+        backgroundPages,
+      ),
+    [visibleSnapshot, activeFloorId, zoneBounds, backgroundPages],
   );
-  const [viewport, setViewport] = useState<Viewport>(() =>
-    fitViewport(scene.bounds, 900, height),
-  );
+  const { cameraController, viewport, getViewport, setViewport } =
+    useViewportController(
+      fitViewport(scene.bounds, 900, height),
+      sharedCameraController,
+    );
   const [localSelection, setLocalSelection] = useState<HallTarget[]>([]);
   const selection = selectedTargets ?? localSelection;
   const [localTool, setLocalTool] = useState<'select' | 'pan'>('select');
+  const [spacePanActive, setSpacePanActive] = useState(false);
   const [gridEnabled, setGridEnabled] = useState(false);
   const [hoverTarget, setHoverTarget] = useState<HallTarget | null>(null);
-  const tool =
-    activeTool === undefined
+  const tool = spacePanActive
+    ? 'pan'
+    : activeTool === undefined
       ? localTool
       : activeTool === 'pan'
         ? 'pan'
@@ -309,6 +373,7 @@ export function HallViewer(props: HallViewerProps) {
       const next = readHallCanvasPalette(container);
       setPalette(next);
       onSeatFillColorChange?.(next.seat);
+      onRendererPaletteChange?.(next);
     };
     update();
     const observer = new MutationObserver(update);
@@ -318,10 +383,20 @@ export function HallViewer(props: HallViewerProps) {
         attributeFilter: ['class', 'style'],
       });
     return () => observer.disconnect();
-  }, [onSeatFillColorChange]);
+  }, [onRendererPaletteChange, onSeatFillColorChange]);
   const observedWidth = useRef(width);
+  const observedHeight = useRef(height);
+  const measuredWidth = useRef(false);
   const sceneRef = useRef(scene);
   const previousFitKey = useRef(fitKey);
+  const previousFloorId = useRef(activeFloorId);
+  const previousSnapshotId = useRef(snapshot.id);
+  const floorViewportCache = useRef(
+    new Map<
+      string,
+      { viewport: typeof viewport; width: number; height: number }
+    >(),
+  );
   const stageRef = useRef<Konva.Stage>(null);
   const { preview, begin, move, finish, cancel } = usePointerInteraction();
   const [movingKeys, setMovingKeys] = useState<ReadonlySet<string>>(new Set());
@@ -329,25 +404,34 @@ export function HallViewer(props: HallViewerProps) {
   const [renderIntent, setRenderIntent] = useState<PointerIntent | null>(null);
   const pointersRef = useRef(new Map<number, Vector2>());
   const pinchRef = useRef<PinchGesture | null>(null);
-  const viewportRef = useRef(viewport);
   const pendingPanRef = useRef<Vector2>({ x: 0, y: 0 });
   const panFrameRef = useRef(0);
-  const dotBatcherRef = useRef<DotSeatBatcher | null>(null);
-  dotBatcherRef.current ??= new DotSeatBatcher();
-  useEffect(() => {
-    viewportRef.current = viewport;
-  }, [viewport]);
-  useEffect(() => onViewportChange?.(viewport), [viewport, onViewportChange]);
+  const dotBatcher = useMemo(() => new DotSeatBatcher(), []);
+  const movingDotBatcher = useMemo(() => new DotSeatBatcher(), []);
+  useLayoutEffect(
+    () =>
+      cameraController.attach((snapshot) => {
+        const stage = stageRef.current;
+        if (stage) {
+          stage.position({ x: snapshot.x, y: snapshot.y });
+          stage.scale({ x: snapshot.scale, y: snapshot.scale });
+          stage.getLayers().forEach((layer) => layer.batchDraw());
+        }
+        const container = containerRef.current;
+        if (container)
+          container.dataset.cameraRevision = String(snapshot.revision);
+      }),
+    [cameraController],
+  );
 
   const applyPendingPan = useCallback(() => {
     panFrameRef.current = 0;
     const delta = pendingPanRef.current;
     pendingPanRef.current = { x: 0, y: 0 };
     if (delta.x === 0 && delta.y === 0) return;
-    const next = panViewportBy(viewportRef.current, delta);
-    viewportRef.current = next;
+    const next = panViewportBy(getViewport(), delta);
     setViewport(next);
-  }, []);
+  }, [getViewport, setViewport]);
   const schedulePan = useCallback(
     (delta: Vector2) => {
       pendingPanRef.current = {
@@ -360,14 +444,12 @@ export function HallViewer(props: HallViewerProps) {
     [applyPendingPan],
   );
   const flushPendingPan = useCallback(() => {
-    if (panFrameRef.current !== 0)
-      cancelAnimationFrame(panFrameRef.current);
+    if (panFrameRef.current !== 0) cancelAnimationFrame(panFrameRef.current);
     panFrameRef.current = 0;
     applyPendingPan();
   }, [applyPendingPan]);
   const discardPendingPan = useCallback(() => {
-    if (panFrameRef.current !== 0)
-      cancelAnimationFrame(panFrameRef.current);
+    if (panFrameRef.current !== 0) cancelAnimationFrame(panFrameRef.current);
     panFrameRef.current = 0;
     pendingPanRef.current = { x: 0, y: 0 };
   }, []);
@@ -389,12 +471,45 @@ export function HallViewer(props: HallViewerProps) {
       cancel();
       setMovingKeys(new Set());
       intentRef.current = null;
+      pointersRef.current.clear();
       setRenderIntent(null);
       pinchRef.current = null;
     }
     document.addEventListener('keydown', cancelOnEscape);
     return () => document.removeEventListener('keydown', cancelOnEscape);
   }, [cancel, flushPendingPan]);
+
+  useEffect(() => {
+    const isInteractiveTarget = (target: EventTarget | null) =>
+      target instanceof Element &&
+      Boolean(
+        target.closest(
+          'button, a, input, textarea, select, [contenteditable="true"]',
+        ),
+      );
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (
+        event.code !== 'Space' ||
+        event.repeat ||
+        isInteractiveTarget(event.target)
+      )
+        return;
+      event.preventDefault();
+      setSpacePanActive(true);
+    };
+    const onKeyUp = (event: globalThis.KeyboardEvent) => {
+      if (event.code === 'Space') setSpacePanActive(false);
+    };
+    const onWindowBlur = () => setSpacePanActive(false);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onWindowBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onWindowBlur);
+    };
+  }, []);
 
   useEffect(() => {
     const session = preview;
@@ -419,8 +534,7 @@ export function HallViewer(props: HallViewerProps) {
               : 0,
       };
       if (pan.x || pan.y) {
-        const next = panViewportBy(viewportRef.current, pan);
-        viewportRef.current = next;
+        const next = panViewportBy(getViewport(), pan);
         setViewport(next);
         move(session.pointerId, session.screen, next);
       }
@@ -428,13 +542,43 @@ export function HallViewer(props: HallViewerProps) {
     }
     frame = requestAnimationFrame(advance);
     return () => cancelAnimationFrame(frame);
-  }, [preview, move, width, height]);
+  }, [preview, move, width, height, getViewport, setViewport]);
 
   useEffect(() => {
     sceneRef.current = scene;
   }, [scene]);
 
   useEffect(() => {
+    if (snapshot.id !== previousSnapshotId.current) {
+      floorViewportCache.current.clear();
+      previousSnapshotId.current = snapshot.id;
+      previousFloorId.current = activeFloorId;
+      previousFitKey.current = fitKey;
+      setViewport(fitViewport(scene.bounds, width, height));
+      return;
+    }
+    if (activeFloorId !== previousFloorId.current) {
+      floorViewportCache.current.set(previousFloorId.current, {
+        viewport: getViewport(),
+        width,
+        height,
+      });
+      previousFloorId.current = activeFloorId;
+      previousFitKey.current = fitKey;
+      const saved = floorViewportCache.current.get(activeFloorId);
+      setViewport(
+        saved
+          ? resizeViewportPreservingCenter(
+              saved.viewport,
+              saved.width,
+              saved.height,
+              width,
+              height,
+            )
+          : fitViewport(scene.bounds, width, height),
+      );
+      return;
+    }
     if (fitKey === previousFitKey.current) return;
     previousFitKey.current = fitKey;
     const focusedBounds = focusedZoneId
@@ -449,25 +593,51 @@ export function HallViewer(props: HallViewerProps) {
         focusedBounds ? 65 : 30,
       ),
     );
-  }, [fitKey, width, height, focusedZoneId]);
+  }, [
+    fitKey,
+    width,
+    height,
+    focusedZoneId,
+    activeFloorId,
+    snapshot.id,
+    scene.bounds,
+    setViewport,
+    getViewport,
+  ]);
 
   useEffect(() => {
     const element = containerRef.current;
     if (!element) return;
     const observer = new ResizeObserver(() => {
       const nextWidth = Math.max(320, Math.round(element.clientWidth));
-      if (nextWidth === observedWidth.current) return;
+      const previousWidth = observedWidth.current;
+      const previousHeight = observedHeight.current;
+      const isFirstMeasurement = !measuredWidth.current;
+      measuredWidth.current = true;
+      if (nextWidth === previousWidth && height === previousHeight) return;
       discardPendingPan();
       observedWidth.current = nextWidth;
-      setWidth(nextWidth);
-      setViewport(fitViewport(sceneRef.current.bounds, nextWidth, height));
+      observedHeight.current = height;
+      if (nextWidth !== previousWidth) setWidth(nextWidth);
+      setViewport(
+        isFirstMeasurement
+          ? fitViewport(sceneRef.current.bounds, nextWidth, height)
+          : resizeViewportPreservingCenter(
+              getViewport(),
+              previousWidth,
+              previousHeight,
+              nextWidth,
+              height,
+            ),
+      );
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [height, discardPendingPan]);
+  }, [height, discardPendingPan, setViewport, getViewport]);
 
-  const selectedKeys = new Set(
-    selection.map((target) => `${target.kind}:${target.id}`),
+  const selectedKeys = useMemo(
+    () => new Set(selection.map((target) => `${target.kind}:${target.id}`)),
+    [selection],
   );
   const interactionMode =
     viewerMode ??
@@ -542,6 +712,21 @@ export function HallViewer(props: HallViewerProps) {
     preview && movingKeys.size > 0
       ? snappedMoveDelta(preview.startWorld, preview.delta, gridEnabled)
       : null;
+  function previewTargetBounds(target: HallTarget) {
+    const bounds = targetBounds(displayScene, target);
+    if (
+      !bounds ||
+      !previewDelta ||
+      !movingKeys.has(`${target.kind}:${target.id}`)
+    )
+      return bounds;
+    return {
+      minX: bounds.minX + previewDelta.x,
+      minY: bounds.minY + previewDelta.y,
+      maxX: bounds.maxX + previewDelta.x,
+      maxY: bounds.maxY + previewDelta.y,
+    };
+  }
   const previewSeatPositions = useMemo<
     readonly RendererSeatPositionUpdate[]
   >(() => {
@@ -672,8 +857,17 @@ export function HallViewer(props: HallViewerProps) {
     }
     return scene.seats.length ? (maxX - minX + 2) * (maxY - minY + 2) * 4 : 0;
   }, [hideSeatShapes, scene.seats]);
+  const movingSeatIds = useMemo(
+    () =>
+      new Set(
+        [...movingKeys]
+          .filter((key) => key.startsWith('seat:'))
+          .map((key) => key.slice('seat:'.length)),
+      ),
+    [movingKeys],
+  );
   const dotBatches = useMemo(() => {
-    if (!showSeats || hideSeatShapes || movingKeys.size > 0) return null;
+    if (!showSeats || hideSeatShapes) return null;
     const visibleBounds =
       dotCachePixels > 8_000_000
         ? {
@@ -683,17 +877,19 @@ export function HallViewer(props: HallViewerProps) {
             maxY: visibleWorld.maxY + margin,
           }
         : undefined;
-    return dotBatcherRef.current?.build(
+    return dotBatcher.build(
       scene.seats,
       viewport.scale,
       seatAppearance ?? emptySeatAppearance,
       palette.seat,
       visibleBounds,
+      movingSeatIds,
     );
   }, [
     showSeats,
     hideSeatShapes,
-    movingKeys.size,
+    movingSeatIds,
+    dotBatcher,
     scene.seats,
     viewport.scale,
     seatAppearance,
@@ -705,6 +901,32 @@ export function HallViewer(props: HallViewerProps) {
     visibleWorld.maxY,
     margin,
   ]);
+  const hasDetailedSeatStroke = showSeats && !hideSeatShapes && !dotBatches;
+  const shouldShowSelectionOverlay = (target: HallTarget) =>
+    target.kind !== 'seat' || (!hideSeatShapes && !hasDetailedSeatStroke);
+  const movingVisibleSeats = useMemo(
+    () => rendered.seats.filter((seat) => movingSeatIds.has(seat.id)),
+    [rendered.seats, movingSeatIds],
+  );
+  const movingDotBatches = useMemo(
+    () =>
+      dotBatches
+        ? movingDotBatcher.build(
+            movingVisibleSeats,
+            viewport.scale,
+            seatAppearance ?? emptySeatAppearance,
+            palette.seat,
+          )
+        : null,
+    [
+      dotBatches,
+      movingDotBatcher,
+      movingVisibleSeats,
+      viewport.scale,
+      seatAppearance,
+      palette.seat,
+    ],
+  );
 
   function handleFit() {
     setViewport(fitViewport(scene.bounds, width, height));
@@ -742,9 +964,14 @@ export function HallViewer(props: HallViewerProps) {
     event.evt.preventDefault();
     const point = stageRef.current?.getPointerPosition();
     if (!point) return;
-    const factor = Math.exp(-event.evt.deltaY * 0.0015);
-    const next = zoomViewportAt(viewportRef.current, point, factor);
-    viewportRef.current = next;
+    const factor = wheelZoomFactor(
+      event.evt.deltaY,
+      event.evt.deltaMode,
+      event.evt.ctrlKey,
+      16,
+      height,
+    );
+    const next = zoomViewportAt(getViewport(), point, factor);
     setViewport(next);
     if (preview) move(preview.pointerId, preview.screen, next);
   }
@@ -815,13 +1042,14 @@ export function HallViewer(props: HallViewerProps) {
       `${nearbyHandle.target.kind}:${nearbyHandle.target.id}` !==
         `${exactTarget.kind}:${exactTarget.id}`,
     );
-    const selectedHandle = Boolean(
+    const handleLocked = Boolean(
       nearbyHandle &&
-      selectedKeys.has(`${nearbyHandle.target.kind}:${nearbyHandle.target.id}`),
+      lockedTargets.has(
+        `${nearbyHandle.target.kind}:${nearbyHandle.target.id}`,
+      ),
     );
-    const handle = selectedHandle
-      ? nearbyHandle
-      : parentRowTarget || handleConflictsWithTarget
+    const handle =
+      parentRowTarget || handleConflictsWithTarget || handleLocked
         ? null
         : nearbyHandle;
     const target =
@@ -845,6 +1073,9 @@ export function HallViewer(props: HallViewerProps) {
       activeTool !== 'select' &&
       !pan;
     const selected = target && selectedKeys.has(`${target.kind}:${target.id}`);
+    const targetLocked = Boolean(
+      target && lockedTargets.has(`${target.kind}:${target.id}`),
+    );
     const modifiers = {
       shift: native.shiftKey,
       ctrl: native.ctrlKey,
@@ -861,6 +1092,7 @@ export function HallViewer(props: HallViewerProps) {
       !box &&
       !pan &&
       !create &&
+      !targetLocked &&
       activeTool === 'select' &&
       (onObjectsMove || onObjectMove) &&
       target &&
@@ -870,7 +1102,9 @@ export function HallViewer(props: HallViewerProps) {
     const targets =
       edit && target ? (onObjectsMove && selected ? selection : [target]) : [];
     setMovingKeys(
-      targets.length > 0 ? movedTargetKeys(snapshot, targets) : new Set(),
+      targets.length > 0
+        ? movedTargetKeys(visibleSnapshot, targets)
+        : new Set(),
     );
     intentRef.current = {
       mode: pan
@@ -897,13 +1131,13 @@ export function HallViewer(props: HallViewerProps) {
 
   function handlePointerMove(native: PointerEvent) {
     const point = pointerPoint(native);
-    if (point) onPointerWorldMove?.(screenToWorld(viewportRef.current, point));
+    if (point) onPointerWorldMove?.(screenToWorld(getViewport(), point));
     if (point && !pointersRef.current.has(native.pointerId) && onHoverTarget) {
       onHoverTarget(
         hitTestHallScene(
           scene,
-          screenToWorld(viewportRef.current, point),
-          3 / viewportRef.current.scale,
+          screenToWorld(getViewport(), point),
+          3 / getViewport().scale,
         ),
       );
     }
@@ -916,8 +1150,8 @@ export function HallViewer(props: HallViewerProps) {
       setHoverTarget(
         hitTestHallScene(
           scene,
-          screenToWorld(viewportRef.current, point),
-          3 / viewportRef.current.scale,
+          screenToWorld(getViewport(), point),
+          3 / getViewport().scale,
         ),
       );
     }
@@ -927,12 +1161,7 @@ export function HallViewer(props: HallViewerProps) {
       const previous = pinchRef.current;
       const current = pinchGesture();
       if (previous && current) {
-        const next = advancePinchViewport(
-          viewportRef.current,
-          previous,
-          current,
-        );
-        viewportRef.current = next;
+        const next = advancePinchViewport(getViewport(), previous, current);
         setViewport(next);
       }
       pinchRef.current = current;
@@ -941,15 +1170,9 @@ export function HallViewer(props: HallViewerProps) {
     const previous = intentRef.current?.lastScreen ?? point;
     if (intentRef.current) intentRef.current.lastScreen = point;
     const intent = intentRef.current;
-    const panPickDrag =
-      interactionMode === 'pick' && intent?.mode === 'pick';
+    const panPickDrag = interactionMode === 'pick' && intent?.mode === 'pick';
     const shouldPan = intent?.mode === 'pan' || panPickDrag;
-    const next = move(
-      native.pointerId,
-      point,
-      viewportRef.current,
-      !shouldPan,
-    );
+    const next = move(native.pointerId, point, getViewport(), !shouldPan);
     if (
       next?.dragging &&
       intentRef.current?.mode === 'edit' &&
@@ -971,18 +1194,35 @@ export function HallViewer(props: HallViewerProps) {
     const point = pointerPoint(native);
     pointersRef.current.delete(native.pointerId);
     if (pinchRef.current) {
-      pinchRef.current = pointersRef.current.size > 1 ? pinchGesture() : null;
+      const stillPinching = pointersRef.current.size > 1;
+      pinchRef.current = stillPinching ? pinchGesture() : null;
       cancel();
       setMovingKeys(new Set());
-      intentRef.current = null;
-      setRenderIntent(null);
+      if (!stillPinching && pointersRef.current.size === 1) {
+        const remaining = [...pointersRef.current.entries()][0];
+        if (remaining) {
+          const [pointerId, screen] = remaining;
+          const panIntent: PointerIntent = {
+            mode: 'pan',
+            target: null,
+            targets: [],
+            selectionReady: false,
+            lastScreen: screen,
+            modifiers: { shift: false, ctrl: false, meta: false },
+          };
+          intentRef.current = panIntent;
+          setRenderIntent(panIntent);
+          begin(pointerId, screen, getViewport());
+        }
+      } else {
+        intentRef.current = null;
+        setRenderIntent(null);
+      }
       return;
     }
     const intent = intentRef.current;
-    const result =
-      point && finish(native.pointerId, point, viewportRef.current);
-    const panPickDrag =
-      interactionMode === 'pick' && intent?.mode === 'pick';
+    const result = point && finish(native.pointerId, point, getViewport());
+    const panPickDrag = interactionMode === 'pick' && intent?.mode === 'pick';
     const shouldPan = intent?.mode === 'pan' || panPickDrag;
     if (point && result?.dragging && shouldPan) {
       const previous = intent?.lastScreen ?? point;
@@ -1001,13 +1241,13 @@ export function HallViewer(props: HallViewerProps) {
         onHandleCommit?.(
           intent.target,
           intent.handleId,
-          snapPoint(screenToWorld(viewportRef.current, point), gridEnabled),
+          snapPoint(screenToWorld(getViewport(), point), gridEnabled),
         );
       return;
     }
     if (intent.mode === 'box') {
       if (result.dragging) {
-        const end = screenToWorld(viewportRef.current, point);
+        const end = screenToWorld(getViewport(), point);
         const bounds = {
           minX: Math.min(result.startWorld.x, end.x),
           minY: Math.min(result.startWorld.y, end.y),
@@ -1051,7 +1291,7 @@ export function HallViewer(props: HallViewerProps) {
     }
     if (result.dragging || intent.mode === 'pan') return;
     const worldPoint = snapPoint(
-      screenToWorld(viewportRef.current, point),
+      screenToWorld(getViewport(), point),
       gridEnabled && authoringMode,
     );
     if (intent.mode === 'create' || interactionMode === 'pick') {
@@ -1078,25 +1318,22 @@ export function HallViewer(props: HallViewerProps) {
 
   function handlePointerCancel(native: PointerEvent) {
     pointersRef.current.delete(native.pointerId);
+    if (pinchRef.current) {
+      pointersRef.current.clear();
+      pinchRef.current = null;
+      cancel();
+      flushPendingPan();
+      setMovingKeys(new Set());
+      intentRef.current = null;
+      setRenderIntent(null);
+      return;
+    }
     if (!cancel(native.pointerId)) return;
     flushPendingPan();
     setMovingKeys(new Set());
     intentRef.current = null;
     setRenderIntent(null);
     pinchRef.current = null;
-  }
-
-  function previewNode(key: string, node: ReactNode): ReactNode {
-    return previewDelta && movingKeys?.has(key) ? (
-      <DragPreview
-        key={isValidElement(node) ? node.key : key}
-        delta={previewDelta}
-      >
-        {node}
-      </DragPreview>
-    ) : (
-      node
-    );
   }
 
   // Keep the static elements stable while the drag preview redraws only overlays.
@@ -1177,7 +1414,6 @@ export function HallViewer(props: HallViewerProps) {
               key={table.id}
               object={table}
               colors={{ fill: palette.table, stroke: palette.row }}
-              scale={viewport.scale}
             />
           ),
         });
@@ -1198,9 +1434,10 @@ export function HallViewer(props: HallViewerProps) {
               object={seat}
               colors={{
                 fill: seatAppearance?.[seat.id]?.fill ?? palette.seat,
-                stroke: seatAppearance?.[seat.id]?.stroke ?? palette.seatStroke,
+                stroke: selectedKeys.has(`seat:${seat.id}`)
+                  ? palette.selected
+                  : (seatAppearance?.[seat.id]?.stroke ?? palette.seatStroke),
               }}
-              scale={viewport.scale}
             />
           ),
         });
@@ -1223,7 +1460,7 @@ export function HallViewer(props: HallViewerProps) {
     visibleLabels,
     palette,
     seatAppearance,
-    viewport.scale,
+    selectedKeys,
   ]);
   const staticSceneObjects = useMemo(
     () =>
@@ -1236,6 +1473,23 @@ export function HallViewer(props: HallViewerProps) {
     () => sceneObjectNodes.filter(({ key }) => movingKeys.has(key)),
     [sceneObjectNodes, movingKeys],
   );
+  const movingSeatNodeCount = useMemo(
+    () => movingDotBatches?.length ?? 0,
+    [movingDotBatches],
+  );
+
+  function previewNode(key: string, node: ReactNode): ReactNode {
+    return previewDelta && movingKeys.has(key) ? (
+      <DragPreview
+        key={isValidElement(node) ? node.key : key}
+        delta={previewDelta}
+      >
+        {node}
+      </DragPreview>
+    ) : (
+      node
+    );
+  }
 
   const selectedText = selection
     .map((target) => {
@@ -1264,7 +1518,13 @@ export function HallViewer(props: HallViewerProps) {
     <Layer name="overlays" listening={false}>
       <Group name="interaction" />
       <Group name="moving-objects">
-        {movingSceneObjects.map(({ key, node }) => previewNode(key, node))}
+        {previewDelta ? (
+          <DragPreview delta={previewDelta}>
+            {movingSceneObjects.map(({ node }) => node)}
+          </DragPreview>
+        ) : (
+          movingSceneObjects.map(({ node }) => node)
+        )}
       </Group>
 
       <Group name="generation-preview">
@@ -1284,17 +1544,15 @@ export function HallViewer(props: HallViewerProps) {
 
       <Group name="selection">
         {selection.flatMap((target) => {
-          const bounds = targetBounds(displayScene, target);
-          return bounds && !(hideSeatShapes && target.kind === 'seat')
+          const bounds = previewTargetBounds(target);
+          return bounds && shouldShowSelectionOverlay(target)
             ? [
-                previewNode(
-                  `${target.kind}:${target.id}`,
-                  <SelectionOverlay
-                    key={`${target.kind}:${target.id}`}
-                    bounds={bounds}
-                    color={palette.selected}
-                  />,
-                ),
+                <SelectionOverlay
+                  key={`${target.kind}:${target.id}`}
+                  bounds={bounds}
+                  color={palette.selected}
+                  shape={target.kind === 'seat' ? 'circle' : 'rectangle'}
+                />,
               ]
             : [];
         })}
@@ -1306,7 +1564,13 @@ export function HallViewer(props: HallViewerProps) {
           (() => {
             const bounds = targetBounds(displayScene, hoverTarget);
             return bounds ? (
-              <SelectionOverlay bounds={bounds} color={palette.row} />
+              <SelectionOverlay
+                bounds={bounds}
+                color={palette.hover}
+                shape={hoverTarget.kind === 'seat' ? 'circle' : 'rectangle'}
+                padding={0.05}
+                strokeWidth={0.12}
+              />
             ) : null;
           })()}
         {boxBounds && (
@@ -1494,18 +1758,6 @@ export function HallViewer(props: HallViewerProps) {
               onChange={(event) => {
                 setFloorId(event.target.value);
                 onFloorChange?.(event.target.value);
-                setViewport(
-                  fitViewport(
-                    buildHallScene(
-                      snapshot,
-                      event.target.value,
-                      zoneBounds,
-                      backgroundPages,
-                    ).bounds,
-                    width,
-                    height,
-                  ),
-                );
                 handleSelection([]);
               }}
             >
@@ -1534,15 +1786,34 @@ export function HallViewer(props: HallViewerProps) {
           setHoverTarget(null);
         }}
         data-visible-seats={showSeats}
+        data-interaction-tool={tool}
         data-preview-seats={previewSeats.length}
         data-preview-moving-seats={previewSeatPositions.length}
+        data-pointer-mode={renderIntent?.mode ?? 'idle'}
+        data-pointer-target={
+          renderIntent?.target
+            ? `${renderIntent.target.kind}:${renderIntent.target.id}`
+            : ''
+        }
+        data-moving-target-count={movingKeys.size}
         data-floor-seat-count={scene.seats.length}
+        data-visible-seat-count={rendered.seats.length}
         data-seat-render-nodes={
           hideSeatShapes
             ? 0
-            : (dotBatches?.length ?? (showSeats ? rendered.seats.length : 0))
+            : dotBatches
+              ? dotBatches.length + movingSeatNodeCount
+              : showSeats
+                ? rendered.seats.length
+                : 0
         }
         data-seat-renderer={hideSeatShapes ? 'external' : 'canvas'}
+        data-seat-renderer-engine={
+          rendererEngine ?? (hideSeatShapes ? 'external' : 'canvas')
+        }
+        data-camera-revision={viewport.revision ?? 0}
+        data-layout-version-id={snapshot.layoutVersionId}
+        data-scene-revision={scene.index.revision}
         data-viewport-x={viewport.x}
         data-viewport-y={viewport.y}
         data-viewport-scale={viewport.scale}
@@ -1552,10 +1823,6 @@ export function HallViewer(props: HallViewerProps) {
           id={stageId}
           width={width}
           height={height}
-          x={viewport.x}
-          y={viewport.y}
-          scaleX={viewport.scale}
-          scaleY={viewport.scale}
           onWheel={handleWheel}
         >
           <Layer name="base" listening={false}>
@@ -1666,9 +1933,9 @@ export function HallViewer(props: HallViewerProps) {
             </Group>
           </Layer>
 
-          <Layer name="objects" listening={false}>
-            <Group name="rows-seats-tables">{staticSceneObjects}</Group>
-          </Layer>
+          <StaticSceneObjectsLayer>
+            {staticSceneObjects}
+          </StaticSceneObjectsLayer>
 
           {!hideSeatShapes && (
             <Layer name="overlays" listening={false}>
@@ -1676,6 +1943,20 @@ export function HallViewer(props: HallViewerProps) {
               <Group name="moving-objects">
                 {movingSceneObjects.map(({ key, node }) =>
                   previewNode(key, node),
+                )}
+                {movingDotBatches && (
+                  <Group
+                    name="moving-dot-seats"
+                    x={previewDelta?.x ?? 0}
+                    y={previewDelta?.y ?? 0}
+                  >
+                    {movingDotBatches.map((batch) => (
+                      <DotSeatBatchShape
+                        key={`moving:${batch.key}`}
+                        batch={batch}
+                      />
+                    ))}
+                  </Group>
                 )}
               </Group>
 
@@ -1696,17 +1977,17 @@ export function HallViewer(props: HallViewerProps) {
 
               <Group name="selection">
                 {selection.flatMap((target) => {
-                  const bounds = targetBounds(displayScene, target);
-                  return bounds && !(hideSeatShapes && target.kind === 'seat')
+                  const bounds = previewTargetBounds(target);
+                  return bounds && shouldShowSelectionOverlay(target)
                     ? [
-                        previewNode(
-                          `${target.kind}:${target.id}`,
-                          <SelectionOverlay
-                            key={`${target.kind}:${target.id}`}
-                            bounds={bounds}
-                            color={palette.selected}
-                          />,
-                        ),
+                        <SelectionOverlay
+                          key={`${target.kind}:${target.id}`}
+                          bounds={bounds}
+                          color={palette.selected}
+                          shape={
+                            target.kind === 'seat' ? 'circle' : 'rectangle'
+                          }
+                        />,
                       ]
                     : [];
                 })}
@@ -1718,7 +1999,15 @@ export function HallViewer(props: HallViewerProps) {
                   (() => {
                     const bounds = targetBounds(displayScene, hoverTarget);
                     return bounds ? (
-                      <SelectionOverlay bounds={bounds} color={palette.row} />
+                      <SelectionOverlay
+                        bounds={bounds}
+                        color={palette.hover}
+                        shape={
+                          hoverTarget.kind === 'seat' ? 'circle' : 'rectangle'
+                        }
+                        padding={0.05}
+                        strokeWidth={0.12}
+                      />
                     ) : null;
                   })()}
                 {boxBounds && (

@@ -66,6 +66,9 @@ describe('layout actions', () => {
     let state = createEditorState(createEmptyDraft('Duplication'));
     const row = createObjectAt(state.draft, 'row-line', { x: 5, y: 5 });
     state = applyEditorCommand(state, row.command);
+    const originalRow = state.draft.snapshot.rows[0];
+    if (!originalRow || originalRow.curve.kind !== 'line')
+      throw new Error('Missing original line row');
     const originalCount = state.draft.snapshot.seats.length;
     const copied = duplicateTargets(state.draft, [row.target], { x: 3, y: 2 });
     state = applyEditorCommand(state, copied.command);
@@ -74,9 +77,12 @@ describe('layout actions', () => {
     expect(copied.targets).toHaveLength(1);
     expect(copied.targets[0]?.id).not.toBe(row.target.id);
     const newRow = state.draft.snapshot.rows[1];
-    expect(newRow?.curve.kind).toBe('line');
-    if (newRow?.curve.kind === 'line')
-      expect(newRow.curve.start).toEqual({ x: 4, y: 7 });
+    if (!newRow || newRow.curve.kind !== 'line')
+      throw new Error('Missing duplicated line row');
+    expect(newRow.curve.start).toEqual({
+      x: originalRow.curve.start.x + 3,
+      y: originalRow.curve.start.y + 2,
+    });
     expect(undoEditor(state).draft.snapshot.rows).toHaveLength(1);
   });
 

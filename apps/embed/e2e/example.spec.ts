@@ -1,8 +1,17 @@
 import { test, expect } from '@playwright/test';
 
-test('renders the empty hall state', async ({ page }) => {
+test('renders a buyer map from the public seat-view package', async ({
+  page,
+}) => {
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'Схема зала' })).toBeVisible();
-  await expect(page.getByText('Пока нет данных для отображения.')).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Бронирование мест' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Места: Small Theater' }),
+  ).toBeVisible();
+  await expect(
+    page.locator('.hall-viewer-canvas canvas').first(),
+  ).toBeVisible();
 });

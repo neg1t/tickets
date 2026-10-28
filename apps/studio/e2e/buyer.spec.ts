@@ -114,25 +114,27 @@ test('releases another tab hold at expiry after the owner tab closes', async ({ 
   await expect(seat).toBeEnabled();
 });
 test('SeatView accepts canvas selection and fits a narrow mobile screen', async ({
-  page,
+  browser,
 }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+  const context = await browser.newContext({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 360, height: 800 },
+  });
+  const page = await context.newPage();
   await page.goto('/');
   await openBuyer(page);
   const view = page.getByRole('region', { name: /Места: Small Theater/ });
   const canvas = view.locator('.hall-viewer-canvas');
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-      ),
-  );
+  const stage = view.locator('[id^="seat-stage-"]');
+  const box = await stage.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y };
+  });
   const x = Number(await canvas.getAttribute('data-viewport-x'));
   const y = Number(await canvas.getAttribute('data-viewport-y'));
   const scale = Number(await canvas.getAttribute('data-viewport-scale'));
-  await view.locator('[id^="seat-stage-"]').click({
-    position: { x, y: y + 10 * scale },
-  });
+  await page.touchscreen.tap(box.x + x, box.y + y + 10 * scale);
   await expect(view.getByText('Выбрано: 1', { exact: true })).toBeVisible();
   await view
     .getByRole('combobox', { name: 'Все сектора' })
@@ -145,6 +147,7 @@ test('SeatView accepts canvas selection and fits a narrow mobile screen', async 
       () => document.documentElement.scrollWidth <= window.innerWidth + 1,
     ),
   ).toBe(true);
+  await context.close();
 });
 test('SeatView switches floors without carrying another floor into its seat list', async ({
   page,

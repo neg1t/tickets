@@ -23,6 +23,7 @@ describe('seat scene preparation', () => {
     );
 
     expect(scene.floorId).toBe('main');
+    expect(scene.sourceItemIds).toEqual(['seat-1', 'seat-2']);
     expect(scene.items).toHaveLength(1);
     expect(scene.items[0]).toMatchObject({
       id: 'seat-1',

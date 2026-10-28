@@ -3,6 +3,6 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "libs/renderer-konva/src",
   "projectType": "library",
-  "tags": ["scope:shared", "layer:widgets", "type:ui"],
+  "tags": ["scope:shared", "layer:features", "type:ui"],
   "targets": {}
 }

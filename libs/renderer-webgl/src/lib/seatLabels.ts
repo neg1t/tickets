@@ -2,6 +2,7 @@ import {
   worldToScreen,
   type RendererScene,
   type RendererSeatGeometry,
+  type RendererSeatPositionUpdate,
   type Viewport,
 } from '@hall-platform/renderer-core';
 import type { SpatialBounds } from '@hall-platform/geometry';
@@ -16,6 +17,7 @@ export function drawSeatLabels(
   viewport: Viewport,
   width: number,
   height: number,
+  previewPositions: readonly RendererSeatPositionUpdate[] = [],
 ): number {
   if (viewport.scale < minimumLabelScale || labelsById.size === 0) return 0;
   const scale = Math.max(0.0001, viewport.scale);
@@ -38,6 +40,9 @@ export function drawSeatLabels(
       (first, second) =>
         (scene.itemOrder.get(first) ?? 0) - (scene.itemOrder.get(second) ?? 0),
     );
+  const previewById = new Map(
+    previewPositions.map(({ id, position }) => [id, position]),
+  );
   if (visibleSeats.length === 0) return 0;
 
   const stride = Math.max(
@@ -62,7 +67,10 @@ export function drawSeatLabels(
     if (!item) continue;
     const label = labelsById.get(item.id);
     if (!label) continue;
-    const point = worldToScreen(viewport, item.geometry.position);
+    const point = worldToScreen(
+      viewport,
+      previewById.get(item.id) ?? item.geometry.position,
+    );
     context.strokeText(label, point.x, point.y, 30);
     context.fillText(label, point.x, point.y, 30);
     rendered += 1;

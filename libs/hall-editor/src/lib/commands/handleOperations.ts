@@ -3,8 +3,8 @@ import type { Vector2, SpatialBounds } from '@hall-platform/geometry';
 import {
   buildHallScene,
   targetBounds,
-  type HallTarget,
 } from '@hall-platform/renderer-konva';
+import type { HallTarget } from '@hall-platform/renderer-core';
 import type { EditorCommand } from '../editorCommands.js';
 import type { HallLayoutDraft } from '../editorDraft.js';
 import { transformRow, transformTable } from './transformSelection.js';

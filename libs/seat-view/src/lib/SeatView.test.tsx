@@ -77,6 +77,21 @@ function ControlledView(props: {
   );
 }
 
+function ClonedControlledView(props: { readonly name: string }) {
+  const [selection, setSelection] = useState<SeatSelectionItem[]>([]);
+  return (
+    <SeatView
+      layout={layout}
+      occurrenceId={props.name}
+      availability={availability}
+      prices={prices}
+      selection={selection.map((item) => ({ ...item }))}
+      onSelectionChange={(next) => setSelection(structuredClone(next))}
+      onBuyClick={() => undefined}
+    />
+  );
+}
+
 describe('SeatView', () => {
   it('uses the pick interaction mode without entering editor tools', () => {
     render(<ControlledView name="pick-mode" />);
@@ -248,6 +263,15 @@ describe('SeatView', () => {
     expect(screen.getByText('Выбрано: 0')).toBeTruthy();
   });
 
+  it('accepts controlled selection echoes as cloned item objects', () => {
+    render(<ClonedControlledView name="cloned-echo" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /^Место L1-1/ }));
+    expect(screen.getByText('Выбрано: 1')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^Место L1-1/ }));
+    expect(screen.getByText('Выбрано: 0')).toBeTruthy();
+  });
+
   it('disables sold seats and limits general admission quantity', () => {
     const onBuyClick = vi.fn();
     render(<ControlledView name="event-1" onBuyClick={onBuyClick} />);
@@ -400,6 +424,74 @@ describe('SeatView', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /^Место L1-2/ }));
     expect(onSelectionChange).toHaveBeenCalledWith([]);
+  });
+
+  it('applies availability deltas and requests a snapshot after a revision gap', async () => {
+    const onAvailabilityResync = vi.fn();
+    const onSelectionChange = vi.fn();
+    const { rerender } = render(
+      <SeatView
+        layout={layout}
+        occurrenceId="event-1"
+        availability={{
+          ...availability,
+          seats: { ...availability.seats, [first.id]: 'available' },
+        }}
+        availabilityRevision={10}
+        availabilityDeltas={[
+          {
+            baseRevision: 10,
+            revision: 11,
+            seats: { [first.id]: 'sold' },
+          },
+        ]}
+        prices={prices}
+        selection={[{ kind: 'seat', seatId: first.id }]}
+        onSelectionChange={onSelectionChange}
+        onBuyClick={() => undefined}
+        onAvailabilityResync={onAvailabilityResync}
+      />,
+    );
+
+    const soldSeat = screen.getByRole('button', { name: /^Место L1-1/ });
+    // A selected seat that becomes unavailable remains removable from the basket.
+    expect((soldSeat as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(soldSeat);
+    expect(onSelectionChange).toHaveBeenCalledWith([]);
+    expect(soldSeat.getAttribute('aria-label')).toContain('продано');
+    expect(
+      screen.getByRole('button', { name: 'Купить' }).hasAttribute('disabled'),
+    ).toBe(true);
+
+    rerender(
+      <SeatView
+        layout={layout}
+        occurrenceId="event-1"
+        availability={{
+          ...availability,
+          seats: { ...availability.seats, [first.id]: 'available' },
+        }}
+        availabilityRevision={11}
+        availabilityDeltas={[
+          {
+            baseRevision: 15,
+            revision: 16,
+            seats: { [first.id]: 'available' },
+          },
+        ]}
+        prices={prices}
+        selection={[]}
+        onSelectionChange={() => undefined}
+        onBuyClick={() => undefined}
+        onAvailabilityResync={onAvailabilityResync}
+      />,
+    );
+
+    await waitFor(() => expect(onAvailabilityResync).toHaveBeenCalledTimes(1));
+    expect(
+      (screen.getByRole('button', { name: /^Место L1-1/ }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
   });
 
   it('allows removing a selected general admission item after stock reaches zero', () => {

@@ -9,11 +9,21 @@ import {
 export const PERFORMANCE_HALL_SIZES = [5_000, 50_000, 100_000] as const;
 export type PerformanceHallSize = (typeof PERFORMANCE_HALL_SIZES)[number];
 export const PERFORMANCE_HALL_SEAT_COUNT = 50_000;
+export const PERFORMANCE_HALL_PROFILES = [
+  'multi-floor',
+  'single-floor',
+  'dense-overlap',
+  'realistic-layout',
+] as const;
+export type PerformanceHallProfile = (typeof PERFORMANCE_HALL_PROFILES)[number];
 
 export function getPerformanceHallId(
   seatCount: PerformanceHallSize = PERFORMANCE_HALL_SEAT_COUNT,
+  profile: PerformanceHallProfile = 'multi-floor',
 ): string {
-  return `performance-hall-${seatCount}`;
+  return profile === 'multi-floor'
+    ? `performance-hall-${seatCount}`
+    : `performance-hall-${seatCount}-${profile}`;
 }
 
 export const PERFORMANCE_HALL_ID = getPerformanceHallId();
@@ -41,6 +51,30 @@ const priceCategories = [
   { amount: 1_500, category: 'Доступные места' },
 ] as const;
 
+type FanCurve = {
+  kind: 'bezier';
+  p0: { x: number; y: number };
+  p1: { x: number; y: number };
+  p2: { x: number; y: number };
+  p3: { x: number; y: number };
+};
+
+function fanCurvePoint(curve: FanCurve, t: number) {
+  const inverse = 1 - t;
+  return {
+    x:
+      inverse ** 3 * curve.p0.x +
+      3 * inverse ** 2 * t * curve.p1.x +
+      3 * inverse * t ** 2 * curve.p2.x +
+      t ** 3 * curve.p3.x,
+    y:
+      inverse ** 3 * curve.p0.y +
+      3 * inverse ** 2 * t * curve.p1.y +
+      3 * inverse * t ** 2 * curve.p2.y +
+      t ** 3 * curve.p3.y,
+  };
+}
+
 function markPerformance(name: string): void {
   if (typeof globalThis.performance !== 'undefined')
     globalThis.performance.mark(name);
@@ -51,8 +85,15 @@ function measurePerformance(name: string, start: string, end: string): void {
     globalThis.performance.measure(name, start, end);
 }
 
-function getHallName(seatCount: number): string {
-  return `Тестовый зал — ${seatCount.toLocaleString('ru-RU')} мест`;
+function getHallName(
+  seatCount: number,
+  profile: PerformanceHallProfile,
+): string {
+  const baseName = `Тестовый зал — ${seatCount.toLocaleString('ru-RU')} мест`;
+  if (profile === 'single-floor') return `${baseName} · один этаж`;
+  if (profile === 'dense-overlap') return `${baseName} · плотная посадка`;
+  if (profile === 'realistic-layout') return `${baseName} · веерная схема`;
+  return baseName;
 }
 
 function getZoneSeatCounts(seatCount: number): number[] {
@@ -66,7 +107,7 @@ function getZoneSeatCounts(seatCount: number): number[] {
   return counts;
 }
 
-function createZones() {
+function createZones(profile: PerformanceHallProfile) {
   return zoneIds.map((id, index) => {
     const floorIndex = Math.floor(index / 4);
     const sectorIndex = index % 4;
@@ -75,32 +116,44 @@ function createZones() {
 
     return {
       id,
-      floorId: floorIds[floorIndex]!,
+      floorId:
+        profile === 'single-floor' ? floorIds[0]! : floorIds[floorIndex]!,
       name: `Сектор ${index + 1}`,
       kind: 'seated' as const,
-      polygon: [
-        { x, y },
-        { x: x + 2_050, y },
-        { x: x + 2_050, y: y + 2_900 },
-        { x, y: y + 2_900 },
-      ],
+      polygon:
+        profile === 'realistic-layout'
+          ? [
+              { x: x + 100, y },
+              { x: x + 1_950, y: y + 100 },
+              { x: x + 1_900, y: y + 2_900 },
+              { x: x + 200, y: y + 2_900 },
+            ]
+          : [
+              { x, y },
+              { x: x + 2_050, y },
+              { x: x + 2_050, y: y + 2_900 },
+              { x, y: y + 2_900 },
+            ],
     };
   });
 }
 
 export function createPerformanceHallSnapshot(
   seatCount: PerformanceHallSize = PERFORMANCE_HALL_SEAT_COUNT,
+  profile: PerformanceHallProfile = 'multi-floor',
 ): LayoutSnapshot {
-  const measurePrefix = `hall:performance:${seatCount}`;
+  const measurePrefix = `hall:performance:${profile}:${seatCount}`;
   markPerformance(`${measurePrefix}:geometry:start`);
-  const layoutVersionId = `performance-layout-${seatCount}-v1`;
-  const id = getPerformanceHallId(seatCount);
-  const floors = floorIds.map((floorId, index) => ({
+  const layoutVersionId = `performance-layout-${seatCount}-${profile}-v1`;
+  const id = getPerformanceHallId(seatCount, profile);
+  const selectedFloorIds =
+    profile === 'single-floor' ? floorIds.slice(0, 1) : floorIds;
+  const floors = selectedFloorIds.map((floorId, index) => ({
     id: floorId,
     layoutVersionId,
     name: ['Партер', 'Балкон', 'Верхний ярус'][index]!,
   }));
-  const zones = createZones();
+  const zones = createZones(profile);
   const zoneSeatCounts = getZoneSeatCounts(seatCount);
   const rows: unknown[] = [];
   const seats: unknown[] = [];
@@ -121,7 +174,29 @@ export function createPerformanceHallSnapshot(
       const zoneY = floorIndex * 12_000 + sectorIndex * 3_000;
       const rowY = zoneY + rowIndex * (10 + (rowIndex % 3) * 0.9);
       const x = sectorIndex * 2_200;
-      const spacing = 8 + ((zoneIndex + rowIndex) % 4) * 0.65;
+      const spacing =
+        8 +
+        ((zoneIndex + rowIndex) % 4) *
+          (profile === 'realistic-layout' ? 0.2 : 0.65);
+      const rowLength = count * spacing;
+      const rowX =
+        profile === 'realistic-layout' ? x + 180 + (1_600 - rowLength) / 2 : x;
+      const fanCurve =
+        profile === 'realistic-layout'
+          ? {
+              kind: 'bezier' as const,
+              p0: { x: rowX, y: rowY + 8 },
+              p1: {
+                x: rowX + rowLength * 0.25,
+                y: rowY + 38 + sectorIndex * 5 + (rowIndex % 5) * 3,
+              },
+              p2: {
+                x: rowX + rowLength * 0.75,
+                y: rowY + 38 + sectorIndex * 5 + (rowIndex % 5) * 3,
+              },
+              p3: { x: rowX + rowLength, y: rowY + 8 },
+            }
+          : null;
 
       rows.push({
         id: rowId,
@@ -129,7 +204,8 @@ export function createPerformanceHallSnapshot(
         zoneId: zone.id,
         name: `Ряд ${rowIndex + 1}`,
         curve:
-          rowIndex % 3 === 0
+          fanCurve ??
+          (rowIndex % 3 === 0
             ? {
                 kind: 'arc',
                 center: { x: x + 1_000, y: rowY - 40 },
@@ -141,7 +217,7 @@ export function createPerformanceHallSnapshot(
                 kind: 'line',
                 start: { x, y: rowY },
                 end: { x: x + count * spacing, y: rowY + (rowIndex % 2) },
-              },
+              }),
         generation: {
           distribution: { kind: 'fixed', count, step: spacing },
         },
@@ -154,10 +230,21 @@ export function createPerformanceHallSnapshot(
           floorId: zone.floorId,
           zoneId: zone.id,
           label: `${column + 1}`,
-          position: {
-            x: x + column * spacing,
-            y: rowY + (column % 7 === 0 ? 0.2 : 0),
-          },
+          position:
+            profile === 'dense-overlap'
+              ? {
+                  x: x + (column % 4) * 0.12,
+                  y: rowY + (Math.floor(column / 4) % 4) * 0.12,
+                }
+              : fanCurve
+                ? fanCurvePoint(
+                    fanCurve,
+                    count === 1 ? 0.5 : column / (count - 1),
+                  )
+                : {
+                    x: x + column * spacing,
+                    y: rowY + (column % 7 === 0 ? 0.2 : 0),
+                  },
           placement: { kind: 'row', rowId },
           ...(visualIndex % 997 === 0
             ? { visualKind: 'wheelchairBay' as const }
@@ -185,7 +272,9 @@ export function createPerformanceHallSnapshot(
       zoneId: zone.id,
       label: `Стол ${index + 1}`,
       center: {
-        x: sectorIndex * 2_200 + 2_000,
+        x:
+          sectorIndex * 2_200 +
+          (profile === 'realistic-layout' ? 1_000 : 2_000),
         y: floorIndex * 12_000 + sectorIndex * 3_000 + 20,
       },
       rotationRadians: (index * Math.PI) / 12,
@@ -266,11 +355,12 @@ export function createPerformanceHallSnapshot(
 
 export function createPerformanceHallDraft(
   seatCount: PerformanceHallSize = PERFORMANCE_HALL_SEAT_COUNT,
+  profile: PerformanceHallProfile = 'multi-floor',
 ): HallLayoutDraft {
-  const snapshot = createPerformanceHallSnapshot(seatCount);
+  const snapshot = createPerformanceHallSnapshot(seatCount, profile);
   return {
     schemaVersion: CURRENT_DRAFT_SCHEMA_VERSION,
-    hallName: getHallName(seatCount),
+    hallName: getHallName(seatCount, profile),
     snapshot,
     zoneBounds: {},
     assets: {

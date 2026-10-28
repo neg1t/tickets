@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   createSeatBuffers,
   updateSeatFillColors,
+  updateSeatGeometry,
   updateSeatSelection,
   updateSeatStatuses,
+  updateSeatStrokeColors,
   type SeatBufferGeometry,
 } from './seatBuffers.js';
 
@@ -60,6 +62,43 @@ describe('WebGL seat instance buffers', () => {
 
     expect([...buffers.fillColors.slice(4, 8)]).toEqual([32, 121, 168, 255]);
     expect(ranges).toEqual([{ start: 1, count: 1 }]);
+  });
+
+  it('updates host-provided stroke colors for per-seat palette parity', () => {
+    const buffers = createSeatBuffers(seats);
+
+    const ranges = updateSeatStrokeColors(buffers, [
+      { id: 'seat-b', strokeColor: '#145577' },
+      { id: 'missing', strokeColor: '#ffffff' },
+    ]);
+
+    expect([...buffers.strokeColors.slice(4, 8)]).toEqual([20, 85, 119, 255]);
+    expect(ranges).toEqual([{ start: 1, count: 1 }]);
+  });
+
+  it('updates moved, rotated, and reshaped seats by stable id', () => {
+    const buffers = createSeatBuffers(seats);
+
+    const ranges = updateSeatGeometry(buffers, [
+      {
+        id: 'seat-b',
+        geometry: {
+          position: { x: 10, y: 11 },
+          rotationRadians: 0.25,
+          visualKind: 'wheelchairBay',
+        },
+      },
+    ]);
+
+    expect([...buffers.positions]).toEqual([1, 2, 10, 11, 7, 8]);
+    expect([...buffers.rotations]).toEqual([0.5, 0.25, 0]);
+    expect([...buffers.symbolKinds]).toEqual([0, 2, 2]);
+    expect(ranges).toMatchObject({
+      positions: [{ start: 1, count: 1 }],
+      rotations: [{ start: 1, count: 1 }],
+      symbolKinds: [{ start: 1, count: 1 }],
+      diameters: [{ start: 1, count: 1 }],
+    });
   });
 
   it('coalesces alternating status updates to avoid one GPU call per seat', () => {

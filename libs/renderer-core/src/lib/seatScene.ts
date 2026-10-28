@@ -1,5 +1,9 @@
 import { seatSymbolBounds } from './seatGeometry.js';
-import { createRendererScene, type RendererScene } from './scene.js';
+import {
+  createRendererScene,
+  type RendererScene,
+  type RendererSceneIdentity,
+} from './scene.js';
 import type { RendererSeatGeometry } from './rendererContract.js';
 
 export type SeatSceneInput = RendererSeatGeometry &
@@ -9,6 +13,7 @@ export function createSeatScene(
   revision: number,
   seats: readonly SeatSceneInput[],
   floorId?: string,
+  identity?: RendererSceneIdentity,
 ): RendererScene<RendererSeatGeometry> {
   const seatFloors = new Set(
     seats.map(({ floorId: itemFloorId }) => itemFloorId),
@@ -39,5 +44,7 @@ export function createSeatScene(
       };
     }),
     activeFloorId,
+    identity,
+    seats.map(({ id }) => id),
   );
 }

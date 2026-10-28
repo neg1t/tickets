@@ -5,7 +5,11 @@ test('auto renderer keeps Canvas disabled until the rollout flag is on', async (
 }) => {
   await page.goto('/');
   await page.evaluate(async () => {
-    const harness = await import('/src/e2e/hallViewportHarness.ts');
+    const moduleUrl = new URL(
+      '/src/e2e/hallViewportHarness.ts',
+      window.location.href,
+    ).href;
+    const harness = await import(moduleUrl);
     harness.mountHallViewportHarness(document.body, 'auto');
   });
 
@@ -27,7 +31,11 @@ test('forced WebGL replaces only the seat layer and preserves CPU picking', asyn
 }) => {
   await page.goto('/');
   await page.evaluate(async () => {
-    const harness = await import('/src/e2e/hallViewportHarness.ts');
+    const moduleUrl = new URL(
+      '/src/e2e/hallViewportHarness.ts',
+      window.location.href,
+    ).href;
+    const harness = await import(moduleUrl);
     harness.mountHallViewportHarness(document.body, 'webgl');
   });
   await expect
@@ -113,7 +121,11 @@ test('resizes WebGL and Konva surfaces together when the viewport changes', asyn
 }) => {
   await page.goto('/');
   await page.evaluate(async () => {
-    const harness = await import('/src/e2e/hallViewportHarness.ts');
+    const moduleUrl = new URL(
+      '/src/e2e/hallViewportHarness.ts',
+      window.location.href,
+    ).href;
+    const harness = await import(moduleUrl);
     harness.mountHallViewportHarness(document.body, 'webgl');
   });
   const container = page.locator('.hall-viewer-canvas');
@@ -154,22 +166,162 @@ test('resizes WebGL and Konva surfaces together when the viewport changes', asyn
     .toEqual([620, 620, 620, 620, 620]);
 });
 
+test('keeps editing available through context loss and restores the latest document', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.evaluate(async () => {
+    const moduleUrl = new URL(
+      '/src/e2e/hallViewportHarness.ts',
+      window.location.href,
+    ).href;
+    const harness = await import(moduleUrl);
+    harness.mountHallViewportHarness(document.body, 'webgl', true);
+  });
+  const webgl = page.locator('canvas[data-renderer="webgl2"]');
+  const viewer = page.locator('.hall-viewer-canvas');
+  await expect(webgl).toBeVisible();
+  const originalSceneRevision = await viewer.getAttribute('data-scene-revision');
+
+  const seatPoint = await page.evaluate(() => {
+    const container = document.querySelector<HTMLElement>(
+      '.hall-viewer-canvas',
+    );
+    const testWindow = window as Window & {
+      __hallSeatWorld?: { x: number; y: number };
+    };
+    if (!container || !testWindow.__hallSeatWorld)
+      throw new Error('Missing HallViewport test fixture');
+    const bounds = container.getBoundingClientRect();
+    const scale = Number(container.dataset.viewportScale);
+    return {
+      x:
+        bounds.left +
+        Number(container.dataset.viewportX) +
+        testWindow.__hallSeatWorld.x * scale,
+      y:
+        bounds.top +
+        Number(container.dataset.viewportY) +
+        testWindow.__hallSeatWorld.y * scale,
+    };
+  });
+  await page.mouse.move(seatPoint.x, seatPoint.y);
+  await page.mouse.down();
+  await page.mouse.move(seatPoint.x + 30, seatPoint.y + 12, { steps: 4 });
+  await expect(viewer).toHaveAttribute('data-preview-moving-seats', '1');
+
+  await page.evaluate(() => {
+    const target = document.querySelector<HTMLCanvasElement>(
+      'canvas[data-renderer="webgl2"]',
+    );
+    if (!target) throw new Error('WebGL canvas was not mounted');
+    target.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+  });
+  await expect(viewer).toHaveAttribute('data-seat-renderer', 'canvas');
+  await expect(viewer).toHaveAttribute('data-moving-target-count', '1');
+  await expect(viewer).toHaveAttribute('data-pointer-mode', 'edit');
+  await page.mouse.up();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as Window & { __hallMoveCommitCount?: number })
+            .__hallMoveCommitCount,
+      ),
+    )
+    .toBe(1);
+
+  await page.evaluate(() => {
+    const testWindow = window as Window & {
+      __replaceHallDocument?: () => void;
+    };
+    if (!testWindow.__replaceHallDocument)
+      throw new Error('Document replacement control was not mounted');
+    testWindow.__replaceHallDocument();
+  });
+  await expect(viewer).toHaveAttribute('data-floor-seat-count', '23');
+  await expect(viewer).toHaveAttribute('data-seat-renderer', 'canvas');
+  await expect
+    .poll(() => viewer.getAttribute('data-scene-revision'))
+    .not.toBe(originalSceneRevision);
+  await expect(webgl).toBeVisible();
+  await expect(viewer).toHaveAttribute('data-seat-renderer', 'external');
+});
+
+test('sizes WebGL, labels, and Konva backing stores at DPR 2', async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    deviceScaleFactor: 2,
+  });
+  try {
+    const page = await context.newPage();
+    await page.goto('/');
+    await page.evaluate(async () => {
+      const moduleUrl = new URL(
+        '/src/e2e/hallViewportHarness.ts',
+        window.location.href,
+      ).href;
+      const harness = await import(moduleUrl);
+      harness.mountHallViewportHarness(document.body, 'webgl');
+    });
+    await expect(page.locator('canvas[data-renderer="webgl2"]')).toBeVisible();
+    const surfaces = await page.evaluate(() => {
+      const selectors = [
+        'canvas[data-renderer="webgl2"]',
+        'canvas[data-renderer="seat-labels"]',
+        '#renderer-parity-stage canvas',
+        '#renderer-parity-stage-overlays canvas',
+      ];
+      return selectors.flatMap((selector) => {
+        const canvas = document.querySelector<HTMLCanvasElement>(selector);
+        if (!canvas) return [];
+        const bounds = canvas.getBoundingClientRect();
+        return [{
+          selector,
+          backing: [canvas.width, canvas.height],
+          css: [bounds.width, bounds.height],
+        }];
+      });
+    });
+    expect(surfaces).toHaveLength(4);
+    expect(surfaces.map(({ backing }) => backing)).toEqual(
+      surfaces.map(({ css }) => [
+        Math.round(Math.round(css[0] ?? 0) * 2),
+        Math.round(Math.round(css[1] ?? 0) * 2),
+      ]),
+    );
+  } finally {
+    await context.close();
+  }
+});
+
 test('matches Canvas seat fill at the same seat center', async ({ page }) => {
   await page.addInitScript(() => {
     const getContext = HTMLCanvasElement.prototype.getContext;
-    HTMLCanvasElement.prototype.getContext = function (kind, ...args) {
-      if (kind !== 'webgl2') return getContext.call(this, kind, ...args);
-      const options = args[0];
-      return getContext.call(this, kind, {
-        ...(typeof options === 'object' && options !== null ? options : {}),
-        preserveDrawingBuffer: true,
-      });
-    };
+    HTMLCanvasElement.prototype.getContext = new Proxy(getContext, {
+      apply(target, thisArg, args: unknown[]) {
+        const [kind, options] = args;
+        if (kind !== 'webgl2') return Reflect.apply(target, thisArg, args);
+        return Reflect.apply(target, thisArg, [
+          kind,
+          {
+            ...(typeof options === 'object' && options !== null ? options : {}),
+            preserveDrawingBuffer: true,
+          },
+        ]);
+      },
+    });
   });
   await page.goto('/');
   await page.evaluate(async () => {
     document.body.classList.add('hall-theme-canvas');
-    const harness = await import('/src/e2e/hallViewportHarness.ts');
+    const moduleUrl = new URL(
+      '/src/e2e/hallViewportHarness.ts',
+      window.location.href,
+    ).href;
+    const harness = await import(moduleUrl);
     harness.mountHallViewportHarness(document.body, 'canvas');
   });
   await page.evaluate(
@@ -228,7 +380,11 @@ test('matches Canvas seat fill at the same seat center', async ({ page }) => {
   expect(canvasFill).toEqual([87, 184, 213, 255]);
 
   await page.evaluate(async () => {
-    const harness = await import('/src/e2e/hallViewportHarness.ts');
+    const moduleUrl = new URL(
+      '/src/e2e/hallViewportHarness.ts',
+      window.location.href,
+    ).href;
+    const harness = await import(moduleUrl);
     harness.unmountHallViewportHarness(document.body);
     harness.mountHallViewportHarness(document.body, 'webgl');
   });
@@ -275,12 +431,65 @@ test('matches Canvas seat fill at the same seat center', async ({ page }) => {
   expect(webglFill.slice(0, 3)).toEqual(canvasFill?.slice(0, 3));
 });
 
+test('passes the resolved CSS selection color to the WebGL shader', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const original = WebGL2RenderingContext.prototype.uniform4f;
+    const targetWindow = window as Window & {
+      __selectedColorUniforms?: number[][];
+    };
+    targetWindow.__selectedColorUniforms = [];
+    WebGL2RenderingContext.prototype.uniform4f = function (
+      location,
+      red,
+      green,
+      blue,
+      alpha,
+    ) {
+      targetWindow.__selectedColorUniforms?.push([red, green, blue, alpha]);
+      return original.call(this, location, red, green, blue, alpha);
+    };
+  });
+  await page.goto('/');
+  await page.evaluate(async () => {
+    document.body.style.setProperty('--hall-canvas-selected', '#12d687');
+    const moduleUrl = new URL(
+      '/src/e2e/hallViewportHarness.ts',
+      window.location.href,
+    ).href;
+    const harness = await import(moduleUrl);
+    harness.mountHallViewportHarness(document.body, 'webgl');
+  });
+  await expect(page.locator('canvas[data-renderer="webgl2"]')).toBeVisible();
+
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (
+          window as Window & { __selectedColorUniforms?: number[][] }
+        ).__selectedColorUniforms?.some(
+          ([red, green, blue, alpha]) =>
+            Math.abs((red ?? 0) - 18 / 255) < 0.001 &&
+            Math.abs((green ?? 0) - 214 / 255) < 0.001 &&
+            Math.abs((blue ?? 0) - 135 / 255) < 0.001 &&
+            alpha === 1,
+        ),
+      ),
+    )
+    .toBe(true);
+});
+
 test('editor drag previews move WebGL seat buffers and commit once on release', async ({
   page,
 }) => {
   await page.goto('/');
   await page.evaluate(async () => {
-    const harness = await import('/src/e2e/hallViewportHarness.ts');
+    const moduleUrl = new URL(
+      '/src/e2e/hallViewportHarness.ts',
+      window.location.href,
+    ).href;
+    const harness = await import(moduleUrl);
     harness.mountHallViewportHarness(document.body, 'webgl', true);
   });
   await expect(page.locator('canvas[data-renderer="webgl2"]')).toBeVisible();
@@ -359,7 +568,11 @@ test('falls back to Konva when WebGL2 context creation fails', async ({
   });
   await page.goto('/');
   await page.evaluate(async () => {
-    const harness = await import('/src/e2e/hallViewportHarness.ts');
+    const moduleUrl = new URL(
+      '/src/e2e/hallViewportHarness.ts',
+      window.location.href,
+    ).href;
+    const harness = await import(moduleUrl);
     harness.mountHallViewportHarness(document.body, 'webgl');
   });
 
@@ -379,30 +592,20 @@ test('falls back to Konva when WebGL2 context creation fails', async ({
     .toBe('WebGL2 is not available for this canvas');
 });
 
-test('restores once and falls back after the context is lost again', async ({
+test('falls back immediately on context loss and recovers only after a draw', async ({
   page,
 }) => {
   await page.goto('/');
   await page.evaluate(async () => {
-    const harness = await import('/src/e2e/hallViewportHarness.ts');
+    const moduleUrl = new URL(
+      '/src/e2e/hallViewportHarness.ts',
+      window.location.href,
+    ).href;
+    const harness = await import(moduleUrl);
     harness.mountHallViewportHarness(document.body, 'webgl');
   });
   const canvas = page.locator('canvas[data-renderer="webgl2"]');
   await expect(canvas).toBeVisible();
-
-  await page.evaluate(() => {
-    const target = document.querySelector<HTMLCanvasElement>(
-      'canvas[data-renderer="webgl2"]',
-    );
-    if (!target) throw new Error('WebGL canvas was not mounted');
-    target.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
-    target.dispatchEvent(new Event('webglcontextrestored'));
-  });
-  await expect(canvas).toBeVisible();
-  await expect(page.locator('.hall-viewer-canvas')).toHaveAttribute(
-    'data-seat-renderer',
-    'external',
-  );
 
   await page.evaluate(() => {
     const target = document.querySelector<HTMLCanvasElement>(
@@ -415,7 +618,67 @@ test('restores once and falls back after the context is lost again', async ({
     'data-seat-renderer',
     'canvas',
   );
-  await expect(page.locator('canvas[data-renderer="webgl2"]')).toHaveCount(0);
+
+  await page.evaluate(() => {
+    const target = document.querySelector<HTMLCanvasElement>(
+      'canvas[data-renderer="webgl2"]',
+    );
+    if (!target) throw new Error('WebGL canvas was not mounted');
+    target.dispatchEvent(new Event('webglcontextrestored'));
+  });
+  await expect(page.locator('.hall-viewer-canvas')).toHaveAttribute(
+    'data-seat-renderer',
+    'external',
+  );
+  await expect(canvas).toBeVisible();
+
+  await page.evaluate(() => {
+    const target = document.querySelector<HTMLCanvasElement>(
+      'canvas[data-renderer="webgl2"]',
+    );
+    if (!target) throw new Error('WebGL canvas was not mounted');
+    target.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+  });
+  await expect(page.locator('.hall-viewer-canvas')).toHaveAttribute(
+    'data-seat-renderer',
+    'canvas',
+  );
+  await expect(page.locator('canvas[data-renderer="webgl2"]')).toHaveCount(1);
+});
+
+test('keeps the Canvas fallback when a lost context never restores', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.evaluate(async () => {
+    const moduleUrl = new URL(
+      '/src/e2e/hallViewportHarness.ts',
+      window.location.href,
+    ).href;
+    const harness = await import(moduleUrl);
+    harness.mountHallViewportHarness(document.body, 'webgl');
+  });
+  const canvas = page.locator('canvas[data-renderer="webgl2"]');
+  await expect(canvas).toBeVisible();
+
+  await page.evaluate(() => {
+    const target = document.querySelector<HTMLCanvasElement>(
+      'canvas[data-renderer="webgl2"]',
+    );
+    if (!target) throw new Error('WebGL canvas was not mounted');
+    target.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+  });
+
+  await expect(page.locator('.hall-viewer-canvas')).toHaveAttribute(
+    'data-seat-renderer',
+    'canvas',
+  );
+  await expect(canvas).toHaveCount(1);
+  await page.waitForTimeout(100);
+  await expect(page.locator('.hall-viewer-canvas')).toHaveAttribute(
+    'data-seat-renderer',
+    'canvas',
+  );
 });
 
 test('recovers a real WebGL context loss and falls back after the next loss', async ({
@@ -423,7 +686,11 @@ test('recovers a real WebGL context loss and falls back after the next loss', as
 }) => {
   await page.goto('/');
   await page.evaluate(async () => {
-    const harness = await import('/src/e2e/hallViewportHarness.ts');
+    const moduleUrl = new URL(
+      '/src/e2e/hallViewportHarness.ts',
+      window.location.href,
+    ).href;
+    const harness = await import(moduleUrl);
     harness.mountHallViewportHarness(document.body, 'webgl');
   });
   const canvas = page.locator('canvas[data-renderer="webgl2"]');
@@ -450,7 +717,7 @@ test('recovers a real WebGL context loss and falls back after the next loss', as
         const timeout = window.setTimeout(() => resolve(false), 4000);
         target.addEventListener(
           'webglcontextlost',
-          () => window.setTimeout(() => extension.restoreContext(), 50),
+          () => window.setTimeout(() => extension.restoreContext(), 150),
           { once: true },
         );
         target.addEventListener(
@@ -484,7 +751,7 @@ test('recovers a real WebGL context loss and falls back after the next loss', as
     'data-seat-renderer',
     'canvas',
   );
-  await expect(page.locator('canvas[data-renderer="webgl2"]')).toHaveCount(0);
+  await expect(page.locator('canvas[data-renderer="webgl2"]')).toHaveCount(1);
 });
 
 test('falls back to Konva if context restoration cannot rebuild shaders', async ({
@@ -492,7 +759,11 @@ test('falls back to Konva if context restoration cannot rebuild shaders', async 
 }) => {
   await page.goto('/');
   await page.evaluate(async () => {
-    const harness = await import('/src/e2e/hallViewportHarness.ts');
+    const moduleUrl = new URL(
+      '/src/e2e/hallViewportHarness.ts',
+      window.location.href,
+    ).href;
+    const harness = await import(moduleUrl);
     harness.mountHallViewportHarness(document.body, 'webgl');
   });
   await expect(page.locator('canvas[data-renderer="webgl2"]')).toBeVisible();

@@ -2,10 +2,12 @@ import type { Vector2 } from '@hall-platform/geometry';
 import { SpatialIndex, type SpatialBounds } from '@hall-platform/geometry';
 import {
   screenToWorld,
+  hitSeatSymbol,
   seatSymbolBounds,
   type RendererContract,
   type RendererEvent,
   type RendererScene,
+  type RendererSceneChangeSet,
   type RendererSeatGeometry,
   type RendererSeatPositionUpdate,
   type RendererSeatUpdate,
@@ -20,24 +22,36 @@ import {
   createSeatBuffers,
   updateSeatSelection,
   updateSeatPositions,
+  updateSeatGeometry,
   updateSeatStatuses,
+  updateSeatStrokeColors,
   type BufferRange,
   type SeatBuffers,
   updateSeatFillColors,
+  parseSeatColor,
 } from './seatBuffers.js';
 import { seatFragmentShader, seatVertexShader } from './seatShaders.js';
-import { hitTestSeatScene } from './seatHitTest.js';
 
 export type WebGLRendererOptions = Readonly<{
   preserveDrawingBuffer?: boolean;
   onContextLost?: () => void;
   onContextRestored?: () => void;
+  onFrameRendered?: () => void;
   onError?: (error: Error) => void;
+}>;
+
+export type WebGLRendererDiagnostics = Readonly<{
+  fullSceneBuilds: number;
+  incrementalSceneUpdates: number;
+  rejectedSceneChanges: number;
+  fullBufferUploads: number;
+  partialBufferUploads: number;
 }>;
 
 type Uniforms = Readonly<{
   resolution: WebGLUniformLocation | null;
   viewport: WebGLUniformLocation | null;
+  selectedColor: WebGLUniformLocation | null;
 }>;
 
 type AttributeBinding = Readonly<{
@@ -95,6 +109,7 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     string,
     SceneItem<RendererSeatGeometry>
   >();
+  private readonly seatOrderById = new Map<string, number>();
   private readonly previewPositions = new Map<string, Vector2>();
   private basePositions = new Float32Array();
   private viewport: Viewport = { x: 0, y: 0, scale: 1 };
@@ -102,13 +117,26 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
   private height = 1;
   private pixelRatio = 1;
   private selection: readonly RendererTargetRef[] = [];
+  private selectedColor: readonly [number, number, number] = [237, 137, 54];
   private eventHandler: ((event: RendererEvent) => void) | null = null;
   private program: WebGLProgram | null = null;
-  private uniforms: Uniforms = { resolution: null, viewport: null };
+  private uniforms: Uniforms = {
+    resolution: null,
+    viewport: null,
+    selectedColor: null,
+  };
   private frame = 0;
   private disposed = false;
   private contextLost = false;
   private stopObservingContext: (() => void) | null = null;
+  private diagnostics = {
+    fullSceneBuilds: 0,
+    incrementalSceneUpdates: 0,
+    rejectedSceneChanges: 0,
+    fullBufferUploads: 0,
+    partialBufferUploads: 0,
+  };
+  private readonly acceptedRevisionsByIdentity = new Map<string, number>();
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -136,12 +164,41 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
   }
 
-  setScene(scene: RendererScene<RendererSeatGeometry>): void {
-    if (this.disposed) return;
+  setScene(scene: RendererScene<RendererSeatGeometry>): boolean {
+    if (this.disposed) return false;
+    const identityKey = this.sceneIdentityKey(scene);
+    const lastAcceptedRevision =
+      this.acceptedRevisionsByIdentity.get(identityKey);
+    if (
+      lastAcceptedRevision !== undefined &&
+      scene.revision <= lastAcceptedRevision
+    ) {
+      this.diagnostics.rejectedSceneChanges += 1;
+      this.updateDiagnosticsAttributes();
+      return false;
+    }
+    const sameIdentity =
+      this.scene?.identity?.documentId === scene.identity?.documentId &&
+      this.scene?.identity?.sessionId === scene.identity?.sessionId;
+    if (this.scene && sameIdentity && scene.revision <= this.scene.revision) {
+      this.diagnostics.rejectedSceneChanges += 1;
+      this.updateDiagnosticsAttributes();
+      return false;
+    }
+    if (this.scene && !sameIdentity) {
+      this.stylesById.clear();
+      this.selection = [];
+    }
+    if (this.scene && sameIdentity) {
+      const nextSeatIds = new Set(scene.sourceItemIds);
+      for (const id of this.stylesById.keys())
+        if (!nextSeatIds.has(id)) this.stylesById.delete(id);
+    }
     this.scene = scene;
     this.visibleSeatRangesCache = null;
     this.renderIndex.clear();
     this.seatItemsById.clear();
+    this.seatOrderById.clear();
     this.previewPositions.clear();
     const seatItems = scene.items.filter(
       (item) =>
@@ -150,19 +207,152 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     );
     for (const item of seatItems) {
       this.seatItemsById.set(item.id, item);
+      this.seatOrderById.set(item.id, scene.itemOrder.get(item) ?? 0);
       this.renderIndex.upsert(item.id, item.bounds, item);
     }
     const seats = seatItems.map((item) => ({ id: item.id, ...item.geometry }));
-    const nextSeatIds = new Set(seats.map(({ id }) => id));
-    for (const id of this.stylesById.keys())
-      if (!nextSeatIds.has(id)) this.stylesById.delete(id);
     this.buffers = createSeatBuffers(seats);
     this.basePositions = new Float32Array(this.buffers.positions);
     updateSeatStatuses(this.buffers, [...this.stylesById.values()]);
     updateSeatFillColors(this.buffers, [...this.stylesById.values()]);
+    updateSeatStrokeColors(this.buffers, [...this.stylesById.values()]);
     updateSeatSelection(this.buffers, this.selection);
     this.uploadSeatBuffers();
+    this.acceptedRevisionsByIdentity.set(identityKey, scene.revision);
+    this.diagnostics.fullSceneBuilds += 1;
+    this.updateDiagnosticsAttributes();
     this.scheduleFrame();
+    return true;
+  }
+
+  applySceneChanges(
+    changes: RendererSceneChangeSet<RendererSeatGeometry>,
+  ): boolean {
+    const current = this.scene;
+    const next = changes.scene;
+    if (
+      this.disposed ||
+      !current ||
+      changes.replace ||
+      changes.baseRevision !== current.revision ||
+      changes.revision !== next.revision ||
+      changes.revision <= changes.baseRevision ||
+      current.floorId !== next.floorId ||
+      current.identity?.documentId !== changes.identity?.documentId ||
+      current.identity?.sessionId !== changes.identity?.sessionId ||
+      next.identity?.documentId !== changes.identity?.documentId ||
+      next.identity?.sessionId !== changes.identity?.sessionId
+    ) {
+      if (!this.disposed) {
+        this.diagnostics.rejectedSceneChanges += 1;
+        this.updateDiagnosticsAttributes();
+      }
+      return false;
+    }
+
+    if (this.previewPositions.size > 0) this.setPreviewPositions([]);
+    for (const id of changes.removedSourceIds) this.stylesById.delete(id);
+    const addedSeats: SceneItem<RendererSeatGeometry>[] = [];
+    const updatedSeats: SceneItem<RendererSeatGeometry>[] = [];
+    let removedSeat = false;
+    for (const key of changes.removed) {
+      const item = current.itemByKey.get(key);
+      if (
+        !item ||
+        item.kind !== 'seat' ||
+        (current.floorId && item.floorId !== current.floorId)
+      )
+        continue;
+      this.seatItemsById.delete(item.id);
+      this.seatOrderById.delete(item.id);
+      this.renderIndex.remove(item.id);
+      this.stylesById.delete(item.id);
+      removedSeat = true;
+    }
+    for (const item of changes.added) {
+      if (
+        item.kind !== 'seat' ||
+        (next.floorId && item.floorId !== next.floorId)
+      )
+        continue;
+      this.seatItemsById.set(item.id, item);
+      this.seatOrderById.set(item.id, next.itemOrder.get(item) ?? 0);
+      this.renderIndex.upsert(item.id, item.bounds, item);
+      addedSeats.push(item);
+    }
+    for (const item of changes.updated) {
+      if (
+        item.kind !== 'seat' ||
+        (next.floorId && item.floorId !== next.floorId)
+      )
+        continue;
+      this.seatItemsById.set(item.id, item);
+      this.seatOrderById.set(item.id, next.itemOrder.get(item) ?? 0);
+      this.renderIndex.upsert(item.id, item.bounds, item);
+      updatedSeats.push(item);
+    }
+    this.scene = next;
+    this.visibleSeatRangesCache = null;
+
+    if (removedSeat || addedSeats.length > 0 || changes.orderChanged) {
+      const seats = next.items
+        .filter(
+          (item) =>
+            item.kind === 'seat' &&
+            (!next.floorId || item.floorId === next.floorId),
+        )
+        .map((item) => ({ id: item.id, ...item.geometry }));
+      this.seatItemsById.clear();
+      this.seatOrderById.clear();
+      for (const item of next.items) {
+        if (
+          item.kind === 'seat' &&
+          (!next.floorId || item.floorId === next.floorId)
+        ) {
+          this.seatItemsById.set(item.id, item);
+          this.seatOrderById.set(item.id, next.itemOrder.get(item) ?? 0);
+        }
+      }
+      this.buffers = createSeatBuffers(seats);
+      this.basePositions = new Float32Array(this.buffers.positions);
+      updateSeatStatuses(this.buffers, [...this.stylesById.values()]);
+      updateSeatFillColors(this.buffers, [...this.stylesById.values()]);
+      updateSeatStrokeColors(this.buffers, [...this.stylesById.values()]);
+      updateSeatSelection(this.buffers, this.selection);
+      this.uploadSeatBuffers();
+    } else if (updatedSeats.length > 0) {
+      const ranges = updateSeatGeometry(
+        this.buffers,
+        updatedSeats.map(({ id, geometry }) => ({ id, geometry })),
+      );
+      this.uploadRanges(
+        'positions',
+        this.buffers.positions,
+        ranges.positions,
+        2,
+      );
+      this.uploadRanges('rotations', this.buffers.rotations, ranges.rotations);
+      this.uploadRanges(
+        'symbolKinds',
+        this.buffers.symbolKinds,
+        ranges.symbolKinds,
+      );
+      this.uploadRanges('diameters', this.buffers.diameters, ranges.diameters);
+      this.basePositions = new Float32Array(this.buffers.positions);
+    }
+    if (changes.styles.length > 0) this.updateSeats(changes.styles);
+    this.acceptedRevisionsByIdentity.set(
+      this.sceneIdentityKey(next),
+      next.revision,
+    );
+    this.diagnostics.incrementalSceneUpdates += 1;
+    this.updateDiagnosticsAttributes();
+    this.scheduleFrame();
+    return true;
+  }
+
+  getDiagnostics(): WebGLRendererDiagnostics {
+    return { ...this.diagnostics };
   }
 
   updateSeats(updates: readonly RendererSeatUpdate[]): void {
@@ -170,9 +360,22 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     for (const update of updates) this.stylesById.set(update.id, update);
     const ranges = updateSeatStatuses(this.buffers, updates);
     const colorRanges = updateSeatFillColors(this.buffers, updates);
+    const strokeColorRanges = updateSeatStrokeColors(this.buffers, updates);
     this.uploadRanges('statuses', this.buffers.statuses, ranges);
     this.uploadRanges('fillColors', this.buffers.fillColors, colorRanges, 4);
-    if (ranges.length > 0 || colorRanges.length > 0) this.scheduleFrame();
+    this.uploadRanges(
+      'strokeColors',
+      this.buffers.strokeColors,
+      strokeColorRanges,
+      4,
+    );
+    this.updateDiagnosticsAttributes();
+    if (
+      ranges.length > 0 ||
+      colorRanges.length > 0 ||
+      strokeColorRanges.length > 0
+    )
+      this.scheduleFrame();
   }
 
   setPreviewPositions(positions: readonly RendererSeatPositionUpdate[]): void {
@@ -201,6 +404,7 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     for (const [id, position] of next) this.previewPositions.set(id, position);
     const ranges = updateSeatPositions(this.buffers, updates);
     this.uploadRanges('positions', this.buffers.positions, ranges, 2);
+    this.updateDiagnosticsAttributes();
     if (ranges.length > 0) {
       this.visibleSeatRangesCache = null;
       this.scheduleFrame();
@@ -213,12 +417,33 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     this.scheduleFrame();
   }
 
+  applyViewportFrame(viewport: Viewport): void {
+    if (this.disposed) return;
+    this.viewport = viewport;
+    this.cancelFrame();
+    this.render();
+    if (this.program && !this.contextLost && viewport.revision !== undefined)
+      this.canvas.dataset.cameraRevision = String(viewport.revision);
+  }
+
   setSelection(targets: readonly RendererTargetRef[]): void {
     if (this.disposed) return;
     this.selection = [...targets];
     const ranges = updateSeatSelection(this.buffers, targets);
     this.uploadRanges('selected', this.buffers.selected, ranges);
+    this.updateDiagnosticsAttributes();
     if (ranges.length > 0) this.scheduleFrame();
+  }
+
+  setSelectedColor(color: string): void {
+    const parsed = parseSeatColor(color);
+    if (
+      !parsed ||
+      parsed.every((channel, index) => channel === this.selectedColor[index])
+    )
+      return;
+    this.selectedColor = parsed;
+    this.scheduleFrame();
   }
 
   resize(
@@ -245,12 +470,25 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
   pickAt(screen: Vector2): RendererTargetRef | null {
     if (!this.scene || this.disposed) return null;
     const world = screenToWorld(this.viewport, screen);
-    return hitTestSeatScene(
-      this.scene,
-      world,
-      this.scene.floorId,
-      8 / Math.max(this.viewport.scale, 0.1),
+    const tolerance = 8 / Math.max(this.viewport.scale, 0.1);
+    const candidates = this.renderIndex
+      .search({
+        minX: world.x - tolerance,
+        minY: world.y - tolerance,
+        maxX: world.x + tolerance,
+        maxY: world.y + tolerance,
+      })
+      .map(({ value }) => value)
+      .sort(
+        (first, second) =>
+          (this.seatOrderById.get(first.id) ?? 0) -
+          (this.seatOrderById.get(second.id) ?? 0),
+      );
+    const hit = candidates.find(
+      (item) =>
+        item.kind === 'seat' && hitSeatSymbol(item.geometry, world, tolerance),
     );
+    return hit ? { kind: hit.kind, id: hit.id } : null;
   }
 
   emitPick(screen: Vector2): void {
@@ -285,6 +523,7 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     this.scene = null;
     this.renderIndex.clear();
     this.seatItemsById.clear();
+    this.seatOrderById.clear();
     this.previewPositions.clear();
     this.basePositions = new Float32Array();
     this.attributes.clear();
@@ -326,6 +565,7 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     this.uniforms = {
       resolution: this.gl.getUniformLocation(program, 'u_resolution'),
       viewport: this.gl.getUniformLocation(program, 'u_viewport'),
+      selectedColor: this.gl.getUniformLocation(program, 'u_selectedColor'),
     };
     this.gl.useProgram(program);
     this.resources.uploadBuffer(this.gl, 'corners', cornerVertices);
@@ -381,6 +621,12 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
       this.buffers.fillColors,
       this.gl.DYNAMIC_DRAW,
     );
+    this.resources.uploadBuffer(
+      this.gl,
+      'strokeColors',
+      this.buffers.strokeColors,
+      this.gl.DYNAMIC_DRAW,
+    );
     this.bindAttribute('a_position', 'positions', 2, 1);
     this.bindAttribute('a_rotation', 'rotations', 1, 1);
     this.bindAttribute('a_symbolKind', 'symbolKinds', 1, 1);
@@ -395,6 +641,15 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
       this.gl.UNSIGNED_BYTE,
       true,
     );
+    this.bindAttribute(
+      'a_strokeColor',
+      'strokeColors',
+      4,
+      1,
+      this.gl.UNSIGNED_BYTE,
+      true,
+    );
+    this.diagnostics.fullBufferUploads += 8;
   }
 
   private bindAttribute(
@@ -405,7 +660,9 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
     type: number = this.gl.FLOAT,
     normalized = false,
   ): void {
-    const location = this.gl.getAttribLocation(this.program!, name);
+    const program = this.program;
+    if (!program) throw new Error('WebGL seat program is not initialized');
+    const location = this.gl.getAttribLocation(program, name);
     if (location < 0) throw new Error(`Missing WebGL attribute: ${name}`);
     const buffer = this.resources.buffer(bufferName);
     if (!buffer) throw new Error(`Missing WebGL buffer: ${bufferName}`);
@@ -444,7 +701,34 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
           (range.start + range.count) * components,
         ),
       );
+      this.diagnostics.partialBufferUploads += 1;
     }
+  }
+
+  private updateDiagnosticsAttributes(): void {
+    if (!this.canvas.dataset) return;
+    this.canvas.dataset.sceneRevision = String(this.scene?.revision ?? '');
+    this.canvas.dataset.fullSceneBuilds = String(
+      this.diagnostics.fullSceneBuilds,
+    );
+    this.canvas.dataset.incrementalSceneUpdates = String(
+      this.diagnostics.incrementalSceneUpdates,
+    );
+    this.canvas.dataset.rejectedSceneChanges = String(
+      this.diagnostics.rejectedSceneChanges,
+    );
+    this.canvas.dataset.fullBufferUploads = String(
+      this.diagnostics.fullBufferUploads,
+    );
+    this.canvas.dataset.partialBufferUploads = String(
+      this.diagnostics.partialBufferUploads,
+    );
+  }
+
+  private sceneIdentityKey(scene: RendererScene<RendererSeatGeometry>): string {
+    return scene.identity
+      ? JSON.stringify([scene.identity.documentId, scene.identity.sessionId])
+      : 'legacy-scene';
   }
 
   private scheduleFrame(): void {
@@ -481,10 +765,19 @@ export class WebGLHallRenderer implements RendererContract<RendererSeatGeometry>
         this.viewport.y * this.pixelRatio,
         this.viewport.scale * this.pixelRatio,
       );
+    if (this.uniforms.selectedColor)
+      this.gl.uniform4f(
+        this.uniforms.selectedColor,
+        (this.selectedColor[0] ?? 237) / 255,
+        (this.selectedColor[1] ?? 137) / 255,
+        (this.selectedColor[2] ?? 54) / 255,
+        1,
+      );
     for (const range of this.visibleSeatRanges()) {
       this.bindInstanceAttributesAt(range.start);
       this.gl.drawArraysInstanced(this.gl.TRIANGLES, 0, 6, range.count);
     }
+    if (this.scene) this.contextCallbacks.onFrameRendered?.();
   }
 
   private visibleSeatRanges(): BufferRange[] {

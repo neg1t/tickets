@@ -4,6 +4,7 @@
     "rootDir": "src",
     "outDir": "../../dist/out-tsc/renderer-webgl-spec",
     "tsBuildInfoFile": "../../dist/out-tsc/renderer-webgl-spec/tsconfig.spec.tsbuildinfo",
+    "lib": ["es2022", "dom"],
     "types": ["vitest/globals", "node"]
   },
   "include": [

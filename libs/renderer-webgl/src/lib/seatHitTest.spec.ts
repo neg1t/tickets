@@ -3,7 +3,7 @@ import { createRendererScene } from '@hall-platform/renderer-core';
 import { hitTestSeatScene } from './seatHitTest.js';
 
 describe('WebGL seat hit testing', () => {
-  it('respects seat rotation and ignores items on another floor', () => {
+  it('uses circular hits regardless of rotation and ignores other floors', () => {
     const scene = createRendererScene(1, [
       {
         id: 'rotated',
@@ -24,10 +24,11 @@ describe('WebGL seat hit testing', () => {
       },
     ]);
 
-    expect(hitTestSeatScene(scene, { x: 2.6, y: 0.6 }, 'lower')).toEqual({
+    expect(hitTestSeatScene(scene, { x: 2.5, y: 0.5 }, 'lower')).toEqual({
       kind: 'seat',
       id: 'rotated',
     });
+    expect(hitTestSeatScene(scene, { x: 2.7, y: 0.7 }, 'lower')).toBeNull();
     expect(hitTestSeatScene(scene, { x: 0, y: 0 }, 'lower')).toBeNull();
   });
 });

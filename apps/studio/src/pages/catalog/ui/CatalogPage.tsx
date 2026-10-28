@@ -45,6 +45,16 @@ export type CatalogPageProps = {
 };
 
 function HallThumbnail({ hall }: { hall: HallSummary }) {
+  if (hall.thumbnailDataUrl)
+    return (
+      <img
+        className="catalog-thumbnail catalog-thumbnail-image"
+        src={hall.thumbnailDataUrl}
+        alt={`Миниатюра схемы зала «${hall.name}»`}
+        loading="lazy"
+        decoding="async"
+      />
+    );
   const zoneCount = Math.max(1, Math.min(hall.zones, 4));
   const dotsPerZone = Math.max(
     1,
@@ -107,6 +117,14 @@ export function CatalogPage(props: CatalogPageProps) {
             Демо-мероприятия
           </button>
         </nav>
+        <button
+          type="button"
+          className="studio-mobile-events"
+          aria-label="Демо-мероприятия"
+          onClick={props.onEvents}
+        >
+          Демо
+        </button>
         <button
           type="button"
           className="studio-button studio-button-primary studio-mobile-create"

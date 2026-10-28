@@ -29,8 +29,14 @@ test('renders a hall, zooms, pans and selects a seat', async ({ page }) => {
   await stage.click({ position: { x, y: y + 10 * scale } });
   await expect(page.getByText(/Выбрано: 1 — L1-1/)).toBeVisible();
 
+  const updatedX = Number(await viewer.getAttribute('data-viewport-x'));
+  const updatedY = Number(await viewer.getAttribute('data-viewport-y'));
+  const updatedScale = Number(await viewer.getAttribute('data-viewport-scale'));
   await stage.click({
-    position: { x: x + 2 * scale, y: y + 10 * scale },
+    position: {
+      x: updatedX + 2 * updatedScale,
+      y: updatedY + 10 * updatedScale,
+    },
     modifiers: ['Shift'],
   });
   await expect(page.getByText(/Выбрано: 2 — L1-1, L1-2/)).toBeVisible();
@@ -144,6 +150,63 @@ test('pinch gesture zooms the hall', async ({ browser }) => {
     .toBeGreaterThan(initialScale);
   await context.close();
 });
+
+test('a pinch can continue as a one-finger pan', async ({ browser }) => {
+  const context = await browser.newContext({
+    hasTouch: true,
+    viewport: { width: 1280, height: 800 },
+  });
+  const page = await context.newPage();
+  await page.goto('/');
+  await openCurrentEditor(page);
+  await page.getByRole('button', { name: /Рука/ }).click();
+  const viewer = page.locator('.hall-viewer-canvas');
+  const stage = page.locator('#hall-stage');
+  const bounds = await stage.boundingBox();
+  if (!bounds) throw new Error('Missing stage bounds for pinch transition');
+  const centerX = bounds.x + Math.min(400, bounds.width / 2);
+  const centerY = bounds.y + Math.min(200, bounds.height / 2);
+  const initialScale = Number(await viewer.getAttribute('data-viewport-scale'));
+  const client = await context.newCDPSession(page);
+
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [
+      { x: centerX - 30, y: centerY, id: 1 },
+      { x: centerX + 30, y: centerY, id: 2 },
+    ],
+  });
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchMove',
+    touchPoints: [
+      { x: centerX - 60, y: centerY, id: 1 },
+      { x: centerX + 60, y: centerY, id: 2 },
+    ],
+  });
+  await expect
+    .poll(async () => Number(await viewer.getAttribute('data-viewport-scale')))
+    .toBeGreaterThan(initialScale);
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchEnd',
+    touchPoints: [{ x: centerX + 60, y: centerY, id: 2 }],
+  });
+  await expect(viewer).toHaveAttribute('data-pointer-mode', 'pan');
+  const xAfterPinch = Number(await viewer.getAttribute('data-viewport-x'));
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchMove',
+    touchPoints: [{ x: centerX - 20, y: centerY + 10, id: 1 }],
+  });
+  await expect
+    .poll(async () => Number(await viewer.getAttribute('data-viewport-x')))
+    .not.toBe(xAfterPinch);
+
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchEnd',
+    touchPoints: [],
+  });
+  await context.close();
+});
+
 test('creates and edits a new hall with undo, redo and save callback', async ({
   page,
 }) => {
@@ -157,7 +220,10 @@ test('creates and edits a new hall with undo, redo and save callback', async ({
   await page.getByRole('button', { name: 'Зона', exact: true }).click();
   await stage.click({ position: { x: 400, y: 250 } });
   await expect(page.getByText(/1 зон · 0 рядов/)).toBeVisible();
-  await expect(page.getByText('Изменений через onChange: 1')).toBeVisible();
+  await expect(page.locator('.studio-editor-page')).toHaveAttribute(
+    'data-change-count',
+    '1',
+  );
   await page.getByRole('textbox', { name: 'Название зоны' }).fill('Партер');
   await page.getByRole('textbox', { name: 'Название зоны' }).blur();
   await expect(
@@ -169,7 +235,7 @@ test('creates and edits a new hall with undo, redo and save callback', async ({
   await page.getByRole('button', { name: 'Прямой ряд' }).click();
   await stage.click({ position: { x: 400, y: 260 } });
   await page.getByRole('button', { name: 'Место', exact: true }).click();
-  await stage.click({ position: { x: 440, y: 260 } });
+  await stage.click({ position: { x: 620, y: 350 } });
   await page.getByRole('spinbutton', { name: 'X места' }).fill('17.5');
   await page.getByRole('spinbutton', { name: 'X места' }).blur();
   await expect(page.getByRole('spinbutton', { name: 'X места' })).toHaveValue(

@@ -44,6 +44,8 @@ jobs:
         run: pnpm nx run-many -t lint typecheck test build --all --output-style=static
 
       - name: Run Studio browser scenarios
+        env:
+          HALL_FUNCTIONAL_ONLY: '1'
         run: pnpm nx e2e studio --output-style=static
 
       - name: Run cross-browser accessibility and touch scenarios
@@ -51,13 +53,92 @@ jobs:
           HALL_BROWSER_MATRIX: '1'
         run: pnpm exec playwright test -c apps/studio/playwright.config.mts apps/studio/e2e/accessibility.spec.ts --project=chromium --project=firefox --project=webkit --project=mobile-chromium --reporter=line
 
-      - name: Check production performance budget
+      - name: Run Embed browser scenarios
+        run: pnpm nx e2e embed --output-style=static
+
+  performance:
+    name: Performance diagnostics
+    needs: verify
+    # Set HALL_PERFORMANCE_RUNNER to a JSON array of runner labels to use a
+    # dedicated hardware runner, for example ["self-hosted","linux","x64","gpu"].
+    # GitHub-hosted Linux uses software WebGL; those results remain diagnostic
+    # and the GPU frame budget is explicitly marked not-enforced.
+    # Pull requests always use a GitHub-hosted runner. Repository-configured
+    # self-hosted hardware is reserved for trusted push/manual runs.
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || vars.HALL_PERFORMANCE_RUNNER || '["ubuntu-latest"]') }}
+    timeout-minutes: 35
+    env:
+      GIT_SHA: ${{ github.sha }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12.14.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium and system dependencies
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run renderer and camera diagnostics
+        env:
+          HALL_ENFORCE_GPU_BUDGET: '1'
+        run: >-
+          pnpm exec playwright test -c apps/studio/playwright.config.mts
+          apps/studio/e2e/renderer-comparison.spec.ts
+          apps/studio/e2e/viewport-frame-sync.spec.ts
+          apps/studio/e2e/webgl-performance.spec.ts
+          --project=chromium --workers=1
+          --output=test-output/performance-dev
+          --reporter=line
+
+      - name: Run large-drag regression
+        run: >-
+          pnpm exec playwright test -c apps/studio/playwright.config.mts
+          apps/studio/e2e/editor-large-drag.spec.ts
+          apps/studio/e2e/editor-sector-drag.spec.ts
+          --project=chromium --workers=1
+          --output=test-output/performance-drag
+          --reporter=line
+
+      - name: Build Studio production bundle
+        run: pnpm nx build studio --configuration=production
+
+      - name: Run production interaction diagnostics
         env:
           HALL_PRODUCTION_PREVIEW: '1'
           HALL_MEASURE_PERFORMANCE: '1'
-          HALL_ENFORCE_BUDGET: '1'
-          HALL_EXTENDED_PERFORMANCE: '1'
-        run: pnpm exec playwright test -c apps/studio/playwright.config.mts apps/studio/e2e/performance.spec.ts --project=chromium --reporter=line
+          HALL_MEASURE_GROUP_DRAG: '1'
+          HALL_DRAG_FRAME_INTERVAL_P95_BUDGET_MS: '25'
+          HALL_ENFORCE_FRAME_INTERVAL_P95_BUDGET: '1'
+        run: >-
+          pnpm exec playwright test -c apps/studio/playwright.config.mts
+          apps/studio/e2e/performance.spec.ts
+          apps/studio/e2e/performance-hall.spec.ts
+          --project=chromium --workers=1
+          --output=test-output/performance-production
+          --reporter=line
 
-      - name: Run Embed browser scenarios
-        run: pnpm nx e2e embed --output-style=static
+      - name: Upload performance reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-performance-${{ github.run_id }}
+          path: |
+            apps/studio/test-output/performance-dev
+            apps/studio/test-output/performance-drag
+            apps/studio/test-output/performance-production
+          if-no-files-found: warn
+          retention-days: 14

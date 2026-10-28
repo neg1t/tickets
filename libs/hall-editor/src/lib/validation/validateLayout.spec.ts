@@ -2,9 +2,34 @@ import { performance } from 'node:perf_hooks';
 import { describe, expect, it } from 'vitest';
 import { seatIdSchema, seatSchema, worldPointSchema } from '@hall-platform/domain';
 import { createEmptyDraft } from '../editorDraft.js';
-import { validateLayout } from './validateLayout.js';
+import { validateLayout, validateLayoutImmediate } from './validateLayout.js';
 
 describe('validateLayout', () => {
+  it('reports cheap local errors synchronously before collision checks finish', () => {
+    const draft = createEmptyDraft('Зал');
+    const floorId = draft.snapshot.floors[0]?.id;
+    if (!floorId) throw new Error('Missing floor');
+    const seats = [0, 3].map((x, index) => seatSchema.parse({
+      id: `seat-immediate-${index}`,
+      floorId,
+      label: '1',
+      position: { x, y: 0 },
+      placement: { kind: 'standalone' },
+    }));
+    const withDuplicate = {
+      ...draft,
+      snapshot: { ...draft.snapshot, seats },
+    };
+
+    expect(validateLayoutImmediate(withDuplicate)).toEqual([
+      expect.objectContaining({
+        code: 'duplicate-number',
+        severity: 'error',
+        targetId: seats[1]?.id,
+      }),
+    ]);
+  });
+
   it('reports nearby collisions in original seat order across spatial cell edges', () => {
     const draft = createEmptyDraft('Зал');
     const floorId = draft.snapshot.floors[0]?.id;

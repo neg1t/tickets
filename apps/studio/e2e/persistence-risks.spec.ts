@@ -139,7 +139,15 @@ test('R05: one corrupted hall record does not hide healthy halls', async ({
     database.close();
   });
   await page.reload();
-  await expect(page.locator('.hall-card')).toHaveCount(3);
+  await expect(page.locator('.hall-card')).toHaveCount(4);
+  const healthyHall = page
+    .locator('.hall-card', { hasText: 'Opera Hall' })
+    .getByRole('button', { name: 'Открыть черновик' });
+  await expect(healthyHall).toBeVisible();
+  await healthyHall.click();
+  await expect(page.locator('.studio-editor-title strong')).toHaveText(
+    'Opera Hall',
+  );
 });
 
 test('R05: the catalog remains usable when browser storage access is denied', async ({

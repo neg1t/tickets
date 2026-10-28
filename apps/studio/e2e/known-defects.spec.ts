@@ -51,9 +51,15 @@ test('A02: leaving the canvas does not commit an unfinished drag', async ({
   await page.mouse.down();
   await page.mouse.move(bounds.x + 450, bounds.y + 250);
   await page.mouse.move(bounds.x - 20, bounds.y - 20);
-  await expect(page.getByText('Изменений через onChange: 1')).toBeVisible();
+  await expect(page.locator('.studio-editor-page')).toHaveAttribute(
+    'data-change-count',
+    '1',
+  );
   await page.mouse.up();
-  await expect(page.getByText('Изменений через onChange: 2')).toBeVisible();
+  await expect(page.locator('.studio-editor-page')).toHaveAttribute(
+    'data-change-count',
+    '2',
+  );
 });
 
 test('A05: deleting a multiselection removes both seats', async ({ page }) => {
@@ -70,31 +76,26 @@ test('A05: deleting a multiselection removes both seats', async ({ page }) => {
   await expect(page.getByText(/0 мест/)).toBeVisible();
 });
 
-test('A04: changing a row in the inspector updates its seats', async ({
+test('A04: changing a row seat count updates its generated seats', async ({
   page,
 }) => {
   await page.goto('/');
   await openCurrentEditor(page);
-  const stage = page.locator('#hall-stage');
-  const viewer = page.locator('.hall-viewer-canvas');
-  const x = Number(await viewer.getAttribute('data-viewport-x'));
-  const y = Number(await viewer.getAttribute('data-viewport-y'));
-  const scale = Number(await viewer.getAttribute('data-viewport-scale'));
-  await stage.click({ position: { x: x + scale, y: y + 10 * scale } });
-  const startX = page.getByRole('spinbutton', { name: 'Начало X' });
-  await expect(startX).toBeVisible();
-  await startX.fill('-1');
-  await startX.blur();
+  await page.getByLabel('Найти объект').fill('L1');
+  await page.getByRole('button', { name: 'Выбрать Ряд L1' }).click();
+  const seatCount = page.getByRole('spinbutton', { name: 'Мест в ряду' });
+  await seatCount.fill('5');
+  await page.getByRole('button', { name: 'Применить места' }).click();
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Экспорт JSON' }).click();
   const draft = JSON.parse(
     await readFile(await (await downloadPromise).path(), 'utf8'),
   );
-  const firstSeat = draft.snapshot.seats.find(
+  const rowSeats = draft.snapshot.seats.filter(
     (seat: { placement: { rowId?: string } }) =>
       seat.placement.rowId === 'small-theater-row-left-1',
   );
-  expect(firstSeat.position.x).toBe(-1);
+  expect(rowSeats).toHaveLength(5);
 });
 
 test('A06: oversized JSON is rejected before parsing it', async ({ page }) => {

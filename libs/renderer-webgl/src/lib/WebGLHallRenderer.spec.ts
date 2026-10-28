@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createRendererScene,
+  diffRendererScenes,
   type RendererSeatGeometry,
 } from '@hall-platform/renderer-core';
 import { SpatialIndex } from '@hall-platform/geometry';
@@ -62,6 +63,7 @@ function fakeContext(): WebGL2RenderingContext {
     clear: vi.fn(),
     uniform2f: vi.fn(),
     uniform3f: vi.fn(),
+    uniform4f: vi.fn(),
     drawArraysInstanced: vi.fn(),
   } as unknown as WebGL2RenderingContext;
 }
@@ -178,6 +180,63 @@ describe('WebGL hall renderer contract', () => {
     renderer.dispose();
   });
 
+  it('uses the resolved theme selection color for selected seats', () => {
+    const gl = fakeContext();
+    const target = Object.assign(new EventTarget(), {
+      width: 0,
+      height: 0,
+      getContext: vi.fn(() => gl),
+    }) as unknown as HTMLCanvasElement;
+    const renderer = new WebGLHallRenderer(target);
+    renderer.setSelectedColor('#123456');
+    renderer.resize(640, 480, 1);
+    renderer.setScene(seatScene());
+    renderer.setSelection([{ kind: 'seat', id: 'seat-a' }]);
+    frames.splice(0).forEach((frame) => frame(16));
+
+    expect(gl.uniform4f).toHaveBeenCalledWith(
+      expect.anything(),
+      18 / 255,
+      52 / 255,
+      86 / 255,
+      1,
+    );
+    target.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    target.dispatchEvent(new Event('webglcontextrestored'));
+    frames.splice(0).forEach((frame) => frame(32));
+    expect(gl.uniform4f).toHaveBeenLastCalledWith(
+      expect.anything(),
+      18 / 255,
+      52 / 255,
+      86 / 255,
+      1,
+    );
+    renderer.dispose();
+  });
+
+  it('uploads host stroke colors as a separate partial instance range', () => {
+    const gl = fakeContext();
+    const target = Object.assign(new EventTarget(), {
+      width: 0,
+      height: 0,
+      getContext: vi.fn(() => gl),
+    }) as unknown as HTMLCanvasElement;
+    const renderer = new WebGLHallRenderer(target);
+    renderer.setScene(seatScene());
+    vi.mocked(gl.bufferSubData).mockClear();
+
+    renderer.updateSeats([
+      { id: 'seat-b', status: 'available', strokeColor: '#145577' },
+    ]);
+
+    expect(gl.bufferSubData).toHaveBeenCalledWith(
+      gl.ARRAY_BUFFER,
+      8,
+      new Uint8Array([20, 85, 119, 255]),
+    );
+    renderer.dispose();
+  });
+
   it('reuses visible seat ranges while the viewport stays inside its cached bounds', () => {
     const search = vi.spyOn(SpatialIndex.prototype, 'search');
     const gl = fakeContext();
@@ -274,6 +333,29 @@ describe('WebGL hall renderer contract', () => {
     renderer.dispose();
   });
 
+  it('signals only after a frame has drawn', () => {
+    const gl = fakeContext();
+    const onFrameRendered = vi.fn();
+    const target = Object.assign(new EventTarget(), {
+      width: 0,
+      height: 0,
+      getContext: vi.fn(() => gl),
+    }) as unknown as HTMLCanvasElement;
+    const renderer = new WebGLHallRenderer(target, { onFrameRendered });
+    renderer.resize(640, 480, 1);
+
+    frames.splice(0).forEach((frame) => frame(8));
+    expect(onFrameRendered).not.toHaveBeenCalled();
+    renderer.setScene(seatScene());
+
+    expect(onFrameRendered).not.toHaveBeenCalled();
+    frames.splice(0).forEach((frame) => frame(16));
+
+    expect(gl.drawArraysInstanced).toHaveBeenCalled();
+    expect(onFrameRendered).toHaveBeenCalledTimes(1);
+    renderer.dispose();
+  });
+
   it('moves preview seats in GPU buffers and restores their base positions', () => {
     const gl = fakeContext();
     const target = Object.assign(new EventTarget(), {
@@ -283,6 +365,7 @@ describe('WebGL hall renderer contract', () => {
     }) as unknown as HTMLCanvasElement;
     const renderer = new WebGLHallRenderer(target);
     renderer.setScene(seatScene());
+    renderer.setViewport({ x: 0, y: 0, scale: 10 });
     vi.mocked(gl.bufferSubData).mockClear();
     const uploadedPositions: number[][] = [];
     vi.mocked(gl.bufferSubData).mockImplementation((_target, _offset, data) => {
@@ -292,12 +375,244 @@ describe('WebGL hall renderer contract', () => {
     renderer.setPreviewPositions([
       { id: 'seat-a', position: { x: 10, y: 20 } },
     ]);
+    expect(renderer.pickAt({ x: 100, y: 200 })).toEqual({
+      kind: 'seat',
+      id: 'seat-a',
+    });
+    expect(renderer.pickAt({ x: 0, y: 0 })).toBeNull();
     renderer.setPreviewPositions([]);
+    expect(renderer.pickAt({ x: 0, y: 0 })).toEqual({
+      kind: 'seat',
+      id: 'seat-a',
+    });
 
     expect(uploadedPositions).toEqual([
       [10, 20],
       [0, 0],
     ]);
+    renderer.dispose();
+  });
+
+  it('updates one moved seat in place without rebuilding scene buffers', () => {
+    const gl = fakeContext();
+    const target = Object.assign(new EventTarget(), {
+      width: 0,
+      height: 0,
+      getContext: vi.fn(() => gl),
+    }) as unknown as HTMLCanvasElement;
+    const renderer = new WebGLHallRenderer(target);
+    const identity = { documentId: 'doc-1', sessionId: 'session-1' } as const;
+    const previous = createRendererScene<RendererSeatGeometry>(
+      1,
+      [
+        {
+          id: 'seat-a',
+          floorId: 'main',
+          kind: 'seat',
+          bounds: { minX: -1, minY: -1, maxX: 1, maxY: 1 },
+          geometry: { position: { x: 0, y: 0 } },
+        },
+        {
+          id: 'seat-b',
+          floorId: 'main',
+          kind: 'seat',
+          bounds: { minX: 1, minY: -1, maxX: 3, maxY: 1 },
+          geometry: { position: { x: 2, y: 0 } },
+        },
+      ],
+      'main',
+      identity,
+    );
+    const seatB = previous.items[1];
+    if (!seatB) throw new Error('Expected seat-b in the previous scene');
+    const next = createRendererScene<RendererSeatGeometry>(
+      2,
+      [
+        {
+          id: 'seat-a',
+          floorId: 'main',
+          kind: 'seat',
+          bounds: { minX: 9, minY: -1, maxX: 11, maxY: 1 },
+          geometry: { position: { x: 10, y: 0 } },
+        },
+        seatB,
+      ],
+      'main',
+      identity,
+    );
+    renderer.setScene(previous);
+    const fullUploads = vi.mocked(gl.bufferData).mock.calls.length;
+    vi.mocked(gl.bufferSubData).mockClear();
+
+    expect(renderer.applySceneChanges(diffRendererScenes(previous, next))).toBe(
+      true,
+    );
+
+    expect(gl.bufferData).toHaveBeenCalledTimes(fullUploads);
+    expect(gl.bufferSubData).toHaveBeenCalledTimes(1);
+    expect(gl.bufferSubData).toHaveBeenCalledWith(
+      gl.ARRAY_BUFFER,
+      0,
+      new Float32Array([10, 0]),
+    );
+    expect(renderer.pickAt({ x: 10, y: 0 })).toEqual({
+      kind: 'seat',
+      id: 'seat-a',
+    });
+    expect(renderer.getDiagnostics()).toMatchObject({
+      fullSceneBuilds: 1,
+      incrementalSceneUpdates: 1,
+      partialBufferUploads: 1,
+    });
+    renderer.dispose();
+  });
+
+  it('rejects stale scene revisions and rebuilds buffers for structural changes', () => {
+    const gl = fakeContext();
+    const target = Object.assign(new EventTarget(), {
+      width: 0,
+      height: 0,
+      getContext: vi.fn(() => gl),
+    }) as unknown as HTMLCanvasElement;
+    const renderer = new WebGLHallRenderer(target);
+    const identity = { documentId: 'doc-1', sessionId: 'session-1' } as const;
+    const first = createRendererScene<RendererSeatGeometry>(
+      1,
+      [
+        {
+          id: 'seat-a',
+          floorId: 'main',
+          kind: 'seat',
+          bounds: { minX: -1, minY: -1, maxX: 1, maxY: 1 },
+          geometry: { position: { x: 0, y: 0 } },
+        },
+      ],
+      'main',
+      identity,
+    );
+    const seatA = first.items[0];
+    if (!seatA) throw new Error('Expected seat-a in the first scene');
+    const second = createRendererScene<RendererSeatGeometry>(
+      2,
+      [
+        seatA,
+        {
+          id: 'seat-b',
+          floorId: 'main',
+          kind: 'seat',
+          bounds: { minX: 1, minY: -1, maxX: 3, maxY: 1 },
+          geometry: { position: { x: 2, y: 0 } },
+        },
+      ],
+      'main',
+      identity,
+    );
+    const stale = createRendererScene<RendererSeatGeometry>(
+      2,
+      [seatA],
+      'main',
+      identity,
+    );
+    const third = createRendererScene<RendererSeatGeometry>(
+      3,
+      [seatA],
+      'main',
+      identity,
+    );
+    renderer.setScene(first);
+    const fullUploads = vi.mocked(gl.bufferData).mock.calls.length;
+
+    expect(renderer.applySceneChanges(diffRendererScenes(first, second))).toBe(
+      true,
+    );
+    expect(renderer.applySceneChanges(diffRendererScenes(first, stale))).toBe(
+      false,
+    );
+    expect(renderer.applySceneChanges(diffRendererScenes(second, third))).toBe(
+      true,
+    );
+    expect(gl.bufferData).toHaveBeenCalledTimes(fullUploads + 16);
+    expect(renderer.pickAt({ x: 100, y: 0 })).toBeNull();
+    expect(renderer.getDiagnostics()).toMatchObject({
+      fullSceneBuilds: 1,
+      incrementalSceneUpdates: 2,
+      rejectedSceneChanges: 1,
+    });
+    renderer.dispose();
+  });
+
+  it('clears stale styles and accepts a new document revision baseline', () => {
+    const gl = fakeContext();
+    const target = Object.assign(new EventTarget(), {
+      width: 0,
+      height: 0,
+      getContext: vi.fn(() => gl),
+    }) as unknown as HTMLCanvasElement;
+    const renderer = new WebGLHallRenderer(target);
+    const seat = {
+      id: 'seat-a',
+      floorId: 'main',
+      kind: 'seat' as const,
+      bounds: { minX: -1, minY: -1, maxX: 1, maxY: 1 },
+      geometry: { position: { x: 0, y: 0 } },
+    };
+    const seatB = {
+      id: 'seat-b',
+      floorId: 'main',
+      kind: 'seat' as const,
+      bounds: { minX: 1, minY: -1, maxX: 3, maxY: 1 },
+      geometry: { position: { x: 2, y: 0 } },
+    };
+    const first = createRendererScene<RendererSeatGeometry>(
+      20,
+      [seat, seatB],
+      'main',
+      {
+        documentId: 'doc-1',
+        sessionId: 'session-1',
+      },
+    );
+    const second = createRendererScene<RendererSeatGeometry>(
+      21,
+      [seat],
+      'main',
+      {
+        documentId: 'doc-1',
+        sessionId: 'session-1',
+      },
+    );
+    const third = createRendererScene<RendererSeatGeometry>(
+      22,
+      [seat, seatB],
+      'main',
+      {
+        documentId: 'doc-1',
+        sessionId: 'session-1',
+      },
+    );
+    const newDocument = createRendererScene<RendererSeatGeometry>(
+      1,
+      [seat],
+      'main',
+      {
+        documentId: 'doc-2',
+        sessionId: 'session-1',
+      },
+    );
+    expect(renderer.setScene(first)).toBe(true);
+    renderer.updateSeats([{ id: 'seat-b', status: 'sold' }]);
+
+    expect(renderer.setScene(second)).toBe(true);
+    expect(renderer.setScene(third)).toBe(true);
+    const thirdSceneUploads = vi.mocked(gl.bufferData).mock.calls.slice(-8);
+    expect(thirdSceneUploads[4]?.[1]).toEqual(new Float32Array([0, 0]));
+    expect(renderer.setScene(newDocument)).toBe(true);
+    expect(renderer.setScene(first)).toBe(false);
+
+    expect(renderer.getDiagnostics()).toMatchObject({
+      fullSceneBuilds: 4,
+      rejectedSceneChanges: 1,
+    });
     renderer.dispose();
   });
 

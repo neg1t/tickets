@@ -10,10 +10,54 @@ export function percentile(
   return sorted[Math.max(0, Math.ceil(sorted.length * fraction) - 1)] ?? 0;
 }
 
+export type GpuClassification =
+  'hardware' | 'software' | 'unknown' | 'not-used';
+
+export function classifyGpu(
+  webglUsed: boolean,
+  vendor: string | null | undefined,
+  renderer: string | null | undefined,
+): GpuClassification {
+  if (!webglUsed) return 'not-used';
+  if (!vendor && !renderer) return 'unknown';
+  return /swiftshader|llvmpipe|software|warp/i.test(
+    `${vendor ?? ''} ${renderer ?? ''}`,
+  )
+    ? 'software'
+    : 'hardware';
+}
+
+export type GestureMetrics = Readonly<{
+  durationMs: number;
+  frameIntervalsMs: readonly number[];
+  inputToStateFeedbackMs: number | null;
+  longTasks: readonly { startTime: number; duration: number }[];
+}>;
+
 export async function installPerformanceObserver(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    const metrics: { longTasks: { startTime: number; duration: number }[] } = {
+    const metrics: {
+      longTasks: { startTime: number; duration: number }[];
+      pendingWebglVisibleSeats: number;
+      webglVisibleSeatCount: number;
+      gesture?: {
+        active: boolean;
+        startedAt: number;
+        endedAt: number | null;
+        previousFrame: number | null;
+        frameIntervalsMs: number[];
+        pointerStartedAt: number | null;
+        inputToStateFeedbackMs: number | null;
+        longTaskStartIndex: number;
+        frame: number;
+        targetSelector: string;
+        feedbackAttribute: string;
+        initialAttributeValue: string | null;
+      };
+    } = {
       longTasks: [],
+      pendingWebglVisibleSeats: 0,
+      webglVisibleSeatCount: 0,
     };
     Object.defineProperty(window, '__hallPerformanceMetrics', {
       value: metrics,
@@ -30,6 +74,28 @@ export async function installPerformanceObserver(page: Page): Promise<void> {
           });
       }).observe({ type: 'longtask', buffered: true });
     }
+    if (typeof WebGL2RenderingContext !== 'undefined') {
+      const prototype = WebGL2RenderingContext.prototype;
+      const drawArraysInstanced = prototype.drawArraysInstanced;
+      prototype.drawArraysInstanced = function (
+        mode: number,
+        first: number,
+        vertexCount: number,
+        instanceCount: number,
+      ) {
+        metrics.pendingWebglVisibleSeats += instanceCount;
+        drawArraysInstanced.call(this, mode, first, vertexCount, instanceCount);
+      };
+    }
+    const publishWebglVisibleSeats = () => {
+      metrics.webglVisibleSeatCount = Math.max(
+        metrics.webglVisibleSeatCount,
+        metrics.pendingWebglVisibleSeats,
+      );
+      metrics.pendingWebglVisibleSeats = 0;
+      requestAnimationFrame(publishWebglVisibleSeats);
+    };
+    requestAnimationFrame(publishWebglVisibleSeats);
   });
 }
 
@@ -50,25 +116,156 @@ export async function waitForPaint(page: Page, frameCount = 2): Promise<void> {
   );
 }
 
-export async function measureFrameIntervals(
+export async function beginGestureMetrics(
   page: Page,
-  frameCount = 180,
-): Promise<number[]> {
+  targetSelector = '.hall-viewer-canvas',
+  feedbackAttribute = 'data-viewport-x',
+): Promise<void> {
   return page.evaluate(
-    (count) =>
-      new Promise<number[]>((resolve) => {
-        const intervals: number[] = [];
-        let previous = performance.now();
-        const sample = (now: number) => {
-          intervals.push(now - previous);
-          previous = now;
-          if (intervals.length >= count) resolve(intervals);
-          else requestAnimationFrame(sample);
+    ({ selector, attribute }) => {
+      const windowWithMetrics = window as Window & {
+        __hallPerformanceMetrics?: {
+          longTasks: { startTime: number; duration: number }[];
+          gesture?: {
+            active: boolean;
+            startedAt: number;
+            endedAt: number | null;
+            previousFrame: number | null;
+            frameIntervalsMs: number[];
+            pointerStartedAt: number | null;
+            inputToStateFeedbackMs: number | null;
+            longTaskStartIndex: number;
+            frame: number;
+            targetSelector: string;
+            feedbackAttribute: string;
+            initialAttributeValue: string | null;
+          };
         };
-        requestAnimationFrame(sample);
-      }),
-    frameCount,
+      };
+      const metrics = windowWithMetrics.__hallPerformanceMetrics;
+      if (!metrics) throw new Error('Performance observer is not installed');
+      if (metrics.gesture?.active)
+        throw new Error('A gesture measurement is already active');
+      const target = document.querySelector<HTMLElement>(selector);
+      if (!target) throw new Error(`Missing gesture target: ${selector}`);
+      const gesture: NonNullable<typeof metrics.gesture> = {
+        active: false,
+        startedAt: performance.now(),
+        endedAt: null,
+        previousFrame: null,
+        frameIntervalsMs: [],
+        pointerStartedAt: null,
+        inputToStateFeedbackMs: null,
+        longTaskStartIndex: metrics.longTasks.length,
+        frame: 0,
+        targetSelector: selector,
+        feedbackAttribute: attribute,
+        initialAttributeValue: target.getAttribute(attribute),
+      };
+      metrics.gesture = gesture;
+      const pointerDown = (event: PointerEvent) => {
+        if (
+          event.target instanceof Element &&
+          event.target.closest(selector) === target
+        ) {
+          const now = performance.now();
+          gesture.active = true;
+          gesture.startedAt = now;
+          gesture.pointerStartedAt = now;
+          gesture.previousFrame = null;
+          gesture.frameIntervalsMs.length = 0;
+          gesture.longTaskStartIndex = metrics.longTasks.length;
+          gesture.initialAttributeValue = target.getAttribute(attribute);
+          gesture.frame = requestAnimationFrame(frame);
+        }
+      };
+      const pointerEnd = (event: PointerEvent) => {
+        if (
+          event.target instanceof Element &&
+          event.target.closest(selector) === target &&
+          gesture.pointerStartedAt !== null
+        ) {
+          gesture.endedAt = performance.now();
+          gesture.active = false;
+          cancelAnimationFrame(gesture.frame);
+        }
+      };
+      document.addEventListener('pointerdown', pointerDown, true);
+      document.addEventListener('pointerup', pointerEnd, true);
+      document.addEventListener('pointercancel', pointerEnd, true);
+      const observer = new MutationObserver(() => {
+        const nextValue = target.getAttribute(attribute);
+        if (
+          gesture.pointerStartedAt !== null &&
+          gesture.inputToStateFeedbackMs === null &&
+          nextValue !== gesture.initialAttributeValue
+        ) {
+          gesture.inputToStateFeedbackMs =
+            performance.now() - gesture.pointerStartedAt;
+        }
+      });
+      observer.observe(target, {
+        attributes: true,
+        attributeFilter: [attribute],
+      });
+      const frame = (now: number) => {
+        if (!gesture.active || gesture.pointerStartedAt === null) return;
+        if (gesture.previousFrame !== null)
+          gesture.frameIntervalsMs.push(now - gesture.previousFrame);
+        gesture.previousFrame = now;
+        gesture.frame = requestAnimationFrame(frame);
+      };
+      Object.assign(gesture, {
+        cleanup: () => {
+          document.removeEventListener('pointerdown', pointerDown, true);
+          document.removeEventListener('pointerup', pointerEnd, true);
+          document.removeEventListener('pointercancel', pointerEnd, true);
+          observer.disconnect();
+        },
+      });
+    },
+    { selector: targetSelector, attribute: feedbackAttribute },
   );
+}
+
+export async function endGestureMetrics(page: Page): Promise<GestureMetrics> {
+  return page.evaluate(() => {
+    const windowWithMetrics = window as Window & {
+      __hallPerformanceMetrics?: {
+        longTasks: { startTime: number; duration: number }[];
+        gesture?: {
+          active: boolean;
+          startedAt: number;
+          endedAt: number | null;
+          pointerStartedAt: number | null;
+          frameIntervalsMs: number[];
+          inputToStateFeedbackMs: number | null;
+          longTaskStartIndex: number;
+          cleanup?: () => void;
+        };
+      };
+    };
+    const metrics = windowWithMetrics.__hallPerformanceMetrics;
+    const gesture = metrics?.gesture;
+    if (!metrics || !gesture)
+      throw new Error('No gesture measurement is active');
+    if (gesture.pointerStartedAt === null)
+      throw new Error('The measured gesture never received pointer input');
+    if (gesture.active) {
+      gesture.endedAt = performance.now();
+      gesture.active = false;
+    }
+    gesture.cleanup?.();
+    const endTime = gesture.endedAt ?? performance.now();
+    return {
+      durationMs: endTime - gesture.startedAt,
+      frameIntervalsMs: [...gesture.frameIntervalsMs],
+      inputToStateFeedbackMs: gesture.inputToStateFeedbackMs,
+      longTasks: metrics.longTasks
+        .slice(gesture.longTaskStartIndex)
+        .filter(({ startTime }) => startTime <= endTime),
+    };
+  });
 }
 
 export async function collectBrowserMetrics(page: Page) {
@@ -82,19 +279,56 @@ export async function collectBrowserMetrics(page: Page) {
       'resource',
     ) as PerformanceResourceTiming[];
     const memory = performanceWithMemory.memory;
-    const longTasks =
-      (
-        window as Window & {
-          __hallPerformanceMetrics?: {
-            longTasks: { startTime: number; duration: number }[];
-          };
-        }
-      ).__hallPerformanceMetrics?.longTasks ?? [];
+    const performanceMetrics = (
+      window as Window & {
+        __hallPerformanceMetrics?: {
+          longTasks: { startTime: number; duration: number }[];
+          webglVisibleSeatCount: number;
+        };
+      }
+    ).__hallPerformanceMetrics;
+    const viewer = document.querySelector<HTMLElement>('.hall-viewer-canvas');
+    const renderer = viewer?.dataset.seatRendererEngine ?? null;
+    const webglVisibleSeatCount =
+      performanceMetrics?.webglVisibleSeatCount ?? null;
+    const webglCanvas = document.querySelector<HTMLCanvasElement>(
+      'canvas[data-renderer="webgl2"]',
+    );
+    const gl = webglCanvas?.getContext('webgl2');
+    const rendererInfoExtension = gl?.getExtension('WEBGL_debug_renderer_info');
+    const gpu =
+      rendererInfoExtension && gl
+        ? {
+            vendor: gl.getParameter(
+              rendererInfoExtension.UNMASKED_VENDOR_WEBGL,
+            ),
+            renderer: gl.getParameter(
+              rendererInfoExtension.UNMASKED_RENDERER_WEBGL,
+            ),
+          }
+        : null;
+    const longTasks = performanceMetrics?.longTasks ?? [];
     return {
       userAgent: navigator.userAgent,
       language: navigator.language,
-      viewport: { width: innerWidth, height: innerHeight },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
       devicePixelRatio,
+      renderer,
+      activeSeatCount: Number(viewer?.dataset.floorSeatCount ?? 0),
+      visibleSeatCount:
+        renderer === 'webgl'
+          ? (webglVisibleSeatCount ?? 0)
+          : Number(viewer?.dataset.visibleSeatCount ?? 0),
+      visibleSeatCountSource:
+        renderer === 'webgl'
+          ? 'maximum WebGL draw instances observed in a frame'
+          : 'visible Konva scene seats',
+      webglVisibleSeatCount,
+      renderNodes: Number(viewer?.dataset.seatRenderNodes ?? 0),
+      layoutVersionId: viewer?.dataset.layoutVersionId ?? null,
+      sceneRevision: Number(viewer?.dataset.sceneRevision ?? 0),
+      cameraRevision: Number(viewer?.dataset.cameraRevision ?? 0),
+      gpu: { used: Boolean(webglCanvas), ...gpu },
       hardwareConcurrency: navigator.hardwareConcurrency,
       deviceMemoryGiB: (navigator as Navigator & { deviceMemory?: number })
         .deviceMemory,
@@ -160,7 +394,18 @@ export async function collectBrowserMetrics(page: Page) {
       logicalCpus: cpus().length,
       totalMemoryBytes: totalmem(),
     },
-    browser,
+    browser: {
+      ...browser,
+      gpu: {
+        classification: classifyGpu(
+          browser.gpu.used,
+          browser.gpu.vendor,
+          browser.gpu.renderer,
+        ),
+        ...(browser.gpu.vendor ? { vendor: browser.gpu.vendor } : {}),
+        ...(browser.gpu.renderer ? { renderer: browser.gpu.renderer } : {}),
+      },
+    },
   };
 }
 
@@ -176,6 +421,7 @@ export async function attachPerformanceReport(
     networkProfile: 'localhost without throttling',
     thermalState: 'not measured by Playwright',
     buildRevision: process.env['GIT_SHA'] ?? null,
+    buildId: process.env['GITHUB_SHA'] ?? process.env['GIT_SHA'] ?? null,
     ...(await collectBrowserMetrics(page)),
   };
   const body = JSON.stringify(report, null, 2);

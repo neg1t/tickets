@@ -1,6 +1,5 @@
 import {
   decorationSchema,
-  layoutSnapshotSchema,
   rowSchema,
   seatSchema,
   tableSchema,
@@ -105,6 +104,278 @@ function replaceMovedItems<T extends { id: string }>(
   replacements: ReadonlyMap<string, T>,
 ): T[] {
   return items.map((item) => replacements.get(item.id) ?? item);
+}
+
+type IdentifiedPatch<T extends { id: string }> = Readonly<{
+  id: string;
+  before?: T | null;
+  after: T | null;
+  index?: number;
+}>;
+
+type SequenceNode<T> = {
+  value: T;
+  priority: number;
+  size: number;
+  left: SequenceNode<T> | null;
+  right: SequenceNode<T> | null;
+  parent: SequenceNode<T> | null;
+};
+
+function sequenceSize<T>(node: SequenceNode<T> | null): number {
+  return node?.size ?? 0;
+}
+
+function updateSequenceNode<T>(node: SequenceNode<T>): void {
+  node.size = 1 + sequenceSize(node.left) + sequenceSize(node.right);
+  if (node.left) node.left.parent = node;
+  if (node.right) node.right.parent = node;
+}
+
+function mergeSequence<T>(
+  left: SequenceNode<T> | null,
+  right: SequenceNode<T> | null,
+): SequenceNode<T> | null {
+  if (!left) {
+    if (right) right.parent = null;
+    return right;
+  }
+  if (!right) {
+    left.parent = null;
+    return left;
+  }
+  if (left.priority <= right.priority) {
+    left.right = mergeSequence(left.right, right);
+    updateSequenceNode(left);
+    left.parent = null;
+    return left;
+  }
+  right.left = mergeSequence(left, right.left);
+  updateSequenceNode(right);
+  right.parent = null;
+  return right;
+}
+
+function splitSequence<T>(
+  root: SequenceNode<T> | null,
+  count: number,
+): [SequenceNode<T> | null, SequenceNode<T> | null] {
+  if (!root) return [null, null];
+  if (count <= sequenceSize(root.left)) {
+    const [left, middle] = splitSequence(root.left, count);
+    root.left = middle;
+    updateSequenceNode(root);
+    root.parent = null;
+    if (left) left.parent = null;
+    return [left, root];
+  }
+  const [middle, right] = splitSequence(
+    root.right,
+    count - sequenceSize(root.left) - 1,
+  );
+  root.right = middle;
+  updateSequenceNode(root);
+  root.parent = null;
+  if (right) right.parent = null;
+  return [root, right];
+}
+
+function sequenceNodeRank<T>(node: SequenceNode<T>): number {
+  let rank = sequenceSize(node.left);
+  let current = node;
+  while (current.parent) {
+    const parent = current.parent;
+    if (parent.right === current) rank += sequenceSize(parent.left) + 1;
+    current = parent;
+  }
+  return rank;
+}
+
+function insertSequenceNode<T>(
+  root: SequenceNode<T> | null,
+  node: SequenceNode<T>,
+  index: number,
+): SequenceNode<T> | null {
+  const [left, right] = splitSequence(root, index);
+  return mergeSequence(mergeSequence(left, node), right);
+}
+
+function removeSequenceNode<T>(
+  root: SequenceNode<T> | null,
+  node: SequenceNode<T>,
+): SequenceNode<T> | null {
+  const index = sequenceNodeRank(node);
+  const [left, tail] = splitSequence(root, index);
+  const [, right] = splitSequence(tail, 1);
+  return mergeSequence(left, right);
+}
+
+function insertionIndex(index: number, length: number): number {
+  if (Number.isNaN(index)) return 0;
+  if (!Number.isFinite(index)) return index < 0 ? 0 : length;
+  const integer = Math.trunc(index);
+  return integer < 0
+    ? Math.max(length + integer, 0)
+    : Math.min(integer, length);
+}
+
+function sequencePriority(index: number): number {
+  let value = (index + 1 + 0x9e3779b9) >>> 0;
+  value = Math.imul(value ^ (value >>> 16), 0x21f0aaad);
+  value = Math.imul(value ^ (value >>> 15), 0x735a2d97);
+  return (value ^ (value >>> 15)) >>> 0;
+}
+
+function applyStructuralArrayPatches<T extends { id: string }>(
+  items: readonly T[],
+  patches: readonly IdentifiedPatch<T>[],
+): readonly T[] {
+  if (patches.some((patch) => patch.after && patch.after.id !== patch.id)) {
+    let next = items as T[];
+    for (const patch of patches)
+      next = replaceItem(next, patch.id, patch.after, patch.index);
+    return next;
+  }
+
+  let root: SequenceNode<T> | null = null;
+  const nodesById = new Map<string, SequenceNode<T>>();
+  for (const item of items) {
+    if (nodesById.has(item.id)) {
+      let next = items as T[];
+      for (const patch of patches)
+        next = replaceItem(next, patch.id, patch.after, patch.index);
+      return next;
+    }
+    const node: SequenceNode<T> = {
+      value: item,
+      priority: sequencePriority(nodesById.size),
+      size: 1,
+      left: null,
+      right: null,
+      parent: null,
+    };
+    root = mergeSequence(root, node);
+    nodesById.set(item.id, node);
+  }
+
+  let nextPriority = items.length;
+  for (const patch of patches) {
+    const existing = nodesById.get(patch.id);
+    if (patch.after === null) {
+      if (!existing) continue;
+      root = removeSequenceNode(root, existing);
+      nodesById.delete(patch.id);
+      continue;
+    }
+    if (existing) {
+      existing.value = patch.after;
+      continue;
+    }
+    const node: SequenceNode<T> = {
+      value: patch.after,
+      priority: sequencePriority(nextPriority++),
+      size: 1,
+      left: null,
+      right: null,
+      parent: null,
+    };
+    const index =
+      patch.index === undefined
+        ? sequenceSize(root)
+        : insertionIndex(patch.index, sequenceSize(root));
+    root = insertSequenceNode(root, node, index);
+    nodesById.set(patch.id, node);
+  }
+
+  const result: T[] = [];
+  const visit = (node: SequenceNode<T> | null) => {
+    if (!node) return;
+    visit(node.left);
+    result.push(node.value);
+    visit(node.right);
+  };
+  visit(root);
+  return result;
+}
+
+function applyArrayPatches<T extends { id: string }>(
+  items: readonly T[],
+  patches: readonly IdentifiedPatch<T>[],
+): readonly T[] {
+  if (patches.length === 0) return items;
+  if (patches.every((patch) => patch.after === null)) {
+    const removed = new Set(patches.map((patch) => patch.id));
+    return items.filter((item) => !removed.has(item.id));
+  }
+
+  if (
+    patches.every(
+      (patch) =>
+        patch.before === null &&
+        patch.after !== null &&
+        patch.after.id === patch.id &&
+        patch.index === undefined,
+    )
+  ) {
+    const additions = new Map<string, T>();
+    for (const patch of patches) {
+      if (patch.after) additions.set(patch.id, patch.after);
+    }
+    const next: T[] = [];
+    for (const item of items) {
+      const replacement = additions.get(item.id);
+      if (replacement) {
+        next.push(replacement);
+        additions.delete(item.id);
+      } else next.push(item);
+    }
+    for (const patch of patches) {
+      const addition = additions.get(patch.id);
+      if (addition) {
+        next.push(addition);
+        additions.delete(patch.id);
+      }
+    }
+    return next;
+  }
+
+  if (
+    patches.every(
+      (patch) =>
+        patch.before !== null &&
+        patch.before !== undefined &&
+        patch.after !== null &&
+        patch.before.id === patch.id &&
+        patch.after.id === patch.id &&
+        patch.index === undefined,
+    )
+  ) {
+    const replacements = new Map<string, T>();
+    for (const patch of patches) {
+      if (patch.after) replacements.set(patch.id, patch.after);
+    }
+    const updated = items.map((item) => {
+      const replacement = replacements.get(item.id);
+      if (!replacement) return item;
+      replacements.delete(item.id);
+      return replacement;
+    });
+    if (replacements.size === 0) return updated;
+  }
+
+  return applyStructuralArrayPatches(items, patches);
+}
+
+function groupPatches(
+  patches: readonly EditorPatch[],
+): Map<EditorPatch['collection'], EditorPatch[]> {
+  const groups = new Map<EditorPatch['collection'], EditorPatch[]>();
+  for (const patch of patches) {
+    const group = groups.get(patch.collection);
+    if (group) group.push(patch);
+    else groups.set(patch.collection, [patch]);
+  }
+  return groups;
 }
 
 function sameSeatPlacement(left: Seat, right: Seat): boolean {
@@ -236,108 +507,73 @@ function applyPatches(
   draft: HallLayoutDraft,
   patches: readonly EditorPatch[],
 ): HallLayoutDraft {
-  let snapshot = draft.snapshot;
+  const grouped = groupPatches(patches);
+  const patchesFor = (collection: EditorPatch['collection']) =>
+    grouped.get(collection) ?? [];
+  const snapshot = {
+    ...draft.snapshot,
+    floors: applyArrayPatches(
+      draft.snapshot.floors,
+      patchesFor('floors') as IdentifiedPatch<Floor>[],
+    ),
+    decorations: applyArrayPatches(
+      draft.snapshot.decorations,
+      patchesFor('decorations') as IdentifiedPatch<Decoration>[],
+    ),
+    zones: applyArrayPatches(
+      draft.snapshot.zones,
+      patchesFor('zones') as IdentifiedPatch<Zone>[],
+    ),
+    backgrounds: applyArrayPatches(
+      draft.snapshot.backgrounds,
+      patchesFor('backgrounds') as IdentifiedPatch<Background>[],
+    ),
+    rows: applyArrayPatches(
+      draft.snapshot.rows,
+      patchesFor('rows') as IdentifiedPatch<Row>[],
+    ),
+    seats: applyArrayPatches(
+      draft.snapshot.seats,
+      patchesFor('seats') as IdentifiedPatch<Seat>[],
+    ),
+    tables: applyArrayPatches(
+      draft.snapshot.tables,
+      patchesFor('tables') as IdentifiedPatch<Table>[],
+    ),
+  };
   let zoneBounds = draft.zoneBounds;
   let assets = draft.assets;
   let calibration = draft.calibration;
-  for (const patch of patches) {
-    switch (patch.collection) {
-      case 'floors':
-        snapshot = {
-          ...snapshot,
-          floors: replaceItem(
-            snapshot.floors,
-            patch.id,
-            patch.after,
-            patch.index,
-          ),
-        };
-        break;
-      case 'decorations':
-        snapshot = {
-          ...snapshot,
-          decorations: replaceItem(
-            snapshot.decorations,
-            patch.id,
-            patch.after,
-            patch.index,
-          ),
-        };
-        break;
-      case 'zones':
-        snapshot = {
-          ...snapshot,
-          zones: replaceItem(
-            snapshot.zones,
-            patch.id,
-            patch.after,
-            patch.index,
-          ),
-        };
-        break;
-      case 'backgrounds':
-        snapshot = {
-          ...snapshot,
-          backgrounds: replaceItem(
-            snapshot.backgrounds,
-            patch.id,
-            patch.after,
-            patch.index,
-          ),
-        };
-        break;
-      case 'assets': {
-        const next = { ...assets };
-        if (patch.after === null) delete next[patch.id];
-        else next[patch.id] = patch.after;
-        assets = next;
-        break;
-      }
-      case 'calibration':
-        calibration = patch.after
-          ? worldCalibrationSchema.parse(patch.after)
-          : null;
-        break;
-      case 'rows':
-        snapshot = {
-          ...snapshot,
-          rows: replaceItem(snapshot.rows, patch.id, patch.after, patch.index),
-        };
-        break;
-      case 'seats':
-        snapshot = {
-          ...snapshot,
-          seats: replaceItem(
-            snapshot.seats,
-            patch.id,
-            patch.after,
-            patch.index,
-          ),
-        };
-        break;
-      case 'tables':
-        snapshot = {
-          ...snapshot,
-          tables: replaceItem(
-            snapshot.tables,
-            patch.id,
-            patch.after,
-            patch.index,
-          ),
-        };
-        break;
-      case 'zoneBounds': {
-        const next = { ...zoneBounds };
-        if (patch.after === null) delete next[patch.id];
-        else next[patch.id] = patch.after;
-        zoneBounds = next;
-        break;
-      }
+  const assetPatches = patchesFor('assets');
+  if (assetPatches.length > 0) {
+    const next = { ...assets };
+    for (const patch of assetPatches) {
+      if (patch.collection !== 'assets') continue;
+      if (patch.after === null) delete next[patch.id];
+      else next[patch.id] = patch.after;
     }
+    assets = next;
   }
-  const validatedSnapshot = layoutSnapshotSchema.parse(snapshot);
+  const calibrationPatches = patchesFor('calibration');
+  for (const patch of calibrationPatches) {
+    if (patch.collection === 'calibration')
+      calibration = patch.after
+        ? worldCalibrationSchema.parse(patch.after)
+        : null;
+  }
+  const boundsPatches = patchesFor('zoneBounds');
+  if (boundsPatches.length > 0) {
+    const next = { ...zoneBounds };
+    for (const patch of boundsPatches) {
+      if (patch.collection !== 'zoneBounds') continue;
+      if (patch.after === null) delete next[patch.id];
+      else next[patch.id] = patch.after;
+    }
+    zoneBounds = next;
+  }
+
   const zoneIds = new Set<string>(
-    validatedSnapshot.zones.map((zone) => zone.id),
+    snapshot.zones.map((zone) => zone.id),
   );
   for (const [id, bounds] of Object.entries(zoneBounds)) {
     if (
@@ -355,7 +591,7 @@ function applyPatches(
   }
   return parseHallLayoutDraft({
     ...draft,
-    snapshot: validatedSnapshot,
+    snapshot,
     zoneBounds,
     assets,
     calibration,

@@ -5,12 +5,11 @@ type Colors = Readonly<{ fill: string; stroke: string }>;
 export type ObjectRendererProps = Readonly<{
   object: Seat | Table;
   colors: Colors;
-  scale: number;
 }>;
 
-export function ObjectRenderer({ object, colors, scale }: ObjectRendererProps) {
+export function ObjectRenderer({ object, colors }: ObjectRendererProps) {
   return 'position' in object ? (
-    <SeatSymbol seat={object} colors={colors} scale={scale} />
+    <SeatSymbol seat={object} colors={colors} />
   ) : (
     <TableSymbol table={object} colors={colors} />
   );

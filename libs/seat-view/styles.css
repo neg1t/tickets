@@ -3,6 +3,34 @@
   min-width: 0;
 }
 
+.seat-view-embed {
+  width: 100%;
+  min-width: 0;
+}
+
+.seat-view-embed[data-theme='dark'] .seat-view {
+  color: #e5edf4;
+}
+
+.seat-view-embed[data-theme='dark'] .seat-view-panel,
+.seat-view-embed[data-theme='dark'] .seat-view-filter-section,
+.seat-view-embed[data-theme='dark'] .seat-view-details,
+.seat-view-embed[data-theme='dark'] .seat-view-basket {
+  color: #e5edf4;
+  border-color: #415468;
+  background: #1d2b3a;
+}
+
+.seat-view-embed[data-theme='dark'] .seat-view-seat-list button,
+.seat-view-embed[data-theme='dark'] .seat-view-seat-list-controls button,
+.seat-view-embed[data-theme='dark'] .seat-view-filters select,
+.seat-view-embed[data-theme='dark'] .seat-view-search input,
+.seat-view-embed[data-theme='dark'] .seat-view-general-admission input {
+  color: #e5edf4;
+  border-color: #536b80;
+  background: #26384a;
+}
+
 .seat-view-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
@@ -24,7 +52,9 @@
   overflow-x: auto;
 }
 
-.seat-view .hall-viewer-toolbar > * { flex: 0 0 auto; }
+.seat-view .hall-viewer-toolbar > * {
+  flex: 0 0 auto;
+}
 
 .seat-view-panel {
   display: grid;
@@ -240,7 +270,9 @@
   font-size: 12px;
 }
 
-.seat-view-price-legend strong { margin-right: 3px; }
+.seat-view-price-legend strong {
+  margin-right: 3px;
+}
 .seat-view-price-legend span {
   padding: 5px 8px;
   border: 1px solid #d7e3ee;
@@ -350,7 +382,10 @@
 
   .seat-view-basket {
     position: fixed;
-    bottom: 0;
+    bottom: max(
+      env(safe-area-inset-bottom),
+      var(--seat-view-keyboard-inset, 0px)
+    );
     left: 0;
     right: 0;
     z-index: 12;
@@ -362,6 +397,10 @@
     border-radius: 16px 16px 0 0;
     background: white;
     box-shadow: 0 -8px 28px #1930472a;
+  }
+
+  .seat-view {
+    scroll-padding-bottom: calc(104px + var(--seat-view-keyboard-inset, 0px));
   }
 
   .seat-view-basket-summary {

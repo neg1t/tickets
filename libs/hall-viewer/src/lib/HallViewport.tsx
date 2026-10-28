@@ -3,22 +3,28 @@ import {
   lazy,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import {
+  CameraController,
   createSeatScene,
+  defaultViewport,
   type RendererScene,
   type RendererSeatGeometry,
   type RendererSeatPositionUpdate,
   type RendererSeatUpdate,
-  type Viewport,
+  type HallTarget,
 } from '@hall-platform/renderer-core';
-import { defaultHallCanvasPalette } from '@hall-platform/design-tokens';
+import {
+  defaultHallCanvasPalette,
+  type HallCanvasPalette,
+} from '@hall-platform/design-tokens';
 import {
   HallViewer,
-  type HallTarget,
   type HallViewerProps,
 } from '@hall-platform/renderer-konva';
 import {
@@ -45,8 +51,10 @@ export type HallViewportProps = Omit<
   HallViewerProps,
   | 'hideSeatShapes'
   | 'seatRendererLayer'
-  | 'onViewportChange'
+  | 'rendererEngine'
+  | 'cameraController'
   | 'onSeatFillColorChange'
+  | 'onRendererPaletteChange'
   | 'onSeatPreviewChange'
 > & {
   readonly renderer?: RendererPreference;
@@ -68,21 +76,44 @@ export function HallViewport(props: HallViewportProps) {
     seatUpdates,
     onRendererChange,
     onRendererError,
+    onSelectionChange: onSelectionChangeProp,
+    onHoverTarget: onHoverTargetProp,
   } = props;
   const [localFloorId, setLocalFloorId] = useState(
     requestedFloorId ?? snapshot.floors[0]?.id ?? '',
   );
-  const [viewport, setViewport] = useState<Viewport | null>(null);
-  const [webglFailed, setWebglFailed] = useState(false);
+  const [cameraController] = useState(
+    () =>
+      new CameraController(
+        defaultViewport,
+        (callback) => requestAnimationFrame(callback),
+        (frame) => cancelAnimationFrame(frame),
+      ),
+  );
+  const rendererSessionId = useId();
+  const sceneRevisionRef = useRef(0);
+  const viewport = useSyncExternalStore(
+    cameraController.subscribe,
+    cameraController.getSnapshot,
+    cameraController.getSnapshot,
+  );
+  const [webglFailureKey, setWebglFailureKey] = useState<string | null>(null);
   const [preparedSeatScene, setPreparedSeatScene] =
     useState<PreparedSeatScene | null>(null);
   const [webglReadyScene, setWebglReadyScene] =
     useState<RendererScene<RendererSeatGeometry> | null>(null);
-  const [canvasSeatFillColor, setCanvasSeatFillColor] = useState(
-    defaultHallCanvasPalette.seat,
-  );
-  const contextLosses = useRef(0);
-  const [hoveredTarget, setHoveredTarget] = useState<HallTarget | null>(null);
+  const [canvasPalette, setCanvasPalette] = useState(defaultHallCanvasPalette);
+  const [contextFallbackState, setContextFallbackState] = useState<{
+    rendererKey: string;
+    sceneRevision: number | null;
+    contextLost: boolean;
+    restorePending: boolean;
+  }>({
+    rendererKey: '',
+    sceneRevision: null,
+    contextLost: false,
+    restorePending: false,
+  });
   const [localSelection, setLocalSelection] = useState<HallTarget[]>([]);
   const [previewPositions, setPreviewPositions] = useState<
     readonly RendererSeatPositionUpdate[]
@@ -92,13 +123,19 @@ export function HallViewport(props: HallViewportProps) {
   const floorId = snapshot.floors.some((floor) => floor.id === preferredFloorId)
     ? preferredFloorId
     : (snapshot.floors[0]?.id ?? '');
-  const engine = selectRendererEngine(renderer, webglEnabled, webglFailed);
   const rendererKey = `${renderer}:${webglEnabled}`;
+  const webglFailed = webglFailureKey === rendererKey;
+  const engine = selectRendererEngine(renderer, webglEnabled, webglFailed);
   const seatScene =
     preparedSeatScene?.seats === snapshot.seats &&
     preparedSeatScene.floorId === floorId
       ? preparedSeatScene.scene
       : null;
+  const webglContextLost =
+    seatScene !== null &&
+    contextFallbackState.rendererKey === rendererKey &&
+    contextFallbackState.sceneRevision === seatScene.revision &&
+    contextFallbackState.contextLost;
   const webglReady =
     engine === 'webgl' && seatScene !== null && webglReadyScene === seatScene;
   const effectiveSeatUpdates = useMemo(() => {
@@ -117,70 +154,88 @@ export function HallViewport(props: HallViewportProps) {
       fillColor:
         seatAppearance?.[update.id]?.fill ??
         update.fillColor ??
-        canvasSeatFillColor,
+        canvasPalette.seat,
+      strokeColor:
+        seatAppearance?.[update.id]?.stroke ??
+        update.strokeColor ??
+        canvasPalette.seatStroke,
     }));
   }, [
     seatUpdates,
     snapshot.seats,
     engine,
     seatAppearance,
-    canvasSeatFillColor,
+    canvasPalette.seat,
+    canvasPalette.seatStroke,
   ]);
   const selection = useMemo(() => {
-    const targets = new Map(
-      selectedTargets.map((target) => [
-        `${target.kind}:${target.id}`,
-        { kind: target.kind, id: target.id },
-      ]),
-    );
-    if (hoveredTarget?.kind === 'seat')
-      targets.set(`seat:${hoveredTarget.id}`, {
-        kind: 'seat',
-        id: hoveredTarget.id,
-      });
-    return [...targets.values()];
-  }, [selectedTargets, hoveredTarget]);
-  const handleViewportChange = useCallback((next: Viewport) => {
-    setViewport(next);
-  }, []);
-  const handleSeatFillColorChange = useCallback((fillColor: string) => {
-    setCanvasSeatFillColor(fillColor);
-  }, []);
+    return selectedTargets.map((target) => ({
+      kind: target.kind,
+      id: target.id,
+    }));
+  }, [selectedTargets]);
+  const handleRendererPaletteChange = useCallback(
+    (palette: HallCanvasPalette) => setCanvasPalette(palette),
+    [],
+  );
   const handleFloorChange = useCallback(
     (next: string) => {
-      setLocalFloorId(next);
+      if (requestedFloorId === undefined) setLocalFloorId(next);
       onFloorChange?.(next);
     },
-    [onFloorChange],
+    [onFloorChange, requestedFloorId],
   );
   const handleSelectionChange = useCallback(
     (next: readonly HallTarget[]) => {
       if (controlledSelection === undefined) setLocalSelection([...next]);
-      props.onSelectionChange?.(next);
+      onSelectionChangeProp?.(next);
     },
-    [controlledSelection, props.onSelectionChange],
+    [controlledSelection, onSelectionChangeProp],
   );
   const handleHoverTarget = useCallback(
     (target: HallTarget | null) => {
-      setHoveredTarget(target);
-      props.onHoverTarget?.(target);
+      onHoverTargetProp?.(target);
     },
-    [props.onHoverTarget],
+    [onHoverTargetProp],
   );
   const handleWebGLError = useCallback(
     (error: Error) => {
-      setWebglFailed(true);
+      setWebglFailureKey(rendererKey);
       onRendererError?.(error);
     },
-    [onRendererError],
+    [onRendererError, rendererKey],
   );
   const handleContextLost = useCallback(() => {
-    contextLosses.current += 1;
-    if (contextLosses.current > 1) setWebglFailed(true);
-  }, []);
-  const handleRendererReady = useCallback(() => {
+    setContextFallbackState({
+      rendererKey,
+      sceneRevision: seatScene?.revision ?? null,
+      contextLost: true,
+      restorePending: false,
+    });
+  }, [rendererKey, seatScene]);
+  const handleContextRestored = useCallback(() => {
+    setContextFallbackState({
+      rendererKey,
+      sceneRevision: seatScene?.revision ?? null,
+      contextLost: true,
+      restorePending: true,
+    });
+  }, [rendererKey, seatScene]);
+  const handleFrameRendered = useCallback(() => {
     if (seatScene) setWebglReadyScene(seatScene);
-  }, [seatScene]);
+    setContextFallbackState((current) =>
+      current.rendererKey === rendererKey &&
+      current.sceneRevision === (seatScene?.revision ?? null) &&
+      current.restorePending
+        ? {
+            rendererKey,
+            sceneRevision: seatScene?.revision ?? null,
+            contextLost: false,
+            restorePending: false,
+          }
+        : current,
+    );
+  }, [rendererKey, seatScene]);
   const rendererLayer =
     engine === 'webgl' && viewport && seatScene ? (
       <WebGLErrorBoundary key={rendererKey} onError={handleWebGLError}>
@@ -188,41 +243,41 @@ export function HallViewport(props: HallViewportProps) {
           <LazyWebGLHallCanvas
             scene={seatScene}
             viewport={viewport}
+            cameraController={cameraController}
             seatUpdates={effectiveSeatUpdates}
             previewPositions={previewPositions}
             selection={selection}
+            selectedColor={canvasPalette.selected}
             onContextLost={handleContextLost}
+            onContextRestored={handleContextRestored}
             onRendererError={handleWebGLError}
-            onRendererReady={handleRendererReady}
+            onFrameRendered={handleFrameRendered}
           />
         </Suspense>
       </WebGLErrorBoundary>
     ) : null;
 
   useEffect(() => {
-    setPreparedSeatScene(null);
-    setWebglReadyScene(null);
     const seats = snapshot.seats;
     const requestedFloorId = floorId;
     return scheduleRendererScenePreparation(
       engine,
       () =>
         createSeatScene(
-          1,
-          seats
-            .filter((seat) => seat.floorId === requestedFloorId)
-            .map((seat) => ({
-              id: seat.id,
-              floorId: seat.floorId,
-              position: seat.position,
-              ...(seat.rotationRadians !== undefined
-                ? { rotationRadians: seat.rotationRadians }
-                : {}),
-              ...(seat.visualKind !== undefined
-                ? { visualKind: seat.visualKind }
-                : {}),
-            })),
+          ++sceneRevisionRef.current,
+          seats.map((seat) => ({
+            id: seat.id,
+            floorId: seat.floorId,
+            position: seat.position,
+            ...(seat.rotationRadians !== undefined
+              ? { rotationRadians: seat.rotationRadians }
+              : {}),
+            ...(seat.visualKind !== undefined
+              ? { visualKind: seat.visualKind }
+              : {}),
+          })),
           requestedFloorId,
+          { documentId: snapshot.id, sessionId: rendererSessionId },
         ),
       (scene) =>
         setPreparedSeatScene({
@@ -231,18 +286,7 @@ export function HallViewport(props: HallViewportProps) {
           scene,
         }),
     );
-  }, [engine, snapshot.seats, floorId]);
-  useEffect(() => {
-    contextLosses.current = 0;
-    setWebglFailed(false);
-  }, [renderer, webglEnabled]);
-  useEffect(() => {
-    if (snapshot.floors.some((floor) => floor.id === localFloorId)) return;
-    setLocalFloorId(snapshot.floors[0]?.id ?? '');
-  }, [snapshot.floors, localFloorId]);
-  useEffect(() => {
-    if (requestedFloorId !== undefined) setLocalFloorId(requestedFloorId);
-  }, [requestedFloorId]);
+  }, [engine, rendererSessionId, snapshot.id, snapshot.seats, floorId]);
   useEffect(() => onRendererChange?.(engine), [engine, onRendererChange]);
 
   return (
@@ -253,11 +297,12 @@ export function HallViewport(props: HallViewportProps) {
       selectedTargets={selectedTargets}
       onSelectionChange={handleSelectionChange}
       onHoverTarget={handleHoverTarget}
-      onViewportChange={handleViewportChange}
-      onSeatFillColorChange={handleSeatFillColorChange}
+      cameraController={cameraController}
+      onRendererPaletteChange={handleRendererPaletteChange}
       onSeatPreviewChange={setPreviewPositions}
-      hideSeatShapes={webglReady}
+      hideSeatShapes={webglReady && !webglContextLost}
       seatRendererLayer={rendererLayer}
+      rendererEngine={webglReady && !webglContextLost ? 'webgl' : 'canvas'}
     />
   );
 }

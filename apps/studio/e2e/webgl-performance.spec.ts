@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { classifyGpu } from './performance-metrics';
 
-test('WebGL culls offscreen instances at 50,000 and 100,000 seats', async ({
+test('WebGL culls offscreen instances at 50,000 and 100,000 seats @performance', async ({
   page,
 }) => {
   test.setTimeout(180_000);
@@ -8,7 +9,11 @@ test('WebGL culls offscreen instances at 50,000 and 100,000 seats', async ({
 
   for (const seatCount of [50_000, 100_000]) {
     const result = await page.evaluate(async (count) => {
-      const harness = await import('/src/e2e/webglHarness.ts');
+      const moduleUrl = new URL(
+        '/src/e2e/webglHarness.ts',
+        window.location.href,
+      ).href;
+      const harness = await import(moduleUrl);
       const mounted = await harness.mountWebGLPerformanceHarness(
         document.body,
         count,
@@ -33,14 +38,39 @@ test('WebGL culls offscreen instances at 50,000 and 100,000 seats', async ({
       seatCount * Float32Array.BYTES_PER_ELEMENT,
     );
     expect(result.metrics.bulkStatusCalls).toBeLessThanOrEqual(1);
+    const gpuClassification = classifyGpu(
+      true,
+      result.metrics.vendor,
+      result.metrics.renderer,
+    );
+    const benchmarkReport = {
+      ...result.metrics,
+      gpu: {
+        classification: gpuClassification,
+        vendor: result.metrics.vendor,
+        renderer: result.metrics.renderer,
+      },
+      gpuBudget: {
+        status: 'not-enforced',
+        reason:
+          'This benchmark checks draw and buffer behavior, not frame-time budget',
+      },
+      devicePixelRatio: result.metrics.devicePixelRatio,
+      buildRevision: process.env['GIT_SHA'] ?? null,
+      buildId: process.env['GITHUB_SHA'] ?? process.env['GIT_SHA'] ?? null,
+    };
     await test.info().attach(`webgl-${seatCount}-metrics.json`, {
-      body: JSON.stringify(result.metrics, null, 2),
+      body: JSON.stringify(benchmarkReport, null, 2),
       contentType: 'application/json',
     });
-    console.log(`[webgl-benchmark] ${JSON.stringify(result.metrics)}`);
+    console.log(`[webgl-benchmark] ${JSON.stringify(benchmarkReport)}`);
 
     await page.evaluate(async () => {
-      const harness = await import('/src/e2e/webglHarness.ts');
+      const moduleUrl = new URL(
+        '/src/e2e/webglHarness.ts',
+        window.location.href,
+      ).href;
+      const harness = await import(moduleUrl);
       harness.unmountWebGLPerformanceHarness(document.body);
     });
   }

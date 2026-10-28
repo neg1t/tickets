@@ -1,5 +1,5 @@
 import { createEvent, createStore } from 'effector';
-import type { HallTarget } from '@hall-platform/renderer-konva';
+import type { HallTarget } from '@hall-platform/renderer-core';
 import {
   applyEditorCommand,
   createEditorState,

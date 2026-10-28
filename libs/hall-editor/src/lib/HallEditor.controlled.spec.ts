@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createElement, useState } from 'react';
 import { rowSchema } from '@hall-platform/domain';
 import { createEmptyDraft, type HallLayoutDraft } from './editorDraft.js';
@@ -57,7 +57,7 @@ describe('controlled HallEditor', () => {
     expect(screen.getByText(/Нет изменений/)).toBeTruthy();
   });
 
-  it('lets the user publish an empty row after acknowledging the warning', () => {
+  it('lets the user publish an empty row after acknowledging the warning', async () => {
     const draft = createEmptyDraft('Hall');
     const floorId = draft.snapshot.floors[0]?.id;
     if (!floorId) throw new Error('Missing floor');
@@ -88,8 +88,38 @@ describe('controlled HallEditor', () => {
     const publishButton = screen.getByRole('button', { name: 'Опубликовать' });
     expect(publishButton).toHaveProperty('disabled', true);
     fireEvent.click(screen.getByLabelText('Публиковать с предупреждениями'));
+    await waitFor(() => expect(publishButton).toHaveProperty('disabled', false));
     expect(publishButton).toHaveProperty('disabled', false);
     fireEvent.click(publishButton);
-    expect(onPublish).toHaveBeenCalledWith(value, true);
+    await waitFor(() => expect(onPublish).toHaveBeenCalledWith(value, true));
+  });
+
+  it('runs Save semantics when Save and Publish use the same callback', async () => {
+    const empty = createEmptyDraft('Hall');
+    const brokenSeat = {
+      id: 'seat-orphan',
+      floorId: 'floor-missing',
+      label: '1',
+      position: { x: 0, y: 0 },
+      placement: { kind: 'standalone' as const },
+    } as HallLayoutDraft['snapshot']['seats'][number];
+    const value = {
+      ...empty,
+      snapshot: { ...empty.snapshot, seats: [brokenSeat] },
+    };
+    const sharedCallback = vi.fn();
+
+    render(
+      createElement(HallEditor, {
+        value,
+        onChange: () => undefined,
+        onSave: sharedCallback,
+        onPublish: sharedCallback,
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(sharedCallback).toHaveBeenCalledTimes(1));
+    expect(sharedCallback.mock.calls[0]).toEqual([value]);
   });
 });

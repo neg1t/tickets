@@ -9,9 +9,19 @@ import {
 type RendererComparisonWindow = Window & {
   __rendererComparisonRoot?: Root;
   __rendererComparisonEngine?: 'canvas' | 'webgl';
+  __rendererComparisonControlSeat?: Readonly<{ id: string; x: number; y: number }>;
 };
 
 const snapshot = createPerformanceHallSnapshot(50_000);
+function firstControlSeat() {
+  const seat = snapshot.seats.find(
+    ({ position }) => position.x >= 4_400 && position.y >= 6_000,
+  );
+  if (!seat) throw new Error('Renderer comparison fixture needs a seat');
+  return seat;
+}
+
+const controlSeat = firstControlSeat();
 
 function RendererComparisonView({
   renderer,
@@ -25,6 +35,9 @@ function RendererComparisonView({
     stageId: 'renderer-comparison-stage',
     renderer,
     webglEnabled: true,
+    seatAppearance: {
+      [controlSeat.id]: { fill: '#ff00ff', stroke: '#ff00ff' },
+    },
     viewerMode: 'edit',
     activeTool: 'pan',
     onRendererChange: (engine) => {
@@ -42,7 +55,13 @@ export function mountRendererComparisonHarness(
   container.style.height = '820px';
   const root = createRoot(container);
   root.render(createElement(RendererComparisonView, { renderer }));
-  (window as RendererComparisonWindow).__rendererComparisonRoot = root;
+  const testWindow = window as RendererComparisonWindow;
+  testWindow.__rendererComparisonRoot = root;
+  testWindow.__rendererComparisonControlSeat = {
+    id: controlSeat.id,
+    x: controlSeat.position.x,
+    y: controlSeat.position.y,
+  };
 }
 
 export function unmountRendererComparisonHarness(container: HTMLElement): void {
@@ -50,5 +69,6 @@ export function unmountRendererComparisonHarness(container: HTMLElement): void {
   testWindow.__rendererComparisonRoot?.unmount();
   delete testWindow.__rendererComparisonRoot;
   delete testWindow.__rendererComparisonEngine;
+  delete testWindow.__rendererComparisonControlSeat;
   container.replaceChildren();
 }

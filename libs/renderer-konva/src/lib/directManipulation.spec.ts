@@ -257,7 +257,7 @@ describe('direct canvas manipulation', () => {
     expect(gridStepForScale(0.1)).toBe(100);
   });
 
-  it('offers a seat rotation handle and previews its direction', () => {
+  it('does not offer rotation handles for circular seats', () => {
     const seat = snapshot.seats[0];
     if (!seat) throw new Error('Missing seat');
     const scene = buildHallScene(snapshot, seat.floorId);
@@ -265,14 +265,6 @@ describe('direct canvas manipulation', () => {
       handlesForTarget(scene, { kind: 'seat', id: seat.id }).map(
         (handle) => handle.id,
       ),
-    ).toContain('rotate');
-    const next = editHandleGeometry(
-      snapshot,
-      {},
-      { kind: 'seat', id: seat.id },
-      'rotate',
-      { x: seat.position.x, y: seat.position.y + 4 },
-    );
-    expect(next.snapshot.seats[0]?.rotationRadians).toBeCloseTo(Math.PI / 2);
+    ).toEqual([]);
   });
 });

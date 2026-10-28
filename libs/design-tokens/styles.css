@@ -29,6 +29,7 @@
   --hall-canvas-row: #65869b;
   --hall-canvas-table: #c3dbe6;
   --hall-canvas-selected: #ed8936;
+  --hall-canvas-hover: #f3b66d;
 }
 
 .hall-theme-canvas {
@@ -45,6 +46,7 @@
   --hall-canvas-zone-stroke: #6e9bad;
   --hall-canvas-row: #91adba;
   --hall-canvas-table: #456c7d;
+  --hall-canvas-hover: #ffbd73;
   color: var(--hall-color-ink);
   background: var(--hall-color-canvas);
 }

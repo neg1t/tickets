@@ -1,8 +1,5 @@
 import { createEffect, createEvent, createStore, sample } from 'effector';
-import {
-  layoutDocumentSchema,
-  layoutSnapshotSchema,
-} from '@hall-platform/domain';
+import { layoutDocumentSchema } from '@hall-platform/domain';
 import {
   createPerformanceHallDraft as createPerformanceHallFixtureDraft,
   getPerformanceHallId,
@@ -187,6 +184,23 @@ async function seedFixtures(): Promise<void> {
   }
 }
 
+async function findFirstReadableHall(): Promise<StoredHall | null> {
+  for (const summary of await repository.list()) {
+    try {
+      const record = await repository.read(summary.id);
+      if (record) return record;
+    } catch (error) {
+      if (
+        error instanceof HallStorageError &&
+        (error.code === 'corrupt' || error.code === 'unsupported')
+      )
+        continue;
+      throw error;
+    }
+  }
+  return null;
+}
+
 async function openStoredHall(
   id: string,
   existingRecord?: StoredHall | null,
@@ -251,6 +265,22 @@ export const initializeFx = createEffect(() => {
         )
           throw error;
       }
+    }
+    try {
+      const sampleRecord = await repository.read(sampleDraft.snapshot.id);
+      if (sampleRecord)
+        return openStoredHall(sampleDraft.snapshot.id, sampleRecord);
+    } catch (error) {
+      if (
+        !(error instanceof HallStorageError) ||
+        (error.code !== 'corrupt' && error.code !== 'unsupported')
+      )
+        throw error;
+    }
+    const fallback = await findFirstReadableHall();
+    if (fallback) {
+      writeBrowserStorage('local', activeHallKey, fallback.id);
+      return openStoredHall(fallback.id, fallback);
     }
     return openStoredHall(sampleDraft.snapshot.id);
   })().catch((error: unknown) => {

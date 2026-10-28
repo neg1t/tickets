@@ -13,6 +13,13 @@ export type SeatBufferGeometry = RendererSeatGeometry &
 
 export type BufferRange = Readonly<{ start: number; count: number }>;
 
+export type SeatGeometryBufferRanges = Readonly<{
+  positions: readonly BufferRange[];
+  rotations: readonly BufferRange[];
+  symbolKinds: readonly BufferRange[];
+  diameters: readonly BufferRange[];
+}>;
+
 export type SeatBuffers = Readonly<{
   ids: readonly string[];
   indexById: ReadonlyMap<string, number>;
@@ -23,6 +30,7 @@ export type SeatBuffers = Readonly<{
   statuses: Float32Array;
   selected: Float32Array;
   fillColors: Uint8Array;
+  strokeColors: Uint8Array;
   selectedIndices: Set<number>;
 }>;
 
@@ -72,6 +80,7 @@ export function createSeatBuffers(
   const statuses = new Float32Array(seats.length);
   const selected = new Float32Array(seats.length);
   const fillColors = new Uint8Array(seats.length * 4);
+  const strokeColors = new Uint8Array(seats.length * 4);
 
   seats.forEach((seat, index) => {
     if (indexById.has(seat.id))
@@ -100,6 +109,7 @@ export function createSeatBuffers(
     statuses,
     selected,
     fillColors,
+    strokeColors,
     selectedIndices: new Set(),
   };
 }
@@ -128,6 +138,12 @@ function parseFillColor(
   ) as [number, number, number];
 }
 
+export function parseSeatColor(
+  value: string,
+): readonly [number, number, number] | null {
+  return parseFillColor(value);
+}
+
 export function updateSeatFillColors(
   buffers: SeatBuffers,
   updates: readonly Pick<RendererSeatUpdate, 'id' | 'fillColor'>[],
@@ -150,6 +166,34 @@ export function updateSeatFillColors(
       continue;
     next.forEach((channel, component) => {
       buffers.fillColors[offset + component] = channel;
+    });
+    changed.push(index);
+  }
+  return rangesForIndices(changed);
+}
+
+export function updateSeatStrokeColors(
+  buffers: SeatBuffers,
+  updates: readonly Pick<RendererSeatUpdate, 'id' | 'strokeColor'>[],
+): BufferRange[] {
+  const changed: number[] = [];
+  for (const update of updates) {
+    const index = buffers.indexById.get(update.id);
+    if (index === undefined || update.strokeColor === undefined) continue;
+    const parsed =
+      update.strokeColor === null ? null : parseFillColor(update.strokeColor);
+    if (update.strokeColor !== null && !parsed) continue;
+    const next = parsed ? [...parsed, 255] : [0, 0, 0, 0];
+    const offset = index * 4;
+    if (
+      next.every(
+        (channel, component) =>
+          buffers.strokeColors[offset + component] === channel,
+      )
+    )
+      continue;
+    next.forEach((channel, component) => {
+      buffers.strokeColors[offset + component] = channel;
     });
     changed.push(index);
   }
@@ -191,6 +235,47 @@ export function updateSeatPositions(
     changed.push(index);
   }
   return rangesForIndices(changed);
+}
+
+export function updateSeatGeometry(
+  buffers: SeatBuffers,
+  updates: readonly Readonly<{ id: string; geometry: RendererSeatGeometry }>[],
+): SeatGeometryBufferRanges {
+  const positions: RendererSeatPositionUpdate[] = [];
+  const rotations: number[] = [];
+  const symbolKinds: number[] = [];
+  const diameters: number[] = [];
+  for (const update of updates) {
+    const index = buffers.indexById.get(update.id);
+    if (index === undefined) continue;
+    positions.push({ id: update.id, position: update.geometry.position });
+    const rotation = update.geometry.rotationRadians ?? 0;
+    if (buffers.rotations[index] !== rotation) {
+      buffers.rotations[index] = rotation;
+      rotations.push(index);
+    }
+    const symbolKind =
+      update.geometry.visualKind === 'armchair'
+        ? 1
+        : update.geometry.visualKind === 'wheelchairBay'
+          ? 2
+          : 0;
+    if (buffers.symbolKinds[index] !== symbolKind) {
+      buffers.symbolKinds[index] = symbolKind;
+      symbolKinds.push(index);
+    }
+    const diameter = seatSymbolDiameter(update.geometry.visualKind);
+    if (buffers.diameters[index] !== diameter) {
+      buffers.diameters[index] = diameter;
+      diameters.push(index);
+    }
+  }
+  return {
+    positions: updateSeatPositions(buffers, positions),
+    rotations: rangesForIndices(rotations),
+    symbolKinds: rangesForIndices(symbolKinds),
+    diameters: rangesForIndices(diameters),
+  };
 }
 
 export function updateSeatSelection(

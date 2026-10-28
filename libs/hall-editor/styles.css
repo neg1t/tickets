@@ -101,6 +101,18 @@
   border-right: 1px solid var(--editor-border);
   background: #f8faff;
 }
+.hall-editor-tool-group {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 5px;
+  align-items: center;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--editor-border);
+}
+.hall-editor-tool-group:last-child {
+  border-bottom: 0;
+}
 .hall-editor-tool-rail button {
   flex: 0 0 40px;
   display: flex;
@@ -113,9 +125,9 @@
   border: 0;
   background: transparent;
 }
-.hall-editor-tool-glyph {
-  font-size: 19px;
-  line-height: 20px;
+.hall-editor-tool-icon {
+  width: 20px;
+  height: 20px;
 }
 .hall-editor-tool-rail .hall-editor-shortcut {
   padding: 1px 3px;
@@ -232,6 +244,125 @@
   background: #fff8e9;
   color: #6d511f;
   line-height: 1.4;
+}
+.hall-editor-structure-panel {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--editor-border);
+}
+.hall-editor-structure-search {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 650;
+}
+.hall-editor-structure-search input {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid var(--editor-border);
+  border-radius: 6px;
+  padding: 5px 7px;
+  color: var(--hall-color-ink, #182b38);
+  background: var(--hall-color-surface, #fff);
+  font: inherit;
+  font-weight: 400;
+}
+.hall-editor-structure-tree {
+  display: grid;
+  gap: 3px;
+  max-height: min(35vh, 300px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.hall-editor-structure-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px 28px;
+  gap: 3px;
+  min-width: 0;
+  align-items: center;
+  border-radius: 6px;
+  color: var(--hall-color-ink, #182b38);
+}
+.hall-editor-structure-item[aria-selected='true'] {
+  background: color-mix(
+    in srgb,
+    var(--hall-color-accent, #087e87) 11%,
+    transparent
+  );
+}
+.hall-editor-structure-item[data-hidden='true'] .hall-editor-structure-name {
+  opacity: 0.55;
+}
+.hall-editor-structure-select,
+.hall-editor-structure-state {
+  min-width: 0;
+  min-height: 29px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.hall-editor-structure-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 5px;
+  text-align: left;
+}
+.hall-editor-structure-kind {
+  flex: 0 0 auto;
+  color: var(--hall-color-muted, #587080);
+  font-size: 9px;
+}
+.hall-editor-structure-name {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hall-editor-structure-state {
+  display: grid;
+  place-items: center;
+  padding: 4px;
+  color: var(--hall-color-muted, #587080);
+}
+.hall-editor-structure-state svg {
+  width: 16px;
+  height: 16px;
+}
+.hall-editor-structure-state[aria-pressed='true'] {
+  color: var(--hall-color-accent, #087e87);
+}
+.hall-editor-structure-item button:focus-visible {
+  outline: 2px solid var(--hall-color-focus, #176bcb);
+  outline-offset: 1px;
+}
+.hall-editor-structure-item button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.hall-editor-structure-empty,
+.hall-editor-structure-count {
+  margin: 0;
+  color: var(--hall-color-muted, #587080);
+  font-size: 10px;
+}
+.hall-editor-structure-empty {
+  padding: 6px 3px;
+}
+.hall-editor-locked-properties {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.hall-editor-locked-properties:disabled {
+  opacity: 0.7;
 }
 .hall-editor-calibration-help {
   padding: 9px 10px;
@@ -469,6 +600,19 @@
     border: 0;
     border-radius: 0;
     font-size: 18px;
+  }
+  .hall-editor-mobile-nav svg {
+    width: 21px;
+    height: 21px;
+    flex: 0 0 21px;
+  }
+  .hall-editor-mobile-nav button[aria-pressed='true'] {
+    color: var(--editor-accent, #087e87);
+    background: color-mix(in srgb, var(--editor-accent, #087e87) 9%, white);
+  }
+  .hall-editor-mobile-nav button:focus-visible {
+    outline: 3px solid var(--hall-color-focus, #176bcb);
+    outline-offset: -3px;
   }
   .hall-editor-mobile-nav span {
     font-size: 10px;

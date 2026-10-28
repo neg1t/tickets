@@ -1,6 +1,6 @@
-import { createElement, useMemo, useState } from 'react';
+import { createElement, useEffect, useMemo, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { layoutDocumentSchema } from '@hall-platform/domain';
+import { layoutDocumentSchema, layoutSnapshotSchema } from '@hall-platform/domain';
 import smallTheater from '@hall-platform/fixtures/small-theater.json' with { type: 'json' };
 import type { RendererSeatUpdate } from '@hall-platform/renderer-core';
 import type { HallTarget } from '@hall-platform/renderer-konva';
@@ -22,6 +22,7 @@ type HallViewportTestWindow = Window & {
   __hallViewportRoot?: Root;
   __hallMoveDelta?: Readonly<{ x: number; y: number }> | null;
   __hallMoveCommitCount?: number;
+  __replaceHallDocument?: () => void;
 };
 
 const snapshot = layoutDocumentSchema.parse(smallTheater.document).snapshot;
@@ -34,19 +35,34 @@ function HallViewportHarness({
   editorMode: boolean;
 }) {
   const [selection, setSelection] = useState<HallTarget[]>([]);
+  const [currentSnapshot, setCurrentSnapshot] = useState(snapshot);
   const seatUpdates = useMemo<readonly RendererSeatUpdate[]>(
     () =>
-      snapshot.seats.map((seat) => ({
+      currentSnapshot.seats.map((seat) => ({
         id: seat.id,
-        status: seat.id === snapshot.seats[1]?.id ? 'sold' : 'available',
+        status: seat.id === currentSnapshot.seats[1]?.id ? 'sold' : 'available',
         label: seat.label,
       })),
-    [snapshot.seats],
+    [currentSnapshot.seats],
   );
   const testWindow = window as HallViewportTestWindow;
+  useEffect(() => {
+    testWindow.__replaceHallDocument = () => {
+      setCurrentSnapshot((previous) =>
+        layoutSnapshotSchema.parse({
+          ...previous,
+          id: `${previous.id}-replacement`,
+          seats: previous.seats.slice(1),
+        }),
+      );
+    };
+    return () => {
+      delete testWindow.__replaceHallDocument;
+    };
+  }, [testWindow]);
 
   return createElement(HallViewport, {
-    snapshot,
+    snapshot: currentSnapshot,
     hallName: 'Renderer parity test',
     height: 480,
     stageId: 'renderer-parity-stage',
@@ -125,5 +141,6 @@ export function unmountHallViewportHarness(container: HTMLElement): void {
   delete testWindow.__hallSeatWorld;
   delete testWindow.__hallMoveDelta;
   delete testWindow.__hallMoveCommitCount;
+  delete testWindow.__replaceHallDocument;
   container.replaceChildren();
 }

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createSeatScene } from '@hall-platform/renderer-core';
+import {
+  createSeatScene,
+} from '@hall-platform/renderer-core';
 import { drawSeatLabels } from './seatLabels.js';
 
 function context(): CanvasRenderingContext2D {
@@ -61,5 +63,27 @@ describe('WebGL seat label overlay', () => {
       ),
     ).toBe(0);
     expect(draw.fillText).not.toHaveBeenCalled();
+  });
+
+  it('places a dragged seat label at its preview position', () => {
+    const scene = createSeatScene(1, [
+      { id: 'visible', floorId: 'main', position: { x: 0, y: 0 } },
+    ]);
+    const draw = context();
+    const previewPositions = [
+      { id: 'visible', position: { x: 1, y: 0 } },
+    ] as const;
+
+    drawSeatLabels(
+      draw,
+      scene,
+      new Map([['visible', 'A1']]),
+      { x: 50, y: 50, scale: 20 },
+      100,
+      100,
+      previewPositions,
+    );
+
+    expect(draw.fillText).toHaveBeenCalledWith('A1', 70, 50, 30);
   });
 });

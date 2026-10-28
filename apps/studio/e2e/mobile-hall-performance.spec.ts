@@ -16,7 +16,7 @@ test.skip(
   'Run explicitly against the production preview',
 );
 
-test('measures 5,000-seat editor readiness on mobile', async ({
+test('measures 5,000-seat editor readiness on mobile @performance', async ({
   page,
 }, testInfo) => {
   test.skip(
@@ -61,7 +61,7 @@ test('measures 5,000-seat editor readiness on mobile', async ({
   );
 });
 
-test('measures buyer readiness and selection feedback on mobile', async ({
+test('measures buyer readiness and selection feedback on mobile @performance', async ({
   page,
 }, testInfo) => {
   test.skip(

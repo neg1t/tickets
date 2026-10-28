@@ -16,6 +16,30 @@ import {
 } from './GenerationControls.js';
 import { EditorLocaleContext } from './editorI18n.js';
 
+type SemanticRole = 'button' | 'heading';
+
+function getByRoleName(
+  markup: string,
+  role: SemanticRole,
+  name: RegExp,
+): { readonly attributes: string; readonly accessibleName: string } {
+  const pattern =
+    role === 'button'
+      ? /<button\b([^>]*)>([\s\S]*?)<\/button>/g
+      : /<h[1-6]\b([^>]*)>([\s\S]*?)<\/h[1-6]>/g;
+  for (const match of markup.matchAll(pattern)) {
+    const attributes = match[1] ?? '';
+    const content = match[2] ?? '';
+    const ariaLabel = attributes.match(/\baria-label="([^"]*)"/)?.[1];
+    const text = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const accessibleName = (ariaLabel ?? text)
+      .replace(/&amp;/g, '&')
+      .replace(/&#x27;/g, "'");
+    if (name.test(accessibleName)) return { attributes, accessibleName };
+  }
+  throw new Error(`No ${role} found with accessible name ${name}`);
+}
+
 describe('editor panel localization', () => {
   it('renders English action and panel names', () => {
     const tools = renderToStaticMarkup(
@@ -42,9 +66,15 @@ describe('editor panel localization', () => {
         children: 'Seat',
       }),
     );
-    expect(tools).toContain('aria-label="Select"');
-    expect(layers).toContain('>Tools</h3>');
-    expect(properties).toContain('>Properties</h3>');
+    const selectButton = getByRoleName(tools, 'button', /^Select/);
+    expect(selectButton.attributes).toContain('aria-pressed="true"');
+    expect(selectButton.attributes).toContain('aria-keyshortcuts="V"');
+    expect(getByRoleName(layers, 'heading', /^Tools$/).accessibleName).toBe(
+      'Tools',
+    );
+    expect(
+      getByRoleName(properties, 'heading', /^Properties$/).accessibleName,
+    ).toBe('Properties');
   });
 
   it('renders the editor shell in English when locale is en', () => {
@@ -65,9 +95,12 @@ describe('editor panel localization', () => {
         onChange: () => undefined,
       }),
     );
-    expect(markup).toContain('aria-label="Hall editor Demo"');
-    expect(markup).toContain('>Undo</button>');
-    expect(markup).toContain('>Floors</h3>');
+    expect(getByRoleName(markup, 'button', /^Undo\b/).accessibleName).toMatch(
+      /^Undo\b/,
+    );
+    expect(getByRoleName(markup, 'heading', /^Floors$/).accessibleName).toBe(
+      'Floors',
+    );
     expect(markup.match(/.{0,40}[А-Яа-я].{0,40}/g)).toEqual(null);
   });
 
@@ -78,8 +111,12 @@ describe('editor panel localization', () => {
         onChange: () => undefined,
       }),
     );
-    expect(markup).toContain('>Отменить</button>');
-    expect(markup).toContain('>Этажи</h3>');
+    expect(getByRoleName(markup, 'button', /^Отменить/u).accessibleName).toMatch(
+      /^Отменить/u,
+    );
+    expect(getByRoleName(markup, 'heading', /^Этажи$/).accessibleName).toBe(
+      'Этажи',
+    );
   });
 
   it('localizes the PDF background loading status', () => {

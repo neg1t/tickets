@@ -7,10 +7,7 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react';
-import { useUnit } from 'effector-react';
 import {
-  backgroundIdSchema,
-  backgroundSchema,
   calibrateWorldDistance,
   worldPointSchema,
   type Background,
@@ -21,27 +18,23 @@ import {
   type Zone,
 } from '@hall-platform/domain';
 import type { Vector2 } from '@hall-platform/geometry';
+import type { HallTarget } from '@hall-platform/renderer-core';
 import type { RendererPreference } from '@hall-platform/hall-viewer';
-import { encodePdfDataUrl, inspectPdfBytes } from '@hall-platform/pdf';
 import {
   buildHallScene,
-  type HallTarget,
   type PolygonEditMode,
 } from '@hall-platform/renderer-konva';
 
 import type { EditorCommand } from './editorCommands.js';
 import type { HallLayoutDraft } from './editorDraft.js';
-import { createEditorModel } from './editorModel.js';
-import {
-  assertImportBytes,
-  assertImportFile,
-  MAX_PDF_IMPORT_PAGES,
-} from './import/importLimits.js';
+import { useEditorController } from './useEditorController.js';
+import { usePdfImport } from './import/usePdfImport.js';
 import { PdfHallViewer } from './PdfHallViewer.js';
 import {
   RowGenerationControls,
   TableGenerationControls,
 } from './ui/GenerationControls.js';
+import { EditorStructure } from './ui/EditorStructure.js';
 import { ToolsPanel, editorTools } from './ui/ToolsPanel.js';
 import { PropertiesPanel, PropertyField } from './ui/PropertiesPanel.js';
 import { LayersPanel } from './ui/LayersPanel.js';
@@ -53,6 +46,10 @@ import {
   translateEditorError,
 } from './ui/editorI18n.js';
 import {
+  expandObjectTargetKeys,
+  hallTargetKey,
+} from './ui/editorStructureModel.js';
+import {
   alignTargets,
   createObjectAt,
   createStarterTemplate,
@@ -60,7 +57,7 @@ import {
   distributeTargets,
   duplicateTargets,
   moveTargets,
-  selectionCenterValue,
+  selectionCenterValues,
   setSelectionCenter,
   type EditorTool,
 } from './editorOperations.js';
@@ -70,9 +67,60 @@ import {
   deleteFloor,
   renameFloor,
 } from './commands/structureOperations.js';
-import { validateLayout } from './validation/validateLayout.js';
+import { useLayoutDiagnostics } from './validation/useLayoutDiagnostics.js';
 import { transformRow, transformTable } from './commands/transformSelection.js';
 import { editHandle } from './commands/handleOperations.js';
+
+const noObjectTreeKeys: ReadonlySet<string> = new Set();
+
+function MobilePanelIcon({
+  name,
+}: {
+  readonly name: 'select' | 'row' | 'tools' | 'layers' | 'properties';
+}) {
+  const common = {
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    strokeWidth: 1.7,
+  };
+  switch (name) {
+    case 'select':
+      return (
+        <svg aria-hidden="true" viewBox="0 0 24 24" {...common}>
+          <path d="M5 3.5 18 14l-5.3 1.1L15 21l-2.2 1-2.4-5.8L7 20z" />
+        </svg>
+      );
+    case 'row':
+      return (
+        <svg aria-hidden="true" viewBox="0 0 24 24" {...common}>
+          <path d="M4 6h16M4 12h16M4 18h16" />
+          <circle cx="7" cy="6" r="1" />
+          <circle cx="12" cy="6" r="1" />
+          <circle cx="17" cy="6" r="1" />
+        </svg>
+      );
+    case 'tools':
+      return (
+        <svg aria-hidden="true" viewBox="0 0 24 24" {...common}>
+          <path d="M5 5h14v14H5zM9 5v14m6-14v14M5 10h14m-14 5h14" />
+        </svg>
+      );
+    case 'layers':
+      return (
+        <svg aria-hidden="true" viewBox="0 0 24 24" {...common}>
+          <path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 16l9 5 9-5" />
+        </svg>
+      );
+    case 'properties':
+      return (
+        <svg aria-hidden="true" viewBox="0 0 24 24" {...common}>
+          <path d="M5 5h14v14H5zM9 9h6m-6 4h6m-6 4h4" />
+        </svg>
+      );
+  }
+}
 
 export type EditorChangeMeta = Readonly<{
   kind: EditorCommand['kind'] | 'undo' | 'redo';
@@ -111,32 +159,54 @@ export function HallEditor(props: HallEditorProps) {
     webglEnabled = false,
   } = props;
   const tr = (russian: string) => editorText(locale, russian);
-  const [model] = useState(() => createEditorModel(value));
+  const { model, state, draft, selection, tool, zoneId, backgroundId } =
+    useEditorController(value);
   const clipboardRef = useRef<{
     draft: HallLayoutDraft;
     targets: readonly HallTarget[];
     pasteCount: number;
   } | null>(null);
   const [hasClipboard, setHasClipboard] = useState(false);
-  const pdfInputRef = useRef<HTMLInputElement>(null);
-  const pdfImportRef = useRef<{ controller: AbortController } | null>(null);
   const controlledValueRef = useRef(value);
-  const latestValueRef = useRef(value);
-  latestValueRef.current = value;
   const [mobilePanel, setMobilePanel] = useState<EditorPanel | null>(null);
+  const [objectTreeState, setObjectTreeState] = useState(() => ({
+    snapshotId: value.snapshot.id,
+    hidden: noObjectTreeKeys,
+    locked: noObjectTreeKeys,
+  }));
+  const directHiddenKeys =
+    objectTreeState.snapshotId === draft.snapshot.id
+      ? objectTreeState.hidden
+      : noObjectTreeKeys;
+  const directLockedKeys =
+    objectTreeState.snapshotId === draft.snapshot.id
+      ? objectTreeState.locked
+      : noObjectTreeKeys;
+  const effectiveHiddenKeys = useMemo(
+    () => expandObjectTargetKeys(draft.snapshot, directHiddenKeys),
+    [draft.snapshot, directHiddenKeys],
+  );
+  const effectiveLockedKeys = useMemo(
+    () => expandObjectTargetKeys(draft.snapshot, directLockedKeys),
+    [draft.snapshot, directLockedKeys],
+  );
+  const selectionLocked = selection.some((target) =>
+    effectiveLockedKeys.has(hallTargetKey(target)),
+  );
   const { setElement: setCanvasElement, height: canvasHeight } =
     useCanvasHeight();
   const [floorId, setFloorId] = useState(value.snapshot.floors[0]?.id ?? '');
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [knownMillimeters, setKnownMillimeters] = useState(1000);
-  const [polygonEditMode, setPolygonEditMode] = useState<PolygonEditMode>('move');
+  const [polygonEditState, setPolygonEditState] = useState<{
+    readonly targetKey: string;
+    readonly mode: PolygonEditMode;
+  }>({ targetKey: '', mode: 'move' });
   const [calibrationFirst, setCalibrationFirst] = useState<Vector2 | null>(
     null,
   );
   const [calibrationHover, setCalibrationHover] = useState<Vector2 | null>(
     null,
   );
-  const [importingPdf, setImportingPdf] = useState(false);
   const [previewState, setPreviewState] = useState<{
     key: string;
     seats: readonly Vector2[];
@@ -144,29 +214,98 @@ export function HallEditor(props: HallEditorProps) {
   const [warningAcknowledgement, setWarningAcknowledgement] = useState<
     HallLayoutDraft['snapshot'] | null
   >(null);
-  const [state, selection, tool, zoneId, backgroundId] = useUnit([
-    model.$state,
-    model.$selection,
-    model.$tool,
-    model.$zoneId,
-    model.$backgroundId,
-  ]);
-  const draft = state.draft;
-  const validationIssues = useMemo(() => validateLayout(draft, false), [draft]);
-  const hasBlockingIssues = validationIssues.some(
-    (issue) => issue.severity === 'error',
-  );
-  const hasWarnings = validationIssues.some(
-    (issue) => issue.severity === 'warning',
-  );
+  const diagnostics = useLayoutDiagnostics(draft, {
+    ...(onError ? { onError } : {}),
+    getLatestDraft: () => model.$state.getState().draft,
+  });
+  const {
+    errorMessage,
+    report,
+    clearError,
+    issues: validationIssues,
+    hasCurrentFullValidation,
+    validationPending,
+    hasBlockingIssues,
+    hasWarnings,
+    validateLatest,
+  } = diagnostics;
   const warningsAcknowledged = warningAcknowledgement === draft.snapshot;
   const activeFloorId = draft.snapshot.floors.some(
     (floor) => floor.id === floorId,
   )
     ? floorId
     : (draft.snapshot.floors[0]?.id ?? '');
+  function toggleObjectVisibility(target: HallTarget) {
+    const key = hallTargetKey(target);
+    const nextDirect = new Set(directHiddenKeys);
+    if (nextDirect.has(key)) nextDirect.delete(key);
+    else nextDirect.add(key);
+    setObjectTreeState((current) => ({
+      snapshotId: draft.snapshot.id,
+      hidden: nextDirect,
+      locked:
+        current.snapshotId === draft.snapshot.id
+          ? current.locked
+          : noObjectTreeKeys,
+    }));
+    const nextHidden = expandObjectTargetKeys(draft.snapshot, nextDirect);
+    const nextSelection = selection.filter(
+      (selected) => !nextHidden.has(hallTargetKey(selected)),
+    );
+    if (nextSelection.length !== selection.length)
+      model.selectionChanged(nextSelection);
+  }
+  function toggleObjectLock(target: HallTarget) {
+    const key = hallTargetKey(target);
+    setObjectTreeState((current) => {
+      const next = new Set(
+        current.snapshotId === draft.snapshot.id
+          ? current.locked
+          : noObjectTreeKeys,
+      );
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return {
+        snapshotId: draft.snapshot.id,
+        hidden:
+          current.snapshotId === draft.snapshot.id
+            ? current.hidden
+            : noObjectTreeKeys,
+        locked: next,
+      };
+    });
+  }
+  const {
+    inputRef: pdfInputRef,
+    importing: importingPdf,
+    cancel: cancelPdfImport,
+    importPdf: handlePdfImport,
+  } = usePdfImport({
+    ...(locale !== undefined ? { locale } : {}),
+    getContext: () => ({
+      draft: model.$state.getState().draft,
+      externalValue: controlledValueRef.current,
+      activeFloorId,
+      readonly,
+    }),
+    commit,
+    onImported: (backgroundId) => {
+      model.backgroundChanged(backgroundId);
+      model.selectionChanged([]);
+      model.toolChanged('select');
+    },
+    report,
+  });
   const target = selection[0] ?? null;
   const targetKey = target ? `${target.kind}:${target.id}` : '';
+  const polygonEditSelectionKey = `${targetKey}:${selection.length}`;
+  const polygonEditMode =
+    polygonEditState.targetKey === polygonEditSelectionKey
+      ? polygonEditState.mode
+      : 'move';
+  function setPolygonEditMode(mode: PolygonEditMode) {
+    setPolygonEditState({ targetKey: polygonEditSelectionKey, mode });
+  }
   const previewSeats = previewState.key === targetKey ? previewState.seats : [];
   const handlePreview = useCallback(
     (seats: readonly Vector2[]) => setPreviewState({ key: targetKey, seats }),
@@ -176,36 +315,12 @@ export function HallEditor(props: HallEditorProps) {
     draft.snapshot.backgrounds.find((item) => item.id === backgroundId) ?? null;
 
   useEffect(() => {
-    setPolygonEditMode('move');
-  }, [targetKey, selection.length]);
-
-  useEffect(() => {
     if (controlledValueRef.current !== value) {
       cancelPdfImport();
       controlledValueRef.current = value;
     }
     model.replace(value);
-  }, [model, value]);
-
-  useEffect(
-    () => () => {
-      pdfImportRef.current?.controller.abort();
-      pdfImportRef.current = null;
-    },
-    [],
-  );
-
-  function cancelPdfImport() {
-    pdfImportRef.current?.controller.abort();
-    pdfImportRef.current = null;
-    setImportingPdf(false);
-  }
-
-  function report(error: unknown) {
-    const failure = error instanceof Error ? error : new Error(String(error));
-    setErrorMessage(failure.message);
-    onError?.(failure);
-  }
+  }, [model, value, cancelPdfImport]);
 
   function clearCalibration() {
     setCalibrationFirst(null);
@@ -233,10 +348,15 @@ export function HallEditor(props: HallEditorProps) {
     selected: HallTarget | null = target,
   ) {
     if (readonly || command.patches.length === 0) return false;
+    if (
+      (selected && effectiveLockedKeys.has(hallTargetKey(selected))) ||
+      selection.some((item) => effectiveLockedKeys.has(hallTargetKey(item)))
+    )
+      return false;
     try {
       cancelPdfImport();
       const next = model.commit(command);
-      setErrorMessage(null);
+      clearError();
       onChange(next.draft, { kind: command.kind, target: selected });
       return true;
     } catch (error) {
@@ -263,7 +383,7 @@ export function HallEditor(props: HallEditorProps) {
         )
       )
         model.backgroundChanged('');
-      setErrorMessage(null);
+      clearError();
       onChange(next.draft, { kind: 'undo', target: null });
     } catch (error) {
       report(error);
@@ -288,7 +408,7 @@ export function HallEditor(props: HallEditorProps) {
         )
       )
         model.backgroundChanged('');
-      setErrorMessage(null);
+      clearError();
       onChange(next.draft, { kind: 'redo', target: null });
     } catch (error) {
       report(error);
@@ -379,137 +499,6 @@ export function HallEditor(props: HallEditorProps) {
     }
   }
 
-  async function handlePdfImport(file: File, replace?: Background) {
-    if (readonly) return;
-    if (replace?.locked) return;
-    const startingDraft = model.$state.getState().draft;
-    const startingValue = latestValueRef.current;
-    const importFloorId = activeFloorId;
-    try {
-      assertImportFile(file, 'pdf');
-    } catch (error) {
-      report(error);
-      return;
-    }
-    cancelPdfImport();
-    const request = { controller: new AbortController() };
-    pdfImportRef.current = request;
-    setImportingPdf(true);
-    try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      if (pdfImportRef.current !== request) return;
-      assertImportBytes(bytes.byteLength, 'pdf');
-      const pages = await inspectPdfBytes(bytes, {
-        signal: request.controller.signal,
-        maxPages: MAX_PDF_IMPORT_PAGES,
-      });
-      if (pdfImportRef.current !== request) return;
-      if (pages.length < 1 || pages.length > MAX_PDF_IMPORT_PAGES)
-        throw new RangeError(tr('PDF содержит недопустимое число страниц'));
-      if (
-        pages.some(
-          (page) =>
-            !Number.isFinite(page.width) ||
-            !Number.isFinite(page.height) ||
-            page.width <= 0 ||
-            page.height <= 0,
-        )
-      )
-        throw new RangeError(tr('PDF содержит страницу неверного размера'));
-      const currentDraft = model.$state.getState().draft;
-      if (
-        currentDraft !== startingDraft ||
-        latestValueRef.current !== startingValue
-      )
-        throw new Error(
-          tr('План изменился во время загрузки PDF. Повторите импорт.'),
-        );
-      const currentBackground = replace
-        ? currentDraft.snapshot.backgrounds.find(
-            (item) => item.id === replace.id,
-          )
-        : null;
-      if (
-        replace &&
-        (currentBackground !== replace || currentBackground.locked)
-      )
-        throw new Error(tr('Подложка недоступна или заблокирована'));
-      if (
-        !replace &&
-        !currentDraft.snapshot.floors.some(
-          (floor) => floor.id === importFloorId,
-        )
-      )
-        throw new Error(tr('Этаж для PDF больше не существует'));
-      const assetId =
-        currentBackground?.source.assetId ?? `asset-${crypto.randomUUID()}`;
-      const beforeAsset = currentDraft.assets[assetId] ?? null;
-      const asset = {
-        kind: 'pdf' as const,
-        name: file.name,
-        dataUrl: encodePdfDataUrl(bytes),
-        pages: [...pages],
-      };
-      const firstPage = pages[0];
-      if (!firstPage) throw new Error(tr('PDF не содержит страниц'));
-      const scale = Math.min(1, 20 / firstPage.width);
-      const nextBackground = currentBackground
-        ? backgroundSchema.parse({
-            ...currentBackground,
-            source: { kind: 'pdf', assetId, pageNumber: 1 },
-          })
-        : backgroundSchema.parse({
-            id: backgroundIdSchema.parse(`background-${crypto.randomUUID()}`),
-            floorId: importFloorId,
-            order: currentDraft.snapshot.backgrounds.length,
-            position: {
-              x: (-firstPage.width * scale) / 2,
-              y: (-firstPage.height * scale) / 2,
-            },
-            scale,
-            rotationRadians: 0,
-            opacity: 0.7,
-            visible: true,
-            locked: false,
-            source: { kind: 'pdf', assetId, pageNumber: 1 },
-          });
-      const patches: EditorCommand['patches'][number][] = [
-        {
-          collection: 'assets',
-          id: assetId,
-          before: beforeAsset,
-          after: asset,
-        },
-        {
-          collection: 'backgrounds',
-          id: nextBackground.id,
-          before: currentBackground ?? null,
-          after: nextBackground,
-        },
-      ];
-      if (pdfImportRef.current !== request) return;
-      pdfImportRef.current = null;
-      if (
-        commit({ kind: currentBackground ? 'update' : 'create', patches }, null)
-      ) {
-        model.backgroundChanged(nextBackground.id);
-        model.selectionChanged([]);
-        model.toolChanged('select');
-      }
-    } catch (error) {
-      if (
-        pdfImportRef.current === request &&
-        !request.controller.signal.aborted
-      )
-        report(error);
-    } finally {
-      if (pdfImportRef.current === request) {
-        pdfImportRef.current = null;
-        setImportingPdf(false);
-      }
-    }
-  }
-
   function updateBackground(after: Background) {
     if (!background) return;
     if (background.locked && after.locked) return;
@@ -555,7 +544,7 @@ export function HallEditor(props: HallEditorProps) {
   }
 
   function handleDelete() {
-    if (!target) return;
+    if (!target || selectionLocked) return;
     if (!commit(deleteTargets(draft, selection), target)) return;
     model.selectionChanged([]);
     if (selection.some((item) => item.kind === 'zone' && item.id === zoneId))
@@ -567,7 +556,12 @@ export function HallEditor(props: HallEditorProps) {
     targets: readonly HallTarget[] = selection,
     offset = 2,
   ) {
-    if (readonly || targets.length === 0) return;
+    if (
+      readonly ||
+      targets.length === 0 ||
+      targets.some((item) => effectiveLockedKeys.has(hallTargetKey(item)))
+    )
+      return;
     try {
       const duplicated = duplicateTargets(
         source,
@@ -616,35 +610,27 @@ export function HallEditor(props: HallEditorProps) {
       event.preventDefault();
       if (event.shiftKey) handleRedo();
       else handleUndo();
-    } else if (
-      (event.ctrlKey || event.metaKey) &&
-      key === 'y'
-    ) {
+    } else if ((event.ctrlKey || event.metaKey) && key === 'y') {
       event.preventDefault();
       handleRedo();
-    } else if (
-      (event.ctrlKey || event.metaKey) &&
-      key === 'd'
-    ) {
+    } else if ((event.ctrlKey || event.metaKey) && key === 'd') {
       event.preventDefault();
       handleDuplicate();
-    } else if (
-      (event.ctrlKey || event.metaKey) &&
-      key === 'c'
-    ) {
+    } else if ((event.ctrlKey || event.metaKey) && key === 'c') {
       event.preventDefault();
       handleCopy();
-    } else if (
-      (event.ctrlKey || event.metaKey) &&
-      key === 'v'
-    ) {
+    } else if ((event.ctrlKey || event.metaKey) && key === 'v') {
       event.preventDefault();
       handlePaste();
     } else if (event.key === 'Delete') {
       handleDelete();
-    } else if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
-      const shortcutTool =
-        key === 'v' ? 'select' : key === 'h' ? 'pan' : null;
+    } else if (
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !event.shiftKey
+    ) {
+      const shortcutTool = key === 'v' ? 'select' : key === 'h' ? 'pan' : null;
       if (shortcutTool) {
         event.preventDefault();
         selectTool(shortcutTool);
@@ -652,20 +638,36 @@ export function HallEditor(props: HallEditorProps) {
     }
   }
 
-  function runCallback(
-    callback?: (
-      layout: HallLayoutDraft,
-      warningsAcknowledged: boolean,
-    ) => void | Promise<void>,
-    acknowledgeWarnings = false,
+  async function runCallback(
+    action:
+      | { kind: 'save'; callback?: HallEditorProps['onSave'] }
+      | { kind: 'publish'; callback?: HallEditorProps['onPublish'] },
   ) {
+    if (action.kind === 'save') {
+      if (!action.callback) return;
+      try {
+        await action.callback(model.$state.getState().draft);
+      } catch (error) {
+        report(error);
+      }
+      return;
+    }
+    const { callback } = action;
     if (!callback) return;
     try {
-      const fullIssues = validateLayout(draft);
-      if (callback === onPublish && fullIssues.some((issue) => issue.severity === 'error')) {
-        throw new Error(fullIssues.find((issue) => issue.severity === 'error')?.message ?? 'Layout validation failed');
-      }
-      Promise.resolve(callback(draft, acknowledgeWarnings)).catch(report);
+      const result = await validateLatest();
+      const candidate = result.draft;
+      const blockingIssue = result.issues.find(
+        (issue) => issue.severity === 'error',
+      );
+      if (blockingIssue) throw new Error(blockingIssue.message);
+      const acknowledged = warningAcknowledgement === candidate.snapshot;
+      if (
+        result.issues.some((issue) => issue.severity === 'warning') &&
+        !acknowledged
+      )
+        throw new Error(tr('Подтвердите публикацию с предупреждениями'));
+      await callback(candidate, acknowledged);
     } catch (error) {
       report(error);
     }
@@ -733,7 +735,7 @@ export function HallEditor(props: HallEditorProps) {
   const parentRowId =
     seat && seat.placement.kind === 'row' ? seat.placement.rowId : null;
   const parentRow = parentRowId
-    ? draft.snapshot.rows.find((item) => item.id === parentRowId) ?? null
+    ? (draft.snapshot.rows.find((item) => item.id === parentRowId) ?? null)
     : null;
   const row =
     target?.kind === 'row'
@@ -752,10 +754,13 @@ export function HallEditor(props: HallEditorProps) {
     zone || (decoration && decoration.kind !== 'label'),
   );
   const editableShape = Boolean(editablePolygon || row);
-  const mixedCenterX =
-    selection.length > 1 ? selectionCenterValue(draft, selection, 'x') : null;
-  const mixedCenterY =
-    selection.length > 1 ? selectionCenterValue(draft, selection, 'y') : null;
+  const selectionCenter = useMemo(
+    () =>
+      selection.length > 1 ? selectionCenterValues(draft, selection) : null,
+    [draft, selection],
+  );
+  const mixedCenterX = selectionCenter?.x ?? null;
+  const mixedCenterY = selectionCenter?.y ?? null;
 
   function activatePolygonMode(next: Exclude<PolygonEditMode, 'move'>) {
     if (tool !== 'select') {
@@ -765,9 +770,12 @@ export function HallEditor(props: HallEditorProps) {
     const mode = polygonEditMode === next ? 'move' : next;
     const zoneBounds =
       zone && !zone.polygon
-        ? bounds ??
-          buildHallScene(draft.snapshot, zone.floorId, draft.zoneBounds).zones
-            .find((item) => item.zone.id === zone.id)?.bounds
+        ? (bounds ??
+          buildHallScene(
+            draft.snapshot,
+            zone.floorId,
+            draft.zoneBounds,
+          ).zones.find((item) => item.zone.id === zone.id)?.bounds)
         : null;
     if (mode === 'geometry' && zone && !zone.polygon && zoneBounds) {
       updateZone(zone, {
@@ -788,13 +796,16 @@ export function HallEditor(props: HallEditorProps) {
       <section
         className="hall-editor"
         aria-label={`${tr('Редактор зала')} ${draft.hallName}`}
+        data-validation-status={validationPending ? 'pending' : 'current'}
         tabIndex={0}
         onKeyDown={handleKeyDown}
         onPointerDown={(event) => {
           const target = event.target;
           if (
             target instanceof Element &&
-            target.closest('button, input, select, textarea, [contenteditable="true"]')
+            target.closest(
+              'button, input, select, textarea, [contenteditable="true"]',
+            )
           )
             return;
           event.currentTarget.focus();
@@ -832,7 +843,7 @@ export function HallEditor(props: HallEditorProps) {
             <button
               type="button"
               disabled={readonly || saving}
-              onClick={() => runCallback(onSave)}
+              onClick={() => runCallback({ kind: 'save', callback: onSave })}
             >
               {tr(saving ? 'Сохранение…' : 'Сохранить')}
             </button>
@@ -844,10 +855,14 @@ export function HallEditor(props: HallEditorProps) {
               disabled={
                 readonly ||
                 saving ||
+                validationPending ||
+                !hasCurrentFullValidation ||
                 hasBlockingIssues ||
                 (hasWarnings && !warningsAcknowledged)
               }
-              onClick={() => runCallback(onPublish, warningsAcknowledged)}
+              onClick={() =>
+                runCallback({ kind: 'publish', callback: onPublish })
+              }
             >
               {tr('Опубликовать')}
             </button>
@@ -888,12 +903,30 @@ export function HallEditor(props: HallEditorProps) {
                   >
                     {tr(item.label)}{' '}
                     {item.shortcut && (
-                      <kbd className="hall-editor-shortcut">{item.shortcut}</kbd>
+                      <kbd className="hall-editor-shortcut">
+                        {item.shortcut}
+                      </kbd>
                     )}
                   </button>
                 ))}
               </div>
             )}
+            <EditorStructure
+              snapshot={draft.snapshot}
+              floorId={activeFloorId}
+              selection={selection}
+              directHiddenKeys={directHiddenKeys}
+              effectiveHiddenKeys={effectiveHiddenKeys}
+              directLockedKeys={directLockedKeys}
+              effectiveLockedKeys={effectiveLockedKeys}
+              {...(locale !== undefined ? { locale } : {})}
+              onSelect={(target) => {
+                model.selectionChanged([target]);
+                model.toolChanged('select');
+              }}
+              onToggleHidden={toggleObjectVisibility}
+              onToggleLocked={toggleObjectLock}
+            />
             <h3>{tr('Этажи')}</h3>
             <label>
               {tr('Активный этаж')}
@@ -1085,6 +1118,8 @@ export function HallEditor(props: HallEditorProps) {
               webglEnabled={webglEnabled}
               viewerMode="edit"
               focusedFloorId={activeFloorId}
+              hiddenTargets={effectiveHiddenKeys}
+              lockedTargets={effectiveLockedKeys}
               previewSeats={previewSeats}
               onError={report}
               activeTool={tool}
@@ -1193,709 +1228,741 @@ export function HallEditor(props: HallEditorProps) {
             mobileOpen={mobilePanel === 'properties'}
             onClose={() => setMobilePanel(null)}
           >
-            {(target || background) && (
-              <p className="hall-editor-selection-path">
-                {target ? `${target.kind} · ${target.id}` : tr('PDF-подложка')}
+            {selectionLocked && (
+              <p className="hall-editor-lock-note" role="status">
+                {tr(
+                  'Выбранный объект заблокирован. Снимите блокировку в дереве объектов.',
+                )}
               </p>
             )}
-            {!target && !background && (
-              <p>{tr('Выберите объект на схеме или подложку в списке.')}</p>
-            )}
-            {(selection.length > 0 || hasClipboard) && !readonly && (
-              <div
-                className="hall-editor-layout-actions"
-                aria-label={tr('Операции с выделением')}
-              >
-                {selection.length > 0 && (
-                  <>
-                    <button type="button" onClick={() => handleDuplicate()}>
-                      {tr('Дублировать')}
-                    </button>
-                    <button type="button" onClick={handleCopy}>
-                      {tr('Копировать')}
-                    </button>
-                  </>
-                )}
-                <button
-                  type="button"
-                  disabled={!hasClipboard}
-                  onClick={handlePaste}
+            <fieldset
+              className="hall-editor-locked-properties"
+              disabled={selectionLocked}
+            >
+              {(target || background) && (
+                <p className="hall-editor-selection-path">
+                  {target
+                    ? `${target.kind} · ${target.id}`
+                    : tr('PDF-подложка')}
+                </p>
+              )}
+              {!target && !background && (
+                <p>{tr('Выберите объект на схеме или подложку в списке.')}</p>
+              )}
+              {(selection.length > 0 || hasClipboard) && !readonly && (
+                <div
+                  className="hall-editor-layout-actions"
+                  aria-label={tr('Операции с выделением')}
                 >
-                  {tr('Вставить')}
-                </button>
-                {selection.length > 1 && (
-                  <>
-                    {(
-                      [
-                        ['left', tr('По левому краю')],
-                        ['center', tr('По центру X')],
-                        ['right', tr('По правому краю')],
-                        ['top', tr('По верхнему краю')],
-                        ['middle', tr('По центру Y')],
-                        ['bottom', tr('По нижнему краю')],
-                      ] as const
-                    ).map(([edge, label]) => (
+                  {selection.length > 0 && (
+                    <>
+                      <button type="button" onClick={() => handleDuplicate()}>
+                        {tr('Дублировать')}
+                      </button>
+                      <button type="button" onClick={handleCopy}>
+                        {tr('Копировать')}
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    disabled={!hasClipboard}
+                    onClick={handlePaste}
+                  >
+                    {tr('Вставить')}
+                  </button>
+                  {selection.length > 1 && (
+                    <>
+                      {(
+                        [
+                          ['left', tr('По левому краю')],
+                          ['center', tr('По центру X')],
+                          ['right', tr('По правому краю')],
+                          ['top', tr('По верхнему краю')],
+                          ['middle', tr('По центру Y')],
+                          ['bottom', tr('По нижнему краю')],
+                        ] as const
+                      ).map(([edge, label]) => (
+                        <button
+                          key={edge}
+                          type="button"
+                          onClick={() =>
+                            commit(
+                              alignTargets(
+                                draft,
+                                selection,
+                                edge,
+                                publishedSeatIds,
+                              ),
+                            )
+                          }
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {selection.length > 2 && (
+                    <>
                       <button
-                        key={edge}
                         type="button"
                         onClick={() =>
                           commit(
-                            alignTargets(
+                            distributeTargets(
                               draft,
                               selection,
-                              edge,
+                              'horizontal',
                               publishedSeatIds,
                             ),
                           )
                         }
                       >
-                        {label}
+                        {tr('Распределить X')}
                       </button>
-                    ))}
-                  </>
-                )}
-                {selection.length > 2 && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        commit(
-                          distributeTargets(
-                            draft,
-                            selection,
-                            'horizontal',
-                            publishedSeatIds,
-                          ),
-                        )
-                      }
-                    >
-                      {tr('Распределить X')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        commit(
-                          distributeTargets(
-                            draft,
-                            selection,
-                            'vertical',
-                            publishedSeatIds,
-                          ),
-                        )
-                      }
-                    >
-                      {tr('Распределить Y')}
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-            {editableShape && selection.length === 1 && !readonly && (
-              <div
-                className="hall-editor-polygon-actions"
-                aria-label={tr('Изменение размера или формы объекта')}
-              >
-                <button
-                  type="button"
-                  aria-pressed={polygonEditMode === 'resize'}
-                  onClick={() => activatePolygonMode('resize')}
-                >
-                  {tr('Изменить размер')}
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={polygonEditMode === 'geometry'}
-                  onClick={() => activatePolygonMode('geometry')}
-                >
-                  {tr('Изменить форму')}
-                </button>
-                <p>
-                  {row
-                    ? polygonEditMode === 'resize'
-                      ? tr('Потяните за крайние точки ряда, чтобы изменить длину.')
-                      : polygonEditMode === 'geometry'
-                        ? tr('Перетаскивайте точки ряда, чтобы изменить форму.')
-                        : tr('Выберите размер или форму, затем перетаскивайте маркеры ряда.')
-                    : polygonEditMode === 'resize'
-                      ? tr('Потяните за край или угол.')
-                      : polygonEditMode === 'geometry'
-                        ? tr('Перетаскивайте точки контура.')
-                        : tr(
-                            'Выберите действие, затем перетаскивайте маркеры на схеме.',
-                          )}
-                </p>
-              </div>
-            )}
-            {selection.length > 1 && (
-              <div className="hall-editor-mixed-properties">
-                <h4>
-                  {tr('Общие координаты ·')} {selection.length} {tr('объекта')}
-                </h4>
-                <PropertyField
-                  label={tr('Центр X')}
-                  kind="number"
-                  value={
-                    mixedCenterX === null
-                      ? null
-                      : Math.round(mixedCenterX * 1000) / 1000
-                  }
-                  disabled={readonly}
-                  onCommit={(value) =>
-                    commit(
-                      setSelectionCenter(
-                        draft,
-                        selection,
-                        'x',
-                        Number(value),
-                        publishedSeatIds,
-                      ),
-                    )
-                  }
-                />
-                <PropertyField
-                  label={tr('Центр Y')}
-                  kind="number"
-                  value={
-                    mixedCenterY === null
-                      ? null
-                      : Math.round(mixedCenterY * 1000) / 1000
-                  }
-                  disabled={readonly}
-                  onCommit={(value) =>
-                    commit(
-                      setSelectionCenter(
-                        draft,
-                        selection,
-                        'y',
-                        Number(value),
-                        publishedSeatIds,
-                      ),
-                    )
-                  }
-                />
-              </div>
-            )}
-            {zone && (
-              <>
-                <h4>{tr('Зона')}</h4>
-                <label>
-                  {tr('Тип зоны')}
-                  <select
-                    aria-label={tr('Тип зоны')}
-                    value={zone.kind}
-                    disabled={readonly}
-                    onChange={(event) =>
-                      updateZone(zone, {
-                        ...zone,
-                        kind: event.target.value as Zone['kind'],
-                        ...(event.target.value === 'ga'
-                          ? { capacity: zone.capacity ?? 20 }
-                          : {}),
-                      })
-                    }
-                  >
-                    <option value="seated">{tr('С местами')}</option>
-                    <option value="ga">{tr('Без мест (GA)')}</option>
-                  </select>
-                </label>
-                {zone.kind === 'ga' && (
-                  <PropertyField
-                    label={tr('Вместимость GA')}
-                    value={zone.capacity ?? 20}
-                    disabled={readonly}
-                    min={1}
-                    integer
-                    onCommit={(capacity) =>
-                      updateZone(zone, { ...zone, capacity: Number(capacity) })
-                    }
-                  />
-                )}
-                <PropertyField
-                  label={tr('Название зоны')}
-                  value={zone.name}
-                  disabled={readonly}
-                  onCommit={(name) =>
-                    updateZone(zone, { ...zone, name: String(name) })
-                  }
-                />
-              </>
-            )}
-            {decoration && (
-              <>
-                <h4>
-                  {decoration.kind === 'stage'
-                    ? tr('Сцена')
-                    : decoration.kind === 'obstacle'
-                      ? tr('Препятствие')
-                      : tr('Подпись')}
-                </h4>
-                <PropertyField
-                  label={tr('Текст объекта')}
-                  value={
-                    decoration.kind === 'label'
-                      ? decoration.text
-                      : (decoration.label ?? '')
-                  }
-                  disabled={readonly}
-                  onCommit={(value) =>
-                    updateDecoration(
-                      decoration,
-                      decoration.kind === 'label'
-                        ? { ...decoration, text: String(value) }
-                        : { ...decoration, label: String(value) },
-                    )
-                  }
-                />
-                {decoration.kind === 'label' ? (
-                  <>
-                    <PropertyField
-                      label={tr('X подписи')}
-                      value={decoration.position.x}
-                      disabled={readonly}
-                      onCommit={(x) =>
-                        updateDecoration(decoration, {
-                          ...decoration,
-                          position: worldPointSchema.parse({
-                            ...decoration.position,
-                            x: Number(x),
-                          }),
-                        })
-                      }
-                    />
-                    <PropertyField
-                      label={tr('Y подписи')}
-                      value={decoration.position.y}
-                      disabled={readonly}
-                      onCommit={(y) =>
-                        updateDecoration(decoration, {
-                          ...decoration,
-                          position: worldPointSchema.parse({
-                            ...decoration.position,
-                            y: Number(y),
-                          }),
-                        })
-                      }
-                    />
-                  </>
-                ) : null}
-              </>
-            )}
-            {seat && (
-              <>
-                <h4>{tr('Место')}</h4>
-                {parentRow && (
-                  <button
-                    type="button"
-                    className="hall-editor-parent-select"
-                    title={tr('Alt+щелчок по месту — выбрать ряд')}
-                    onClick={() => {
-                      if (tool !== 'select') clearCalibration();
-                      model.toolChanged('select');
-                      model.selectionChanged([
-                        { kind: 'row', id: parentRow.id },
-                      ]);
-                    }}
-                  >
-                    {tr('Выбрать ряд')}: {parentRow.name}
-                    <kbd className="hall-editor-shortcut">Alt+клик</kbd>
-                  </button>
-                )}
-                <label className="hall-editor-field">
-                  {tr('Тип места')}
-                  <select
-                    aria-label={tr('Тип места')}
-                    value={seat.visualKind ?? 'chair'}
-                    disabled={readonly}
-                    onChange={(event) =>
-                      updateSeat(seat, {
-                        ...seat,
-                        visualKind: event.target.value as NonNullable<
-                          Seat['visualKind']
-                        >,
-                      })
-                    }
-                  >
-                    <option value="chair">{tr('Стул')}</option>
-                    <option value="armchair">{tr('Кресло')}</option>
-                    <option value="wheelchairBay">
-                      {tr('Место для коляски')}
-                    </option>
-                  </select>
-                </label>
-                <PropertyField
-                  label={tr('Номер места')}
-                  value={seat.label}
-                  disabled={readonly}
-                  onCommit={(label) =>
-                    updateSeat(seat, { ...seat, label: String(label) })
-                  }
-                />
-                <PropertyField
-                  label={tr('X места')}
-                  value={seat.position.x}
-                  disabled={readonly}
-                  onCommit={(x) =>
-                    updateSeat(seat, {
-                      ...seat,
-                      position: { ...seat.position, x: Number(x) },
-                    })
-                  }
-                />
-                <PropertyField
-                  label={tr('Y места')}
-                  value={seat.position.y}
-                  disabled={readonly}
-                  onCommit={(y) =>
-                    updateSeat(seat, {
-                      ...seat,
-                      position: { ...seat.position, y: Number(y) },
-                    })
-                  }
-                />
-              </>
-            )}
-            {row && (
-              <>
-                <h4>{tr('Ряд')}</h4>
-                <PropertyField
-                  label={tr('Название ряда')}
-                  value={row.name}
-                  disabled={readonly}
-                  onCommit={(name) =>
-                    updateRow(row, { ...row, name: String(name) })
-                  }
-                />
-                <RowGenerationControls
-                  key={`${row.id}:${JSON.stringify(row.generation)}`}
-                  row={row}
-                  seatCount={
-                    draft.snapshot.seats.filter(
-                      (seat) =>
-                        seat.placement.kind === 'row' &&
-                        seat.placement.rowId === row.id,
-                    ).length
-                  }
-                  readonly={readonly}
-                  onPreview={handlePreview}
-                  onApply={(after) => updateRow(row, after)}
-                />
-              </>
-            )}
-            {table && (
-              <>
-                <h4>{tr('Стол')}</h4>
-                <PropertyField
-                  label={tr('Название стола')}
-                  value={table.label}
-                  disabled={readonly}
-                  onCommit={(label) =>
-                    updateTable(table, { ...table, label: String(label) })
-                  }
-                />
-                <PropertyField
-                  label={tr('X стола')}
-                  value={table.center.x}
-                  disabled={readonly}
-                  onCommit={(x) =>
-                    updateTable(table, {
-                      ...table,
-                      center: { ...table.center, x: Number(x) },
-                    })
-                  }
-                />
-                <PropertyField
-                  label={tr('Y стола')}
-                  value={table.center.y}
-                  disabled={readonly}
-                  onCommit={(y) =>
-                    updateTable(table, {
-                      ...table,
-                      center: { ...table.center, y: Number(y) },
-                    })
-                  }
-                />
-                <PropertyField
-                  label={tr('Поворот (рад)')}
-                  value={table.rotationRadians}
-                  disabled={readonly}
-                  onCommit={(rotationRadians) =>
-                    updateTable(table, {
-                      ...table,
-                      rotationRadians: Number(rotationRadians),
-                    })
-                  }
-                />
-                {table.shape.kind === 'circle' ? (
-                  <PropertyField
-                    label={tr('Радиус стола')}
-                    value={table.shape.radius}
-                    disabled={readonly}
-                    onCommit={(radius) =>
-                      updateTable(table, {
-                        ...table,
-                        shape: {
-                          ...table.shape,
-                          radius: Number(radius),
-                        } as Table['shape'],
-                      })
-                    }
-                  />
-                ) : (
-                  <>
-                    <PropertyField
-                      label={tr('Ширина стола')}
-                      value={table.shape.width}
-                      disabled={readonly}
-                      onCommit={(width) =>
-                        updateTable(table, {
-                          ...table,
-                          shape: {
-                            ...table.shape,
-                            width: Number(width),
-                          } as Table['shape'],
-                        })
-                      }
-                    />
-                    <PropertyField
-                      label={tr('Высота стола')}
-                      value={table.shape.height}
-                      disabled={readonly}
-                      onCommit={(height) =>
-                        updateTable(table, {
-                          ...table,
-                          shape: {
-                            ...table.shape,
-                            height: Number(height),
-                          } as Table['shape'],
-                        })
-                      }
-                    />
-                  </>
-                )}
-                <TableGenerationControls
-                  key={`${table.id}:${JSON.stringify(table.shape)}:${JSON.stringify(table.generation)}`}
-                  table={table}
-                  readonly={readonly}
-                  onPreview={handlePreview}
-                  onApply={(after) => updateTable(table, after)}
-                />
-              </>
-            )}
-            {background &&
-              background.source.kind === 'pdf' &&
-              (() => {
-                const asset = draft.assets[background.source.assetId];
-                return (
-                  <>
-                    <h4>{tr('PDF-подложка')}</h4>
-                    <p>{asset?.name ?? tr('Файл не найден')}</p>
-                    {background.locked && (
-                      <p className="hall-editor-lock-note" role="status">
-                        <span role="img" aria-label={tr('Заблокировано')}>
-                          🔒
-                        </span>{' '}
-                        {tr(
-                          'Подложка заблокирована. Снимите блокировку, чтобы изменить положение, видимость или файл.',
-                        )}
-                      </p>
-                    )}
-
-                    <label className="hall-editor-field">
-                      {tr('Страница PDF')}
-                      <select
-                        aria-label={tr('Страница PDF')}
-                        value={background.source.pageNumber}
-                        disabled={readonly || background.locked}
-                        onChange={(event) =>
-                          updateBackground({
-                            ...background,
-                            source: {
-                              kind: 'pdf',
-                              assetId: background.source.assetId,
-                              pageNumber: Number(event.target.value),
-                            },
-                          })
+                      <button
+                        type="button"
+                        onClick={() =>
+                          commit(
+                            distributeTargets(
+                              draft,
+                              selection,
+                              'vertical',
+                              publishedSeatIds,
+                            ),
+                          )
                         }
                       >
-                        {asset?.pages.map((_, index) => (
-                          <option key={index + 1} value={index + 1}>
-                            {index + 1}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
+                        {tr('Распределить Y')}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+              {editableShape && selection.length === 1 && !readonly && (
+                <div
+                  className="hall-editor-polygon-actions"
+                  aria-label={tr('Изменение размера или формы объекта')}
+                >
+                  <button
+                    type="button"
+                    aria-pressed={polygonEditMode === 'resize'}
+                    onClick={() => activatePolygonMode('resize')}
+                  >
+                    {tr('Изменить размер')}
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={polygonEditMode === 'geometry'}
+                    onClick={() => activatePolygonMode('geometry')}
+                  >
+                    {tr('Изменить форму')}
+                  </button>
+                  <p>
+                    {row
+                      ? polygonEditMode === 'resize'
+                        ? tr(
+                            'Потяните за крайние точки ряда, чтобы изменить длину.',
+                          )
+                        : polygonEditMode === 'geometry'
+                          ? tr(
+                              'Перетаскивайте точки ряда, чтобы изменить форму.',
+                            )
+                          : tr(
+                              'Выберите размер или форму, затем перетаскивайте маркеры ряда.',
+                            )
+                      : polygonEditMode === 'resize'
+                        ? tr('Потяните за край или угол.')
+                        : polygonEditMode === 'geometry'
+                          ? tr('Перетаскивайте точки контура.')
+                          : tr(
+                              'Выберите действие, затем перетаскивайте маркеры на схеме.',
+                            )}
+                  </p>
+                </div>
+              )}
+              {selection.length > 1 && (
+                <div className="hall-editor-mixed-properties">
+                  <h4>
+                    {tr('Общие координаты ·')} {selection.length}{' '}
+                    {tr('объекта')}
+                  </h4>
+                  <PropertyField
+                    label={tr('Центр X')}
+                    kind="number"
+                    value={
+                      mixedCenterX === null
+                        ? null
+                        : Math.round(mixedCenterX * 1000) / 1000
+                    }
+                    disabled={readonly}
+                    onCommit={(value) =>
+                      commit(
+                        setSelectionCenter(
+                          draft,
+                          selection,
+                          'x',
+                          Number(value),
+                          publishedSeatIds,
+                        ),
+                      )
+                    }
+                  />
+                  <PropertyField
+                    label={tr('Центр Y')}
+                    kind="number"
+                    value={
+                      mixedCenterY === null
+                        ? null
+                        : Math.round(mixedCenterY * 1000) / 1000
+                    }
+                    disabled={readonly}
+                    onCommit={(value) =>
+                      commit(
+                        setSelectionCenter(
+                          draft,
+                          selection,
+                          'y',
+                          Number(value),
+                          publishedSeatIds,
+                        ),
+                      )
+                    }
+                  />
+                </div>
+              )}
+              {zone && (
+                <>
+                  <h4>{tr('Зона')}</h4>
+                  <label>
+                    {tr('Тип зоны')}
+                    <select
+                      aria-label={tr('Тип зоны')}
+                      value={zone.kind}
+                      disabled={readonly}
+                      onChange={(event) =>
+                        updateZone(zone, {
+                          ...zone,
+                          kind: event.target.value as Zone['kind'],
+                          ...(event.target.value === 'ga'
+                            ? { capacity: zone.capacity ?? 20 }
+                            : {}),
+                        })
+                      }
+                    >
+                      <option value="seated">{tr('С местами')}</option>
+                      <option value="ga">{tr('Без мест (GA)')}</option>
+                    </select>
+                  </label>
+                  {zone.kind === 'ga' && (
                     <PropertyField
-                      label={tr('X подложки')}
-                      value={background.position.x}
-                      disabled={readonly || background.locked}
-                      onCommit={(x) =>
-                        updateBackground({
-                          ...background,
-                          position: { ...background.position, x: Number(x) },
+                      label={tr('Вместимость GA')}
+                      value={zone.capacity ?? 20}
+                      disabled={readonly}
+                      min={1}
+                      integer
+                      onCommit={(capacity) =>
+                        updateZone(zone, {
+                          ...zone,
+                          capacity: Number(capacity),
                         })
                       }
                     />
-
-                    <PropertyField
-                      label={tr('Y подложки')}
-                      value={background.position.y}
-                      disabled={readonly || background.locked}
-                      onCommit={(y) =>
-                        updateBackground({
-                          ...background,
-                          position: { ...background.position, y: Number(y) },
-                        })
-                      }
-                    />
-
-                    <PropertyField
-                      label={tr('Масштаб подложки')}
-                      value={background.scale}
-                      disabled={readonly || background.locked}
-                      onCommit={(scale) =>
-                        updateBackground({
-                          ...background,
-                          scale: Number(scale),
-                        })
-                      }
-                    />
-
-                    <PropertyField
-                      label={tr('Поворот подложки (°)')}
-                      value={
-                        Math.round(
-                          ((background.rotationRadians * 180) / Math.PI) * 1000,
-                        ) / 1000
-                      }
-                      disabled={readonly || background.locked}
-                      onCommit={(degrees) =>
-                        updateBackground({
-                          ...background,
-                          rotationRadians: (Number(degrees) * Math.PI) / 180,
-                        })
-                      }
-                    />
-
-                    <PropertyField
-                      label={tr('Прозрачность подложки')}
-                      value={background.opacity}
-                      disabled={readonly || background.locked}
-                      min={0}
-                      max={1}
-                      onCommit={(opacity) =>
-                        updateBackground({
-                          ...background,
-                          opacity: Number(opacity),
-                        })
-                      }
-                    />
-
-                    <label className="hall-editor-field">
-                      {tr('Видимая')}
-                      <input
-                        type="checkbox"
-                        checked={background.visible}
-                        disabled={readonly || background.locked}
-                        onChange={(event) =>
-                          updateBackground({
-                            ...background,
-                            visible: event.target.checked,
-                          })
-                        }
-                      />
-                    </label>
-
-                    <label className="hall-editor-field">
-                      {tr('Заблокирована')}
-                      <input
-                        type="checkbox"
-                        checked={background.locked}
+                  )}
+                  <PropertyField
+                    label={tr('Название зоны')}
+                    value={zone.name}
+                    disabled={readonly}
+                    onCommit={(name) =>
+                      updateZone(zone, { ...zone, name: String(name) })
+                    }
+                  />
+                </>
+              )}
+              {decoration && (
+                <>
+                  <h4>
+                    {decoration.kind === 'stage'
+                      ? tr('Сцена')
+                      : decoration.kind === 'obstacle'
+                        ? tr('Препятствие')
+                        : tr('Подпись')}
+                  </h4>
+                  <PropertyField
+                    label={tr('Текст объекта')}
+                    value={
+                      decoration.kind === 'label'
+                        ? decoration.text
+                        : (decoration.label ?? '')
+                    }
+                    disabled={readonly}
+                    onCommit={(value) =>
+                      updateDecoration(
+                        decoration,
+                        decoration.kind === 'label'
+                          ? { ...decoration, text: String(value) }
+                          : { ...decoration, label: String(value) },
+                      )
+                    }
+                  />
+                  {decoration.kind === 'label' ? (
+                    <>
+                      <PropertyField
+                        label={tr('X подписи')}
+                        value={decoration.position.x}
                         disabled={readonly}
-                        onChange={(event) =>
-                          updateBackground({
-                            ...background,
-                            locked: event.target.checked,
+                        onCommit={(x) =>
+                          updateDecoration(decoration, {
+                            ...decoration,
+                            position: worldPointSchema.parse({
+                              ...decoration.position,
+                              x: Number(x),
+                            }),
                           })
                         }
                       />
-                    </label>
-
-                    <label className="hall-editor-file-field">
-                      {tr('Заменить PDF')}
-                      <input
-                        aria-label={tr('Заменить PDF')}
-                        type="file"
-                        accept="application/pdf,.pdf"
-                        disabled={readonly || importingPdf || background.locked}
-                        onChange={(event) => {
-                          const file = event.currentTarget.files?.[0];
-                          event.currentTarget.value = '';
-                          if (file) void handlePdfImport(file, background);
-                        }}
+                      <PropertyField
+                        label={tr('Y подписи')}
+                        value={decoration.position.y}
+                        disabled={readonly}
+                        onCommit={(y) =>
+                          updateDecoration(decoration, {
+                            ...decoration,
+                            position: worldPointSchema.parse({
+                              ...decoration.position,
+                              y: Number(y),
+                            }),
+                          })
+                        }
                       />
-                    </label>
-
+                    </>
+                  ) : null}
+                </>
+              )}
+              {seat && (
+                <>
+                  <h4>{tr('Место')}</h4>
+                  {parentRow && (
                     <button
                       type="button"
-                      disabled={readonly || background.locked}
-                      onClick={deleteBackground}
+                      className="hall-editor-parent-select"
+                      title={tr('Alt+щелчок по месту — выбрать ряд')}
+                      onClick={() => {
+                        if (tool !== 'select') clearCalibration();
+                        model.toolChanged('select');
+                        model.selectionChanged([
+                          { kind: 'row', id: parentRow.id },
+                        ]);
+                      }}
                     >
-                      {tr('Удалить подложку')}
+                      {tr('Выбрать ряд')}: {parentRow.name}
+                      <kbd className="hall-editor-shortcut">Alt+клик</kbd>
                     </button>
-                  </>
-                );
-              })()}
-            {target && (
-              <button type="button" disabled={readonly} onClick={handleDelete}>
-                {tr('Удалить объект')}
-              </button>
-            )}
-            {validationIssues.length > 0 && (
-              <section
-                className="hall-editor-validation"
-                aria-label={tr('Проверка схемы')}
-              >
-                <h3>{tr('Проверка схемы')}</h3>
-                <p>
-                  {tr(
-                    'Номера проверяются внутри ряда или стола; для отдельных мест — внутри зоны либо этажа.',
                   )}
-                </p>
-                {hasWarnings && (
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={warningsAcknowledged}
+                  <label className="hall-editor-field">
+                    {tr('Тип места')}
+                    <select
+                      aria-label={tr('Тип места')}
+                      value={seat.visualKind ?? 'chair'}
+                      disabled={readonly}
                       onChange={(event) =>
-                        setWarningAcknowledgement(
-                          event.target.checked ? draft.snapshot : null,
-                        )
+                        updateSeat(seat, {
+                          ...seat,
+                          visualKind: event.target.value as NonNullable<
+                            Seat['visualKind']
+                          >,
+                        })
+                      }
+                    >
+                      <option value="chair">{tr('Стул')}</option>
+                      <option value="armchair">{tr('Кресло')}</option>
+                      <option value="wheelchairBay">
+                        {tr('Место для коляски')}
+                      </option>
+                    </select>
+                  </label>
+                  <PropertyField
+                    label={tr('Номер места')}
+                    value={seat.label}
+                    disabled={readonly}
+                    onCommit={(label) =>
+                      updateSeat(seat, { ...seat, label: String(label) })
+                    }
+                  />
+                  <PropertyField
+                    label={tr('X места')}
+                    value={seat.position.x}
+                    disabled={readonly}
+                    onCommit={(x) =>
+                      updateSeat(seat, {
+                        ...seat,
+                        position: { ...seat.position, x: Number(x) },
+                      })
+                    }
+                  />
+                  <PropertyField
+                    label={tr('Y места')}
+                    value={seat.position.y}
+                    disabled={readonly}
+                    onCommit={(y) =>
+                      updateSeat(seat, {
+                        ...seat,
+                        position: { ...seat.position, y: Number(y) },
+                      })
+                    }
+                  />
+                </>
+              )}
+              {row && (
+                <>
+                  <h4>{tr('Ряд')}</h4>
+                  <PropertyField
+                    label={tr('Название ряда')}
+                    value={row.name}
+                    disabled={readonly}
+                    onCommit={(name) =>
+                      updateRow(row, { ...row, name: String(name) })
+                    }
+                  />
+                  <RowGenerationControls
+                    key={`${row.id}:${JSON.stringify(row.generation)}`}
+                    row={row}
+                    seatCount={
+                      draft.snapshot.seats.filter(
+                        (seat) =>
+                          seat.placement.kind === 'row' &&
+                          seat.placement.rowId === row.id,
+                      ).length
+                    }
+                    readonly={readonly}
+                    onPreview={handlePreview}
+                    onApply={(after) => updateRow(row, after)}
+                  />
+                </>
+              )}
+              {table && (
+                <>
+                  <h4>{tr('Стол')}</h4>
+                  <PropertyField
+                    label={tr('Название стола')}
+                    value={table.label}
+                    disabled={readonly}
+                    onCommit={(label) =>
+                      updateTable(table, { ...table, label: String(label) })
+                    }
+                  />
+                  <PropertyField
+                    label={tr('X стола')}
+                    value={table.center.x}
+                    disabled={readonly}
+                    onCommit={(x) =>
+                      updateTable(table, {
+                        ...table,
+                        center: { ...table.center, x: Number(x) },
+                      })
+                    }
+                  />
+                  <PropertyField
+                    label={tr('Y стола')}
+                    value={table.center.y}
+                    disabled={readonly}
+                    onCommit={(y) =>
+                      updateTable(table, {
+                        ...table,
+                        center: { ...table.center, y: Number(y) },
+                      })
+                    }
+                  />
+                  <PropertyField
+                    label={tr('Поворот (рад)')}
+                    value={table.rotationRadians}
+                    disabled={readonly}
+                    onCommit={(rotationRadians) =>
+                      updateTable(table, {
+                        ...table,
+                        rotationRadians: Number(rotationRadians),
+                      })
+                    }
+                  />
+                  {table.shape.kind === 'circle' ? (
+                    <PropertyField
+                      label={tr('Радиус стола')}
+                      value={table.shape.radius}
+                      disabled={readonly}
+                      onCommit={(radius) =>
+                        updateTable(table, {
+                          ...table,
+                          shape: {
+                            ...table.shape,
+                            radius: Number(radius),
+                          } as Table['shape'],
+                        })
                       }
                     />
-                    {tr('Публиковать с предупреждениями')}
-                  </label>
-                )}
-                <ul>
-                  {validationIssues.slice(0, 20).map((issue, index) => (
-                    <li
-                      key={`${issue.code}:${issue.targetId ?? index}`}
-                      data-severity={issue.severity}
-                    >
-                      {issue.severity === 'error'
-                        ? tr('Ошибка')
-                        : tr('Предупреждение')}
-                      : {translateEditorError(locale, issue.message)}
-                    </li>
-                  ))}
-                </ul>
-                {validationIssues.length > 20 && (
+                  ) : (
+                    <>
+                      <PropertyField
+                        label={tr('Ширина стола')}
+                        value={table.shape.width}
+                        disabled={readonly}
+                        onCommit={(width) =>
+                          updateTable(table, {
+                            ...table,
+                            shape: {
+                              ...table.shape,
+                              width: Number(width),
+                            } as Table['shape'],
+                          })
+                        }
+                      />
+                      <PropertyField
+                        label={tr('Высота стола')}
+                        value={table.shape.height}
+                        disabled={readonly}
+                        onCommit={(height) =>
+                          updateTable(table, {
+                            ...table,
+                            shape: {
+                              ...table.shape,
+                              height: Number(height),
+                            } as Table['shape'],
+                          })
+                        }
+                      />
+                    </>
+                  )}
+                  <TableGenerationControls
+                    key={`${table.id}:${JSON.stringify(table.shape)}:${JSON.stringify(table.generation)}`}
+                    table={table}
+                    readonly={readonly}
+                    onPreview={handlePreview}
+                    onApply={(after) => updateTable(table, after)}
+                  />
+                </>
+              )}
+              {background &&
+                background.source.kind === 'pdf' &&
+                (() => {
+                  const asset = draft.assets[background.source.assetId];
+                  return (
+                    <>
+                      <h4>{tr('PDF-подложка')}</h4>
+                      <p>{asset?.name ?? tr('Файл не найден')}</p>
+                      {background.locked && (
+                        <p className="hall-editor-lock-note" role="status">
+                          <span role="img" aria-label={tr('Заблокировано')}>
+                            🔒
+                          </span>{' '}
+                          {tr(
+                            'Подложка заблокирована. Снимите блокировку, чтобы изменить положение, видимость или файл.',
+                          )}
+                        </p>
+                      )}
+
+                      <label className="hall-editor-field">
+                        {tr('Страница PDF')}
+                        <select
+                          aria-label={tr('Страница PDF')}
+                          value={background.source.pageNumber}
+                          disabled={readonly || background.locked}
+                          onChange={(event) =>
+                            updateBackground({
+                              ...background,
+                              source: {
+                                kind: 'pdf',
+                                assetId: background.source.assetId,
+                                pageNumber: Number(event.target.value),
+                              },
+                            })
+                          }
+                        >
+                          {asset?.pages.map((_, index) => (
+                            <option key={index + 1} value={index + 1}>
+                              {index + 1}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <PropertyField
+                        label={tr('X подложки')}
+                        value={background.position.x}
+                        disabled={readonly || background.locked}
+                        onCommit={(x) =>
+                          updateBackground({
+                            ...background,
+                            position: { ...background.position, x: Number(x) },
+                          })
+                        }
+                      />
+
+                      <PropertyField
+                        label={tr('Y подложки')}
+                        value={background.position.y}
+                        disabled={readonly || background.locked}
+                        onCommit={(y) =>
+                          updateBackground({
+                            ...background,
+                            position: { ...background.position, y: Number(y) },
+                          })
+                        }
+                      />
+
+                      <PropertyField
+                        label={tr('Масштаб подложки')}
+                        value={background.scale}
+                        disabled={readonly || background.locked}
+                        onCommit={(scale) =>
+                          updateBackground({
+                            ...background,
+                            scale: Number(scale),
+                          })
+                        }
+                      />
+
+                      <PropertyField
+                        label={tr('Поворот подложки (°)')}
+                        value={
+                          Math.round(
+                            ((background.rotationRadians * 180) / Math.PI) *
+                              1000,
+                          ) / 1000
+                        }
+                        disabled={readonly || background.locked}
+                        onCommit={(degrees) =>
+                          updateBackground({
+                            ...background,
+                            rotationRadians: (Number(degrees) * Math.PI) / 180,
+                          })
+                        }
+                      />
+
+                      <PropertyField
+                        label={tr('Прозрачность подложки')}
+                        value={background.opacity}
+                        disabled={readonly || background.locked}
+                        min={0}
+                        max={1}
+                        onCommit={(opacity) =>
+                          updateBackground({
+                            ...background,
+                            opacity: Number(opacity),
+                          })
+                        }
+                      />
+
+                      <label className="hall-editor-field">
+                        {tr('Видимая')}
+                        <input
+                          type="checkbox"
+                          checked={background.visible}
+                          disabled={readonly || background.locked}
+                          onChange={(event) =>
+                            updateBackground({
+                              ...background,
+                              visible: event.target.checked,
+                            })
+                          }
+                        />
+                      </label>
+
+                      <label className="hall-editor-field">
+                        {tr('Заблокирована')}
+                        <input
+                          type="checkbox"
+                          checked={background.locked}
+                          disabled={readonly}
+                          onChange={(event) =>
+                            updateBackground({
+                              ...background,
+                              locked: event.target.checked,
+                            })
+                          }
+                        />
+                      </label>
+
+                      <label className="hall-editor-file-field">
+                        {tr('Заменить PDF')}
+                        <input
+                          aria-label={tr('Заменить PDF')}
+                          type="file"
+                          accept="application/pdf,.pdf"
+                          disabled={
+                            readonly || importingPdf || background.locked
+                          }
+                          onChange={(event) => {
+                            const file = event.currentTarget.files?.[0];
+                            event.currentTarget.value = '';
+                            if (file) void handlePdfImport(file, background);
+                          }}
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        disabled={readonly || background.locked}
+                        onClick={deleteBackground}
+                      >
+                        {tr('Удалить подложку')}
+                      </button>
+                    </>
+                  );
+                })()}
+              {target && (
+                <button
+                  type="button"
+                  disabled={readonly}
+                  onClick={handleDelete}
+                >
+                  {tr('Удалить объект')}
+                </button>
+              )}
+              {validationIssues.length > 0 && (
+                <section
+                  className="hall-editor-validation"
+                  aria-label={tr('Проверка схемы')}
+                >
+                  <h3>{tr('Проверка схемы')}</h3>
                   <p>
-                    {tr('Ещё')} {validationIssues.length - 20} {tr('замечаний')}
+                    {tr(
+                      'Номера проверяются внутри ряда или стола; для отдельных мест — внутри зоны либо этажа.',
+                    )}
                   </p>
-                )}
-              </section>
-            )}
+                  {hasWarnings && (
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={warningsAcknowledged}
+                        onChange={(event) =>
+                          setWarningAcknowledgement(
+                            event.target.checked ? draft.snapshot : null,
+                          )
+                        }
+                      />
+                      {tr('Публиковать с предупреждениями')}
+                    </label>
+                  )}
+                  <ul>
+                    {validationIssues.slice(0, 20).map((issue, index) => (
+                      <li
+                        key={`${issue.code}:${issue.targetId ?? index}`}
+                        data-severity={issue.severity}
+                      >
+                        {issue.severity === 'error'
+                          ? tr('Ошибка')
+                          : tr('Предупреждение')}
+                        : {translateEditorError(locale, issue.message)}
+                      </li>
+                    ))}
+                  </ul>
+                  {validationIssues.length > 20 && (
+                    <p>
+                      {tr('Ещё')} {validationIssues.length - 20}{' '}
+                      {tr('замечаний')}
+                    </p>
+                  )}
+                </section>
+              )}
+            </fieldset>
           </PropertiesPanel>
           {mobilePanel && (
             <button
@@ -1912,53 +1979,60 @@ export function HallEditor(props: HallEditorProps) {
             <button
               type="button"
               aria-pressed={tool === 'select'}
+              aria-label={tr('Выбор')}
               onClick={() => {
                 model.toolChanged('select');
                 setMobilePanel(null);
               }}
             >
-              ↖ <span>{tr('Выбор')}</span>
+              <MobilePanelIcon name="select" /> <span>{tr('Выбор')}</span>
             </button>
             <button
               type="button"
+              disabled={readonly}
               aria-pressed={tool === 'row-line'}
+              aria-label={tr('Ряд')}
               onClick={() => {
                 model.toolChanged('row-line');
                 setMobilePanel(null);
               }}
             >
-              ▤ <span>{tr('Ряд')}</span>
+              <MobilePanelIcon name="row" /> <span>{tr('Ряд')}</span>
             </button>
             <button
               type="button"
               aria-pressed={mobilePanel === 'tools'}
+              aria-label={tr('Инструменты')}
               onClick={() =>
                 setMobilePanel((current) => toggleEditorPanel(current, 'tools'))
               }
             >
-              ✥ <span>{tr('Инструменты')}</span>
+              <MobilePanelIcon name="tools" /> <span>{tr('Инструменты')}</span>
             </button>
             <button
               type="button"
               aria-pressed={mobilePanel === 'layers'}
+              aria-label={tr('Слои')}
               onClick={() =>
                 setMobilePanel((current) =>
                   toggleEditorPanel(current, 'layers'),
                 )
               }
             >
-              ▦ <span>{tr('Слои')}</span>
+              <MobilePanelIcon name="layers" /> <span>{tr('Слои')}</span>
             </button>
             <button
               type="button"
               aria-pressed={mobilePanel === 'properties'}
+              aria-label={tr('Свойства')}
               onClick={() =>
                 setMobilePanel((current) =>
                   toggleEditorPanel(current, 'properties'),
                 )
               }
             >
-              ☷ <span>{tr('Свойства')}</span>
+              <MobilePanelIcon name="properties" />{' '}
+              <span>{tr('Свойства')}</span>
             </button>
           </nav>
         </div>

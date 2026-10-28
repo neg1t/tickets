@@ -10,6 +10,7 @@ import {
   createRendererScene,
   hitTestScene,
   sceneItemKey,
+  type HallTarget,
   type RendererScene,
   type SceneItem,
 } from '@hall-platform/renderer-core';
@@ -25,10 +26,7 @@ import {
 } from '@hall-platform/geometry';
 import { hitSeatSymbol, seatSymbolBounds } from './furniture.js';
 
-export type HallTarget = Readonly<{
-  kind: 'seat' | 'row' | 'table' | 'zone' | 'decoration';
-  id: string;
-}>;
+export type { HallTarget } from '@hall-platform/renderer-core';
 
 let sceneBuildSequence = 0;
 

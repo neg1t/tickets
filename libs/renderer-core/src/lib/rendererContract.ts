@@ -1,5 +1,6 @@
 import type { Vector2 } from '@hall-platform/geometry';
 import type { RendererScene } from './scene.js';
+import type { RendererSceneChangeSet } from './sceneChanges.js';
 import type { Viewport } from './viewport.js';
 
 export type RendererTargetRef = Readonly<{ kind: string; id: string }>;
@@ -18,6 +19,8 @@ export type RendererSeatUpdate = Readonly<{
   label?: string;
   /** CSS hex or rgb() fill override used to match a host renderer palette. */
   fillColor?: string | null;
+  /** CSS hex or rgb() stroke override used to match a host renderer palette. */
+  strokeColor?: string | null;
 }>;
 
 export type RendererSeatPositionUpdate = Readonly<{
@@ -38,7 +41,9 @@ export type RendererEvent =
     }>;
 
 export type RendererContract<TGeometry = unknown> = Readonly<{
-  setScene(scene: RendererScene<TGeometry>): void;
+  setScene(scene: RendererScene<TGeometry>): boolean;
+  /** Apply a same-document, same-floor geometry change against its base revision. */
+  applySceneChanges(changes: RendererSceneChangeSet<TGeometry>): boolean;
   updateSeats(updates: readonly RendererSeatUpdate[]): void;
   setPreviewPositions(positions: readonly RendererSeatPositionUpdate[]): void;
   setViewport(viewport: Viewport): void;

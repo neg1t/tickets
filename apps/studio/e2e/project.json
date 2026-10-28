@@ -1,0 +1,8 @@
+{
+  "name": "studio-e2e",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/studio/e2e",
+  "projectType": "application",
+  "tags": ["scope:studio", "layer:app"],
+  "targets": {}
+}

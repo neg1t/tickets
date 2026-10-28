@@ -32,26 +32,36 @@ export function preserveSeatManualAdjustment(before: Seat, after: Seat): Seat {
   };
 }
 
-function attachedSeats(
+function indexAttachedSeats(
   draft: HallLayoutDraft,
   kind: 'row' | 'table',
   id: string,
-): Seat[] {
-  return draft.snapshot.seats.filter((seat) =>
-    kind === 'row'
-      ? seat.placement.kind === 'row' && seat.placement.rowId === id
-      : seat.placement.kind === 'table' && seat.placement.tableId === id,
-  );
+): { attached: Seat[]; allSeatIds: Seat['id'][] } {
+  const attached: Seat[] = [];
+  const allSeatIds: Seat['id'][] = [];
+  for (const seat of draft.snapshot.seats) {
+    allSeatIds.push(seat.id);
+    if (
+      (kind === 'row' &&
+        seat.placement.kind === 'row' &&
+        seat.placement.rowId === id) ||
+      (kind === 'table' &&
+        seat.placement.kind === 'table' &&
+        seat.placement.tableId === id)
+    )
+      attached.push(seat);
+  }
+  return { attached, allSeatIds };
 }
 
 function seatPatches(
-  draft: HallLayoutDraft,
   previous: readonly Seat[],
   nextSlots: readonly (RowSeatSlot | TableSeatSlot)[],
   parent: Row | Table,
   kind: 'row' | 'table',
   oldSlots: readonly (RowSeatSlot | TableSeatSlot)[],
   options: Options,
+  allSeatIds: readonly Seat['id'][],
 ): EditorPatch[] {
   const previousByKey = new Map(
     previous.map((seat, index) => [
@@ -83,9 +93,8 @@ function seatPatches(
   );
   const matched = keys.map((key) => previousByKey.get(key) ?? null);
   const previousIds = previous.map((seat) => seat.id);
-  const reservedSeatIds = draft.snapshot.seats
-    .filter((seat) => !previousIds.includes(seat.id))
-    .map((seat) => seat.id);
+  const previousIdSet = new Set(previousIds);
+  const reservedSeatIds = allSeatIds.filter((id) => !previousIdSet.has(id));
   const ids = reconcileSeatIds({
     previousSeatIds: previousIds,
     nextSeatIds: matched.map((seat) => seat?.id ?? null),
@@ -176,7 +185,11 @@ export function regenerateRowSeats(
   after: Row,
   options: Options = {},
 ): EditorCommand {
-  const previous = before ? attachedSeats(draft, 'row', before.id) : [];
+  const { attached: previous, allSeatIds } = indexAttachedSeats(
+    draft,
+    'row',
+    before?.id ?? after.id,
+  );
   const nextSlots = rowSlots(after, previous.length);
   const oldSlots =
     before && previous.length > 0 ? rowSlots(before, previous.length) : [];
@@ -185,13 +198,13 @@ export function regenerateRowSeats(
     patches: [
       { collection: 'rows', id: after.id, before, after },
       ...seatPatches(
-        draft,
         previous,
         nextSlots,
         after,
         'row',
         oldSlots,
         options,
+        allSeatIds,
       ),
     ],
   };
@@ -203,7 +216,11 @@ export function regenerateTableSeats(
   after: Table,
   options: Options = {},
 ): EditorCommand {
-  const previous = before ? attachedSeats(draft, 'table', before.id) : [];
+  const { attached: previous, allSeatIds } = indexAttachedSeats(
+    draft,
+    'table',
+    before?.id ?? after.id,
+  );
   const nextSlots = tableSlots(after);
   const oldSlots = before && previous.length > 0 ? tableSlots(before) : [];
   return {
@@ -211,13 +228,13 @@ export function regenerateTableSeats(
     patches: [
       { collection: 'tables', id: after.id, before, after },
       ...seatPatches(
-        draft,
         previous,
         nextSlots,
         after,
         'table',
         oldSlots,
         options,
+        allSeatIds,
       ),
     ],
   };

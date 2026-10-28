@@ -12,16 +12,22 @@
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "references": [
     {
+      "path": "../fixtures/tsconfig.lib.json"
+    },
+    {
       "path": "../renderer-konva/tsconfig.lib.json"
+    },
+    {
+      "path": "../renderer-core/tsconfig.lib.json"
     },
     {
       "path": "../pdf/tsconfig.lib.json"
     },
     {
-      "path": "../geometry/tsconfig.lib.json"
+      "path": "../hall-viewer/tsconfig.lib.json"
     },
     {
-      "path": "../hall-viewer/tsconfig.lib.json"
+      "path": "../geometry/tsconfig.lib.json"
     },
     {
       "path": "../domain/tsconfig.lib.json"

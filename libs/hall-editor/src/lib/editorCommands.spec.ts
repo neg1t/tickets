@@ -4,6 +4,7 @@ import {
   rowSchema,
   seatIdSchema,
   seatSchema,
+  type Seat,
   worldPointSchema,
 } from '@hall-platform/domain';
 import { createEmptyDraft } from './editorDraft.js';
@@ -93,6 +94,91 @@ describe('editor commands', () => {
     expect(next.draft.snapshot.seats[2_047]?.position.y).toBe(2);
     expect(next.draft.snapshot.seats[9_999]).toBe(draft.snapshot.seats[9_999]);
     expect(elapsed).toBeLessThan(500);
+  }, 20_000);
+
+  it('measures command application for 1, 100, 500 and 1000 patches', () => {
+    const draft = largeSeatDraft(50_000);
+    const state = createEditorState(draft);
+    for (const count of [1, 100, 500, 1_000]) {
+      const patches = draft.snapshot.seats.slice(0, count).map((before) => ({
+        collection: 'seats' as const,
+        id: before.id,
+        before,
+        after: {
+          ...before,
+          position: worldPointSchema.parse({
+            x: before.position.x + 0.25,
+            y: before.position.y + 0.25,
+          }),
+        },
+      }));
+      const apply = () =>
+        applyEditorCommand(state, { kind: 'update', patches });
+      apply();
+      const samples = Array.from({ length: 3 }, () => {
+        const started = performance.now();
+        const next = apply();
+        const elapsed = performance.now() - started;
+        expect(next.draft.snapshot.seats[count - 1]?.position.x).toBe(
+          count - 1 + 0.25,
+        );
+        return elapsed;
+      });
+      const median = [...samples].sort((left, right) => left - right)[1];
+      console.info(
+        `50k draft, ${count} update patches: median ${median?.toFixed(1)} ms across 3 runs`,
+      );
+    }
+  }, 20_000);
+
+  it('measures structural command batches for 1, 100, 500 and 1000 patches', () => {
+    const draft = largeSeatDraft(50_000);
+    const state = createEditorState(draft);
+    const seed = draft.snapshot.seats[0];
+    if (!seed) throw new Error('Missing seed seat');
+
+    for (const count of [1, 100, 500, 1_000]) {
+      const deleteCount = Math.floor(count / 2);
+      const createCount = count - deleteCount;
+      const patches = [
+        ...draft.snapshot.seats.slice(0, deleteCount).map((before) => ({
+          collection: 'seats' as const,
+          id: before.id,
+          before,
+          after: null,
+        })),
+        ...Array.from({ length: createCount }, (_, index) => {
+          const after = seatSchema.parse({
+            ...seed,
+            id: seatIdSchema.parse(`seat-bench-${count}-${index}`),
+            label: `Bench ${count}-${index}`,
+            position: worldPointSchema.parse({ x: 100_000 + index, y: 0 }),
+          });
+          return {
+            collection: 'seats' as const,
+            id: after.id,
+            before: null,
+            after,
+          };
+        }),
+      ];
+      const apply = () =>
+        applyEditorCommand(state, { kind: 'update', patches });
+      apply();
+      const samples = Array.from({ length: 3 }, () => {
+        const started = performance.now();
+        const next = apply();
+        const elapsed = performance.now() - started;
+        expect(next.draft.snapshot.seats).toHaveLength(
+          50_000 - deleteCount + createCount,
+        );
+        return elapsed;
+      });
+      const median = [...samples].sort((left, right) => left - right)[1];
+      console.info(
+        `50k draft, ${count} structural patches: median ${median?.toFixed(1)} ms across 3 runs`,
+      );
+    }
   }, 20_000);
 
   it('still rejects a move that changes a seat to a missing floor', () => {
@@ -203,6 +289,87 @@ describe('editor commands', () => {
     expect(
       redoEditor(undoEditor(moved)).draft.snapshot.seats[0]?.position,
     ).toEqual({ x: 9, y: 7 });
+  });
+
+  it('applies grouped collection changes in order and preserves undo/redo indexes', () => {
+    const draft = largeSeatDraft(4);
+    const [first, second, third, fourth] = draft.snapshot.seats;
+    if (!first || !second || !third || !fourth)
+      throw new Error('Missing seed seats');
+    const inserted = seatSchema.parse({
+      ...first,
+      id: 'seat-inserted',
+      label: 'Inserted',
+      position: { x: 20, y: 1 },
+    });
+    const appended = seatSchema.parse({
+      ...first,
+      id: 'seat-appended',
+      label: 'Appended',
+      position: { x: 30, y: 1 },
+    });
+    const negativeIndexed = seatSchema.parse({
+      ...first,
+      id: 'seat-negative-index',
+      label: 'Negative index',
+      position: { x: 25, y: 1 },
+    });
+    const command = {
+      kind: 'update' as const,
+      patches: [
+        { collection: 'seats' as const, id: third.id, before: third, after: null, index: 2 },
+        { collection: 'seats' as const, id: inserted.id, before: null, after: inserted, index: 1 },
+        { collection: 'seats' as const, id: second.id, before: second, after: { ...second, label: 'Updated' } },
+        { collection: 'seats' as const, id: negativeIndexed.id, before: null, after: negativeIndexed, index: -1 },
+        { collection: 'seats' as const, id: appended.id, before: null, after: appended },
+      ],
+    };
+    const applied = applyEditorCommand(createEditorState(draft), command);
+    expect(applied.draft.snapshot.seats.map((seat) => seat.id)).toEqual([
+      first.id,
+      inserted.id,
+      second.id,
+      negativeIndexed.id,
+      fourth.id,
+      appended.id,
+    ]);
+    expect(applied.draft.snapshot.seats[2]?.label).toBe('Updated');
+
+    const undone = undoEditor(applied);
+    expect(undone.draft.snapshot.seats.map((seat) => seat.id)).toEqual(
+      draft.snapshot.seats.map((seat) => seat.id),
+    );
+    expect(undone.draft.snapshot.seats[1]).toEqual(second);
+    expect(redoEditor(undone).draft.snapshot.seats.map((seat) => seat.id)).toEqual(
+      applied.draft.snapshot.seats.map((seat) => seat.id),
+    );
+  });
+
+  it('still validates the complete draft when applying a malformed create patch', () => {
+    const initial = createEditorState(createEmptyDraft('Test Hall'));
+    const floorId = initial.draft.snapshot.floors[0]?.id;
+    if (!floorId) throw new Error('Missing floor');
+    const malformed = {
+      id: 'seat-invalid',
+      floorId,
+      label: 'Invalid',
+      position: { x: Number.POSITIVE_INFINITY, y: 0 },
+      placement: { kind: 'standalone' as const },
+    } as unknown as Seat;
+
+    expect(() =>
+      applyEditorCommand(initial, {
+        kind: 'create',
+        patches: [
+          {
+            collection: 'seats',
+            id: malformed.id,
+            before: null,
+            after: malformed,
+          },
+        ],
+      }),
+    ).toThrow();
   });
 
   it('rejects a row linked to a missing zone without changing the draft', () => {

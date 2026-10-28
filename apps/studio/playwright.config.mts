@@ -30,6 +30,9 @@ const baseURL = process.env['BASE_URL'] || getReadyUrl(previewUrl);
  */
 export default defineConfig({
   ...nxE2EPreset(import.meta.dirname, { testDir: './e2e' }),
+  ...(process.env['HALL_FUNCTIONAL_ONLY'] === '1'
+    ? { grepInvert: /@performance/ }
+    : {}),
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     baseURL,

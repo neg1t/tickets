@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { renderPdfPage } from '@hall-platform/pdf';
-import type { HallViewerProps } from '@hall-platform/renderer-konva';
 import {
   HallViewport,
+  type HallViewportProps,
   type RendererPreference,
 } from '@hall-platform/hall-viewer';
 import type { HallLayoutDraft } from './editorDraft.js';
@@ -50,7 +50,7 @@ function pruneInactiveCache(
 }
 
 export type PdfHallViewerProps = Omit<
-  HallViewerProps,
+  HallViewportProps,
   'hallName' | 'snapshot' | 'zoneBounds' | 'backgroundPages'
 > & {
   readonly draft: HallLayoutDraft;

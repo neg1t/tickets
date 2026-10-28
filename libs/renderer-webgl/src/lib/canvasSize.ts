@@ -4,6 +4,8 @@ export type CanvasPixelSize = Readonly<{
   pixelRatio: number;
 }>;
 
+export type CanvasBackingStore = Pick<HTMLCanvasElement, 'width' | 'height'>;
+
 const maximumPixelCount = 16_777_216;
 
 export function canvasPixelSize(
@@ -23,4 +25,15 @@ export function canvasPixelSize(
     height: Math.max(1, Math.round(height * pixelRatio)),
     pixelRatio,
   };
+}
+
+export function resizeCanvasBackingStore(
+  canvas: CanvasBackingStore,
+  size: CanvasPixelSize,
+): boolean {
+  if (canvas.width === size.width && canvas.height === size.height)
+    return false;
+  canvas.width = size.width;
+  canvas.height = size.height;
+  return true;
 }

@@ -30,6 +30,59 @@ test('captures the desktop editor baseline', async ({ page }) => {
   await capture('studio-editor-1280x800', await page.screenshot());
 });
 
+test('captures the selected-row editor in light and dark canvas themes', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto('/');
+  await openCurrentEditor(page);
+  await expect(page.locator('#hall-stage')).toBeVisible();
+  await page.getByLabel('Найти объект').fill('L1');
+  await page.getByRole('button', { name: 'Выбрать Ряд L1' }).click();
+  await page.getByRole('button', { name: 'К выбранному' }).click();
+  await capture(
+    'studio-editor-1440x1000-selected-row-light',
+    await page.screenshot(),
+  );
+
+  await page.locator('.studio-editor-page').evaluate((element) => {
+    element.classList.add('hall-theme-canvas');
+  });
+  await capture(
+    'studio-editor-1440x1000-selected-row-dark',
+    await page.screenshot(),
+  );
+});
+
+test('captures PDF import and validation error states', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Новый зал' }).click();
+  await page.getByLabel('Загрузить PDF').setInputFiles({
+    name: 'invalid.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from('not a PDF document'),
+  });
+  await expect(page.getByRole('alert')).toBeVisible();
+  await capture(
+    'studio-editor-1280x800-pdf-import-error',
+    await page.screenshot(),
+  );
+
+  const stage = page.locator('#hall-stage');
+  await page.getByRole('button', { name: 'Место', exact: true }).click();
+  await stage.click({ position: { x: 300, y: 260 } });
+  await page.getByRole('button', { name: 'Место', exact: true }).click();
+  await stage.click({ position: { x: 500, y: 260 } });
+  await page.getByLabel('Номер места').fill('1');
+  await page.getByLabel('Номер места').blur();
+  await expect(page.getByText(/Повтор номера/)).toBeVisible();
+  await capture(
+    'studio-editor-1280x800-validation-error',
+    await page.screenshot(),
+  );
+});
+
 test('captures the mobile buyer baseline', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');

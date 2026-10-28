@@ -1,1 +1,61 @@
-/* You can add global styles to this file, and also import other style files */
+:root {
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  color: #193047;
+  background: #eef3f7;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+}
+
+.embed-host {
+  width: min(1440px, 100%);
+  margin-inline: auto;
+  padding: 28px clamp(16px, 3vw, 40px) 40px;
+}
+
+.embed-host-header {
+  max-width: 760px;
+  margin-bottom: 24px;
+}
+
+.embed-host-header h1 {
+  margin: 0 0 8px;
+  color: #193047;
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+}
+
+.embed-host-header p {
+  margin: 0;
+  color: #506579;
+  line-height: 1.5;
+}
+
+.embed-host-header .embed-host-eyebrow {
+  margin-bottom: 8px;
+  color: #246d91;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 760px) {
+  .embed-host {
+    padding: 18px 12px 28px;
+  }
+}
