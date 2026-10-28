@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useUnit } from 'effector-react';
+import { formatPricingMoney } from '@hall-platform/domain';
 import { SeatView, type SeatSelectionItem } from '@hall-platform/seat-view';
-import { getDemoAvailability, getDemoTotal } from '../model/demoBooking.js';
+import { getDemoAvailability } from '../model/demoBooking.js';
 import type { DemoOccurrence, DemoOrder } from '../model/demoBooking.js';
 import { cancelDemoFx, confirmDemoFx } from '../model/dashboard.model.js';
 import './buyer-page.css';
@@ -43,24 +44,13 @@ const englishText: Record<string, string> = {
   'Время удержания истекло. Выберите билеты заново':
     'Your hold expired. Please choose tickets again',
   'Демо-мероприятие не найдено': 'Demo event was not found',
+  'Сумма старого демо-заказа не сохранена.': 'The total was not saved for this legacy demo order.',
+  'Старые удержания отменены после обновления цен. Выберите билеты заново.':
+    'Legacy holds were cancelled after the pricing update. Please choose tickets again.',
 };
-
-const rubleFormatters = new Map<string, Intl.NumberFormat>();
 
 function translate(locale: string, russian: string): string {
   return locale === 'en-US' ? (englishText[russian] ?? russian) : russian;
-}
-
-function formatRubles(amount: number, locale: string): string {
-  let formatter = rubleFormatters.get(locale);
-  if (!formatter) {
-    formatter = new Intl.NumberFormat(locale, {
-      style: 'currency',
-      currency: 'RUB',
-    });
-    rubleFormatters.set(locale, formatter);
-  }
-  return formatter.format(amount);
 }
 
 type BuyerPageProps = {
@@ -127,7 +117,7 @@ function ActiveHoldPanel(props: {
 
   const minutes = String(Math.floor(remaining / 60)).padStart(2, '0');
   const seconds = String(remaining % 60).padStart(2, '0');
-  const total = getDemoTotal(props.occurrence, props.hold.selection);
+  const quote = props.hold.quote;
   return (
     <section
       className="studio-buyer-result"
@@ -142,7 +132,7 @@ function ActiveHoldPanel(props: {
         </time>
       </p>
       <strong>
-        {translate(props.locale, 'Итого:')} {formatRubles(total, props.locale)}
+        {translate(props.locale, 'Итого:')} {formatPricingMoney(quote.total, props.locale)}
       </strong>
       <div className="studio-buyer-result-actions">
         <button
@@ -312,6 +302,11 @@ export function BuyerPage(props: BuyerPageProps) {
                   {tr('Время удержания истекло. Выберите билеты заново.')}
                 </div>
               )}
+            {occurrence.legacyQuoteNotice && (
+              <div role="status" className="studio-alert">
+                {tr('Старые удержания отменены после обновления цен. Выберите билеты заново.')}
+              </div>
+            )}
             {props.receipt ? (
               <section className="studio-buyer-result" role="status">
                 <h2>{tr('Покупка подтверждена')}</h2>
@@ -326,13 +321,13 @@ export function BuyerPage(props: BuyerPageProps) {
                     0,
                   )}
                 </p>
-                <strong>
-                  {tr('Итого:')}{' '}
-                  {formatRubles(
-                    getDemoTotal(occurrence, props.receipt.selection),
-                    locale,
-                  )}
-                </strong>
+                {props.receipt.quote ? (
+                  <strong>
+                    {tr('Итого:')} {formatPricingMoney(props.receipt.quote.total, locale)}
+                  </strong>
+                ) : (
+                  <p>{tr('Сумма старого демо-заказа не сохранена.')}</p>
+                )}
                 <button
                   type="button"
                   onClick={() => void props.onReopen(occurrence.id)}

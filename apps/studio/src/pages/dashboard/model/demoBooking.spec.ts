@@ -4,6 +4,7 @@ import banquetHall from '@hall-platform/fixtures/banquet-hall.json';
 import {
   backgroundSchema,
   layoutDocumentSchema,
+  layoutSnapshotSchema,
   worldPointSchema,
 } from '@hall-platform/domain';
 import {
@@ -62,6 +63,28 @@ describe('demo booking', () => {
     const sold = confirmDemoHold(held, held.holds[0]?.id ?? '', 1002);
     expect(getDemoAvailability(sold, 1002).seats[seatId]).toBe('sold');
     expect(getDemoTotal(sold, sold.orders[0]?.selection ?? [])).toBe(1500);
+  });
+
+  it('keeps a hold quote immutable through pricing changes and copies it to the order', () => {
+    const initial = createDemoOccurrence('demo-small', layout);
+    const held = holdDemoSelection(
+      initial,
+      [{ kind: 'seat', seatId }],
+      1000,
+    );
+    const originalQuote = held.holds[0]?.quote;
+    const repriced = {
+      ...held,
+      prices: {
+        ...held.prices,
+        seats: { ...held.prices.seats, [seatId]: { amount: 9999, currency: 'RUB' } },
+      },
+    };
+    const confirmed = confirmDemoHold(repriced, held.holds[0]?.id ?? '', 1002);
+
+    expect(originalQuote?.total).toEqual({ amountMinor: 150000, currency: 'RUB' });
+    expect(confirmed.orders[0]?.quote).toEqual(originalQuote);
+    expect(confirmed.orders[0]?.quote?.total.amountMinor).toBe(150000);
   });
 
   it('releases an expired or cancelled hold', () => {
@@ -232,13 +255,19 @@ describe('demo booking', () => {
   });
 
   it('reserves general admission capacity and prevents overselling', () => {
-    const banquetSnapshot = layoutDocumentSchema.parse(
+    const parsedSnapshot = layoutDocumentSchema.parse(
       banquetHall.document,
     ).snapshot;
-    const emptyZone = banquetSnapshot.zones.find(
-      (zone) => !banquetSnapshot.seats.some((seat) => seat.zoneId === zone.id),
+    const emptyZone = parsedSnapshot.zones.find(
+      (zone) => !parsedSnapshot.seats.some((seat) => seat.zoneId === zone.id),
     );
-    if (!emptyZone) throw new Error('Fixture needs a general admission zone');
+    if (!emptyZone) throw new Error('Fixture needs an empty zone for explicit GA setup');
+    const banquetSnapshot = layoutSnapshotSchema.parse({
+      ...parsedSnapshot,
+      zones: parsedSnapshot.zones.map((zone) =>
+        zone.id === emptyZone.id ? { ...zone, kind: 'ga', capacity: 20 } : zone,
+      ),
+    });
     const occurrence = createDemoOccurrence('demo-banquet', {
       hallName: 'Banquet Hall',
       snapshot: banquetSnapshot,

@@ -8,6 +8,8 @@ describe('OpenAPI contract', () => {
     expect(openApiDocument.paths).toHaveProperty('/api/v1/halls');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/layouts/{id}/publish');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/occurrences/{id}/holds');
+    expect(openApiDocument.paths).toHaveProperty('/api/v1/occurrences/{id}/pricing-segments');
+    expect(openApiDocument.paths).toHaveProperty('/api/v1/occurrences/{id}/pricing-assignments');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/orders/{id}/checkout');
     expect(openApiDocument.components.securitySchemes).toHaveProperty('bearerAuth');
     expect(openApiDocument.paths['/api/v1/layouts/{id}/draft'].put.responses).toHaveProperty('409');
@@ -20,6 +22,24 @@ describe('OpenAPI contract', () => {
     expect(openApiDocument.components.parameters.IdempotencyKey).toMatchObject({
       in: 'header', name: 'Idempotency-Key', required: true,
     });
+  });
+
+  it('documents empty, mixed seated, GA, and conflict pricing payloads', () => {
+    const getAssignments = openApiDocument.paths['/api/v1/occurrences/{id}/pricing-assignments'].get;
+    const putAssignments = openApiDocument.paths['/api/v1/occurrences/{id}/pricing-assignments'].put;
+    const readExamples = getAssignments.responses['200'].content['application/json'].examples;
+    const writeExamples = putAssignments.requestBody.content['application/json'].examples;
+    const conflictExamples = putAssignments.responses['409'].content['application/json'].examples;
+
+    expect(readExamples).toHaveProperty('emptyAssignments');
+    expect(readExamples).toHaveProperty('mixedSeatedZone');
+    expect(readExamples).toHaveProperty('generalAdmissionZone');
+    expect(writeExamples).toHaveProperty('emptyAssignments');
+    expect(writeExamples).toHaveProperty('mixedSeatedZone');
+    expect(writeExamples).toHaveProperty('generalAdmissionZone');
+    expect(conflictExamples).toHaveProperty('catalogChanged');
+    expect(conflictExamples).toHaveProperty('layoutChanged');
+    expect(conflictExamples).toHaveProperty('invalidTarget');
   });
 
   it('keeps the distributable OpenAPI JSON in sync with runtime schemas', async () => {

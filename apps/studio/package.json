@@ -12,10 +12,12 @@
     "@hall-platform/fixtures": "workspace:*",
     "@hall-platform/hall-viewer": "workspace:*",
     "@hall-platform/local-storage": "workspace:*",
+    "@hall-platform/pricing-editor": "workspace:*",
     "@hall-platform/renderer-konva": "workspace:*",
     "@hall-platform/renderer-core": "workspace:*",
     "@hall-platform/renderer-webgl": "workspace:*",
     "@hall-platform/seat-view": "workspace:*",
-    "@hall-platform/ui": "workspace:*"
+    "@hall-platform/ui": "workspace:*",
+    "zod": "^4.6.7"
   }
 }

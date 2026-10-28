@@ -1,5 +1,6 @@
 export * from './lib/hitTest.js';
 export * from './lib/hallTarget.js';
+export * from './lib/selectionPolicy.js';
 export * from './lib/interaction.js';
 export * from './lib/lod.js';
 export * from './lib/rendererContract.js';

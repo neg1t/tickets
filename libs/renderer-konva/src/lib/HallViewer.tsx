@@ -17,7 +17,11 @@ import {
   readHallCanvasPalette,
 } from '@hall-platform/design-tokens';
 import type { SpatialBounds, Vector2 } from '@hall-platform/geometry';
-import type { RendererSeatPositionUpdate } from '@hall-platform/renderer-core';
+import type {
+  RendererSeatPositionUpdate,
+  SelectableKind,
+  SelectionOperation,
+} from '@hall-platform/renderer-core';
 import {
   advancePinchViewport,
   CameraController,
@@ -73,6 +77,11 @@ import {
   snappedMoveDelta,
   type PolygonEditMode,
 } from './directManipulation.js';
+import {
+  boxSelectedTargetsForSelection,
+  clickSelection,
+  mergeBoxSelection,
+} from './selectionInteraction.js';
 
 const noPreviewPositions: readonly RendererSeatPositionUpdate[] = [];
 const noTargetKeys: ReadonlySet<string> = new Set();
@@ -133,6 +142,9 @@ export type HallViewerProps = {
   readonly seatAppearance?: Readonly<
     Record<string, { fill: string; stroke?: string }>
   >;
+  readonly zoneAppearance?: Readonly<
+    Record<string, { fill?: string; stroke?: string; opacity?: number }>
+  >;
   readonly previewSeats?: readonly Vector2[];
   readonly zoneBounds?: Readonly<Record<string, SpatialBounds>>;
   readonly backgroundPages?: Readonly<
@@ -141,7 +153,9 @@ export type HallViewerProps = {
       { width: number; height: number; canvas?: HTMLCanvasElement }
     >
   >;
-  readonly viewerMode?: 'edit' | 'view' | 'pick';
+  readonly viewerMode?: 'edit' | 'view' | 'pick' | 'selection';
+  readonly selectableKinds?: readonly SelectableKind[];
+  readonly selectionOperation?: SelectionOperation;
   readonly activeTool?: string;
   readonly polygonEditMode?: PolygonEditMode;
   readonly selectedTargets?: readonly HallTarget[];
@@ -188,6 +202,7 @@ type PointerIntent = {
 };
 
 const farZoomTargets = new Set<HallTarget['kind']>(['zone']);
+const defaultSelectionKinds = ['seat'] as const;
 const emptySeatAppearance = {};
 
 const DotSeatBatchShape = memo(function DotSeatBatchShape({
@@ -297,10 +312,13 @@ export function HallViewer(props: HallViewerProps) {
     focusedFloorId,
     focusedZoneId,
     seatAppearance,
+    zoneAppearance,
     previewSeats = [],
     zoneBounds,
     backgroundPages,
     viewerMode,
+    selectableKinds,
+    selectionOperation = 'replace',
     activeTool,
     polygonEditMode,
     selectedTargets,
@@ -467,6 +485,10 @@ export function HallViewer(props: HallViewerProps) {
   useEffect(() => {
     function cancelOnEscape(event: globalThis.KeyboardEvent) {
       if (event.key !== 'Escape') return;
+      const hadGesture =
+        intentRef.current !== null ||
+        pinchRef.current !== null ||
+        pointersRef.current.size > 0;
       flushPendingPan();
       cancel();
       setMovingKeys(new Set());
@@ -474,10 +496,14 @@ export function HallViewer(props: HallViewerProps) {
       pointersRef.current.clear();
       setRenderIntent(null);
       pinchRef.current = null;
+      if (!hadGesture && viewerMode === 'selection') {
+        setLocalSelection([]);
+        onSelectionChange?.([]);
+      }
     }
     document.addEventListener('keydown', cancelOnEscape);
     return () => document.removeEventListener('keydown', cancelOnEscape);
-  }, [cancel, flushPendingPan]);
+  }, [cancel, flushPendingPan, onSelectionChange, viewerMode]);
 
   useEffect(() => {
     const isInteractiveTarget = (target: EventTarget | null) =>
@@ -647,6 +673,14 @@ export function HallViewer(props: HallViewerProps) {
         ? 'pick'
         : 'edit');
   const editorMode = interactionMode === 'edit';
+  const selectionMode = interactionMode === 'selection';
+  const effectiveSelectableKinds = selectionMode
+    ? (selectableKinds ?? defaultSelectionKinds)
+    : selectableKinds;
+  const selectionKinds =
+    selectionMode && effectiveSelectableKinds !== undefined
+      ? new Set(effectiveSelectableKinds)
+      : undefined;
   const authoringMode = editorMode;
   const handles =
     editorMode && activeTool === 'select' && onHandleCommit
@@ -818,11 +852,15 @@ export function HallViewer(props: HallViewerProps) {
       : [];
   const showSeats =
     interactionMode === 'edit' ||
+    selectionMode ||
     scene.seats.some(
       (seat) => seatLevelOfDetail(viewport.scale, seat.visualKind) !== 'dot',
     );
-  const hitTestKinds =
-    showSeats || interactionMode === 'pick' ? undefined : farZoomTargets;
+  const hitTestKinds = selectionMode
+    ? selectionKinds
+    : showSeats || interactionMode === 'pick'
+      ? undefined
+      : farZoomTargets;
   const visibleLabels = useMemo(
     () =>
       hideSeatShapes
@@ -1028,6 +1066,7 @@ export function HallViewer(props: HallViewerProps) {
         ? clickedSeat.placement.rowId
         : null;
     const parentRowTarget =
+      !selectionMode &&
       clickedSeatRowId &&
       (native.altKey ||
         (selectedKeys.has(`row:${clickedSeatRowId}`) &&
@@ -1085,12 +1124,15 @@ export function HallViewer(props: HallViewerProps) {
       meta: native.metaKey,
     };
     const box =
-      interactionMode === 'edit' &&
-      activeTool === 'select' &&
+      ((selectionMode && effectiveSelectableKinds?.includes('seat')) ||
+        (interactionMode === 'edit' && activeTool === 'select')) &&
+      tool === 'select' &&
       !pan &&
       !handle &&
-      shouldStartBoxSelection(target, Boolean(selected), modifiers.shift);
+      (selectionMode ||
+        shouldStartBoxSelection(target, Boolean(selected), modifiers.shift));
     const edit =
+      interactionMode === 'edit' &&
       !handle &&
       !box &&
       !pan &&
@@ -1141,6 +1183,7 @@ export function HallViewer(props: HallViewerProps) {
           scene,
           screenToWorld(getViewport(), point),
           3 / getViewport().scale,
+          hitTestKinds,
         ),
       );
     }
@@ -1155,6 +1198,7 @@ export function HallViewer(props: HallViewerProps) {
           scene,
           screenToWorld(getViewport(), point),
           3 / getViewport().scale,
+          hitTestKinds,
         ),
       );
     }
@@ -1257,23 +1301,24 @@ export function HallViewer(props: HallViewerProps) {
           maxX: Math.max(result.startWorld.x, end.x),
           maxY: Math.max(result.startWorld.y, end.y),
         };
-        const picked = boxSelectedTargets(scene, bounds);
+        const picked = selectionMode
+          ? boxSelectedTargetsForSelection(
+              scene,
+              bounds,
+              effectiveSelectableKinds ?? defaultSelectionKinds,
+            )
+          : boxSelectedTargets(scene, bounds);
         const additive =
           intent.modifiers.shift ||
           intent.modifiers.ctrl ||
           intent.modifiers.meta;
-        const keys = new Set(
-          selection.map((target) => `${target.kind}:${target.id}`),
-        );
         handleSelection(
-          additive
-            ? [
-                ...selection,
-                ...picked.filter(
-                  (target) => !keys.has(`${target.kind}:${target.id}`),
-                ),
-              ]
-            : picked,
+          mergeBoxSelection(
+            selection,
+            picked,
+            additive ? 'add' : selectionOperation,
+            selectionMode ? effectiveSelectableKinds : undefined,
+          ),
         );
         return;
       }
@@ -1302,7 +1347,14 @@ export function HallViewer(props: HallViewerProps) {
       return;
     }
     if (!intent.target) {
-      handleSelection([]);
+      handleSelection(
+        clickSelection(
+          selection,
+          null,
+          selectionOperation,
+          selectionMode ? effectiveSelectableKinds : undefined,
+        ),
+      );
       return;
     }
     if (
@@ -1310,13 +1362,24 @@ export function HallViewer(props: HallViewerProps) {
       intent.modifiers.ctrl ||
       intent.modifiers.meta
     ) {
-      const key = `${intent.target.kind}:${intent.target.id}`;
       handleSelection(
-        selectedKeys.has(key)
-          ? selection.filter((item) => `${item.kind}:${item.id}` !== key)
-          : [...selection, intent.target],
+        clickSelection(
+          selection,
+          intent.target,
+          'toggle',
+          selectionMode ? effectiveSelectableKinds : undefined,
+        ),
       );
-    } else handleSelection([intent.target]);
+    } else {
+      handleSelection(
+        clickSelection(
+          selection,
+          intent.target,
+          selectionOperation,
+          selectionMode ? effectiveSelectableKinds : undefined,
+        ),
+      );
+    }
   }
 
   function handlePointerCancel(native: PointerEvent) {
@@ -1684,6 +1747,25 @@ export function HallViewer(props: HallViewerProps) {
           </button>
         )}
 
+        {selectionMode && (
+          <>
+            <button
+              type="button"
+              aria-pressed={tool === 'select'}
+              onClick={() => setLocalTool('select')}
+            >
+              {ui.select}
+            </button>
+            <button
+              type="button"
+              aria-pressed={tool === 'pan'}
+              onClick={() => setLocalTool('pan')}
+            >
+              {ui.pan}
+            </button>
+          </>
+        )}
+
         {interactionMode === 'view' && (
           <button
             type="button"
@@ -1893,31 +1975,40 @@ export function HallViewer(props: HallViewerProps) {
               {rendered.zones.map(({ zone, bounds }) =>
                 previewNode(
                   `zone:${zone.id}`,
-                  zone.polygon ? (
-                    <Line
-                      key={zone.id}
-                      points={zone.polygon.flatMap((point) => [
-                        point.x,
-                        point.y,
-                      ])}
-                      closed
-                      fill={palette.zone}
-                      stroke={palette.zoneStroke}
-                      strokeWidth={0.12}
-                    />
-                  ) : (
-                    <Rect
-                      key={zone.id}
-                      x={bounds.minX}
-                      y={bounds.minY}
-                      width={bounds.maxX - bounds.minX}
-                      height={bounds.maxY - bounds.minY}
-                      fill={palette.zone}
-                      stroke={palette.zoneStroke}
-                      strokeWidth={0.12}
-                      cornerRadius={0.8}
-                    />
-                  ),
+                  (() => {
+                    const appearance = zoneAppearance?.[zone.id];
+                    const opacity = Math.max(
+                      0,
+                      Math.min(1, appearance?.opacity ?? 1),
+                    );
+                    return zone.polygon ? (
+                      <Line
+                        key={zone.id}
+                        points={zone.polygon.flatMap((point) => [
+                          point.x,
+                          point.y,
+                        ])}
+                        closed
+                        fill={appearance?.fill ?? palette.zone}
+                        stroke={appearance?.stroke ?? palette.zoneStroke}
+                        strokeWidth={0.12}
+                        opacity={opacity}
+                      />
+                    ) : (
+                      <Rect
+                        key={zone.id}
+                        x={bounds.minX}
+                        y={bounds.minY}
+                        width={bounds.maxX - bounds.minX}
+                        height={bounds.maxY - bounds.minY}
+                        fill={appearance?.fill ?? palette.zone}
+                        stroke={appearance?.stroke ?? palette.zoneStroke}
+                        strokeWidth={0.12}
+                        cornerRadius={0.8}
+                        opacity={opacity}
+                      />
+                    );
+                  })(),
                 ),
               )}
               {rendered.zones.map(({ zone, bounds }) =>

@@ -101,6 +101,23 @@ describe('SeatView', () => {
     expect(viewer.getAttribute('data-active-tool')).toBeNull();
   });
 
+  it('can disable purchase while keeping the buyer price preview selectable', () => {
+    render(
+      <SeatView
+        layout={layout}
+        occurrenceId="preview-only"
+        availability={availability}
+        prices={prices}
+        selection={[{ kind: 'seat', seatId: first.id }]}
+        purchaseDisabled
+        onSelectionChange={() => undefined}
+        onBuyClick={() => undefined}
+      />,
+    );
+
+    expect((screen.getByRole('button', { name: 'Купить' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('limits a large seat list while preserving search and keyboard navigation', () => {
     const seatPrice = prices.seats[first.id];
     if (!seatPrice) throw new Error('Missing seat price');

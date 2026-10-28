@@ -155,3 +155,70 @@ function EditorHost() {
 схему малого театра из fixture через публичный импорт `@hall-platform/seat-view`.
 Запуск: `pnpm nx serve embed`; сборка: `pnpm nx build embed`. Демо checkout
 только показывает переданную selection и не выполняет бронирование.
+
+## Ценовые сегменты
+
+`@hall-platform/pricing-editor` — контролируемый административный компонент.
+Host загружает read-only каталог сегментов и документ назначений для конкретных
+`occurrenceId` и `layoutVersionId`, хранит черновик и отправляет его на сервер.
+Пакет не создаёт сегменты, не меняет схему и не считает серверную цену.
+
+```tsx
+import { useState } from 'react';
+import type { PricingAssignmentDocument, PricingCatalog } from '@hall-platform/domain';
+import { PricingEditor, type PublishedPricingLayout } from '@hall-platform/pricing-editor';
+import '@hall-platform/design-tokens/styles.css';
+import '@hall-platform/pricing-editor/styles.css';
+
+type Props = {
+  layout: PublishedPricingLayout;
+  catalog: PricingCatalog;
+  initialDocument: PricingAssignmentDocument;
+  savePricing: (document: PricingAssignmentDocument) => Promise<PricingAssignmentDocument>;
+};
+
+function PricingHost({ layout, catalog, initialDocument, savePricing }: Props) {
+  const [document, setDocument] = useState<PricingAssignmentDocument>(initialDocument);
+  return (
+    <PricingEditor
+      layout={layout}
+      catalog={catalog}
+      value={document}
+      onChange={(next) => setDocument(next)}
+      onSave={async (next) => {
+        // savePricing validates and retains body/key if the network outcome is unknown.
+        const saved = await savePricing(next);
+        // Replace the draft with the server response, including its new revision.
+        setDocument(saved);
+      }}
+    />
+  );
+}
+```
+
+Назначение seated-зоне полностью заменяет сегменты всех мест, найденных по
+связям и точной геометрии; после этого отдельные места можно переназначить.
+Последняя явная команда для пересекающихся зон определяет общий сегмент.
+GA-зона получает одну цену за билет и сохраняет capacity из схемы. Если в GA
+найдены места, назначение блокируется. Для непривязанных объектов цена
+отсутствует: они не считаются бесплатными.
+
+Для чернового отображения `createPricingPreviewPriceMap` преобразует только
+проверенные назначения в карту `SeatView`; передайте её с `purchaseDisabled`,
+чтобы отключить удержания и заказы. При реальной продаже отображайте цены из
+ответа API, а итог и доступность подтверждайте через серверный hold.
+
+API-режим Studio использует административные маршруты
+`GET /api/v1/occurrences/{id}/pricing-segments`,
+`GET /api/v1/occurrences/{id}/pricing-assignments` и атомарный
+`PUT /api/v1/occurrences/{id}/pricing-assignments`. В PUT передаются только
+контекст, segment IDs и метаданные версии; revision защищает от конкурентной
+записи, а `Idempotency-Key` должен сохраняться при повторе того же запроса.
+OpenAPI и клиентский контракт находятся в `libs/api-contracts` и
+`libs/api-axios`. Backend в этом репозитории не реализован, поэтому перед
+production-подключением требуется сверить статусы, auth, revisions, фактические
+цены и сохранность котировок holds/orders с серверной командой.
+
+Flutter-приложения и React WebView используют тот же backend occurrence,
+availability, цены и hold/order API. Они не используют этот React pricing editor
+и не должны принимать локальный preview за подтверждённую цену.

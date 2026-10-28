@@ -1246,6 +1246,497 @@
         }
       }
     },
+    "/api/v1/occurrences/{id}/pricing-segments": {
+      "get": {
+        "operationId": "getPricingSegments",
+        "summary": "Read the managed pricing segment catalog for one occurrence",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only pricing catalog for the selected occurrence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingCatalog"
+                },
+                "examples": {
+                  "activeAndArchivedSegments": {
+                    "summary": "Stable IDs, active and archived segments, minor-unit prices",
+                    "value": {
+                      "apiVersion": "v1",
+                      "occurrenceId": "concert-2026-10-28",
+                      "revision": 9,
+                      "items": [
+                        {
+                          "id": "segment-standard",
+                          "name": "Стандарт",
+                          "color": "#2b7b68",
+                          "status": "active",
+                          "price": {
+                            "amountMinor": 125000,
+                            "currency": "RUB"
+                          }
+                        },
+                        {
+                          "id": "segment-vip",
+                          "name": "VIP",
+                          "color": "#784fa3",
+                          "status": "active",
+                          "price": {
+                            "amountMinor": 250000,
+                            "currency": "RUB"
+                          }
+                        },
+                        {
+                          "id": "segment-standing",
+                          "name": "Танцпол",
+                          "color": "#bd8424",
+                          "status": "active",
+                          "price": {
+                            "amountMinor": 90000,
+                            "currency": "RUB"
+                          }
+                        },
+                        {
+                          "id": "segment-retired",
+                          "name": "Старый тариф",
+                          "color": "#7a838f",
+                          "status": "archived",
+                          "price": {
+                            "amountMinor": 0,
+                            "currency": "RUB"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/occurrences/{id}/pricing-assignments": {
+      "get": {
+        "operationId": "getPricingAssignments",
+        "summary": "Read saved price assignments for an occurrence and published layout version",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved segment IDs for the occurrence and published layout version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingAssignments"
+                },
+                "examples": {
+                  "emptyAssignments": {
+                    "summary": "No segments are assigned yet",
+                    "value": {
+                      "apiVersion": "v1",
+                      "schemaVersion": 1,
+                      "occurrenceId": "concert-2026-10-28",
+                      "layoutVersionId": "hall-layout-v3",
+                      "revision": 2,
+                      "catalogRevision": 9,
+                      "assignments": {
+                        "seatSegments": {},
+                        "gaZoneSegments": {}
+                      }
+                    }
+                  },
+                  "mixedSeatedZone": {
+                    "summary": "A seated zone with a manual VIP override",
+                    "value": {
+                      "apiVersion": "v1",
+                      "schemaVersion": 1,
+                      "occurrenceId": "concert-2026-10-28",
+                      "layoutVersionId": "hall-layout-v3",
+                      "revision": 3,
+                      "catalogRevision": 9,
+                      "assignments": {
+                        "seatSegments": {
+                          "seat-parterre-1": "segment-standard",
+                          "seat-parterre-2": "segment-vip"
+                        },
+                        "gaZoneSegments": {}
+                      }
+                    }
+                  },
+                  "generalAdmissionZone": {
+                    "summary": "A GA zone has one segment ID; capacity remains on the layout",
+                    "value": {
+                      "apiVersion": "v1",
+                      "schemaVersion": 1,
+                      "occurrenceId": "concert-2026-10-28",
+                      "layoutVersionId": "hall-layout-v3",
+                      "revision": 4,
+                      "catalogRevision": 9,
+                      "assignments": {
+                        "seatSegments": {},
+                        "gaZoneSegments": {
+                          "zone-dance-floor": "segment-standing"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The occurrence no longer uses the published layout referenced by the assignments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "layoutChanged": {
+                    "summary": "Assignments target another published layout version",
+                    "value": {
+                      "apiVersion": "v1",
+                      "code": "layout_version_conflict",
+                      "message": "Published layout version changed."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "savePricingAssignments",
+        "summary": "Atomically replace occurrence pricing assignments",
+        "description": "The backend validates occurrence and published-layout context, active catalog segment IDs, target IDs and GA zone kinds, and the catalog currency. It replaces the full assignment maps atomically only when If-Match and Idempotency-Key are accepted. A seated zone is expanded to explicit seat IDs by the client; GA capacity remains in the published layout. HTTP 400 reports invalid assignments, HTTP 409 reports revision/catalog/layout/idempotency conflicts, and HTTP 503 reports a possibly unknown mutation outcome that must be retried with the same body and key.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingAssignmentsWrite"
+              },
+              "examples": {
+                "emptyAssignments": {
+                  "summary": "Save an empty assignment map",
+                  "value": {
+                    "apiVersion": "v1",
+                    "schemaVersion": 1,
+                    "occurrenceId": "concert-2026-10-28",
+                    "layoutVersionId": "hall-layout-v3",
+                    "catalogRevision": 9,
+                    "assignments": {
+                      "seatSegments": {},
+                      "gaZoneSegments": {}
+                    }
+                  }
+                },
+                "mixedSeatedZone": {
+                  "summary": "Save a zone assignment with an explicit manual seat override",
+                  "value": {
+                    "apiVersion": "v1",
+                    "schemaVersion": 1,
+                    "occurrenceId": "concert-2026-10-28",
+                    "layoutVersionId": "hall-layout-v3",
+                    "catalogRevision": 9,
+                    "assignments": {
+                      "seatSegments": {
+                        "seat-parterre-1": "segment-standard",
+                        "seat-parterre-2": "segment-vip"
+                      },
+                      "gaZoneSegments": {}
+                    }
+                  }
+                },
+                "generalAdmissionZone": {
+                  "summary": "Save a GA segment without changing layout capacity",
+                  "value": {
+                    "apiVersion": "v1",
+                    "schemaVersion": 1,
+                    "occurrenceId": "concert-2026-10-28",
+                    "layoutVersionId": "hall-layout-v3",
+                    "catalogRevision": 9,
+                    "assignments": {
+                      "seatSegments": {},
+                      "gaZoneSegments": {
+                        "zone-dance-floor": "segment-standing"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The server-accepted assignments and new revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingAssignments"
+                },
+                "examples": {
+                  "emptyAssignments": {
+                    "summary": "No segments are assigned yet",
+                    "value": {
+                      "apiVersion": "v1",
+                      "schemaVersion": 1,
+                      "occurrenceId": "concert-2026-10-28",
+                      "layoutVersionId": "hall-layout-v3",
+                      "revision": 2,
+                      "catalogRevision": 9,
+                      "assignments": {
+                        "seatSegments": {},
+                        "gaZoneSegments": {}
+                      }
+                    }
+                  },
+                  "mixedSeatedZone": {
+                    "summary": "A seated zone with a manual VIP override",
+                    "value": {
+                      "apiVersion": "v1",
+                      "schemaVersion": 1,
+                      "occurrenceId": "concert-2026-10-28",
+                      "layoutVersionId": "hall-layout-v3",
+                      "revision": 3,
+                      "catalogRevision": 9,
+                      "assignments": {
+                        "seatSegments": {
+                          "seat-parterre-1": "segment-standard",
+                          "seat-parterre-2": "segment-vip"
+                        },
+                        "gaZoneSegments": {}
+                      }
+                    }
+                  },
+                  "generalAdmissionZone": {
+                    "summary": "A GA zone has one segment ID; capacity remains on the layout",
+                    "value": {
+                      "apiVersion": "v1",
+                      "schemaVersion": 1,
+                      "occurrenceId": "concert-2026-10-28",
+                      "layoutVersionId": "hall-layout-v3",
+                      "revision": 4,
+                      "catalogRevision": 9,
+                      "assignments": {
+                        "seatSegments": {},
+                        "gaZoneSegments": {
+                          "zone-dance-floor": "segment-standing"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid assignment or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalidTarget": {
+                    "summary": "A target is invalid for pricing",
+                    "value": {
+                      "apiVersion": "v1",
+                      "code": "invalid_pricing_assignment",
+                      "message": "One or more assignments are invalid.",
+                      "issues": [
+                        {
+                          "severity": "error",
+                          "code": "not_ga_zone",
+                          "message": "Zone is not GA.",
+                          "targetId": "zone-parterre"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Occurrence not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision, catalog, layout, or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "catalogChanged": {
+                    "summary": "The catalog revision no longer matches",
+                    "value": {
+                      "apiVersion": "v1",
+                      "code": "pricing_catalog_conflict",
+                      "message": "Pricing catalog changed; reload and review it."
+                    }
+                  },
+                  "layoutChanged": {
+                    "summary": "Assignments target another published layout version",
+                    "value": {
+                      "apiVersion": "v1",
+                      "code": "layout_version_conflict",
+                      "message": "Published layout version changed."
+                    }
+                  },
+                  "invalidTarget": {
+                    "summary": "A target is invalid for pricing",
+                    "value": {
+                      "apiVersion": "v1",
+                      "code": "invalid_pricing_assignment",
+                      "message": "One or more assignments are invalid.",
+                      "issues": [
+                        {
+                          "severity": "error",
+                          "code": "not_ga_zone",
+                          "message": "Zone is not GA.",
+                          "targetId": "zone-parterre"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Mutation outcome may be unknown; retry the exact request with the same Idempotency-Key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/occurrences/{id}/holds": {
       "post": {
         "operationId": "createHold",
@@ -8571,6 +9062,234 @@
         ],
         "additionalProperties": false
       },
+      "PricingCatalog": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "apiVersion": {
+            "type": "string",
+            "const": "v1"
+          },
+          "occurrenceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "color": {
+                  "type": "string",
+                  "pattern": "^#[\\da-fA-F]{6}$"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "active",
+                    "archived"
+                  ]
+                },
+                "price": {
+                  "type": "object",
+                  "properties": {
+                    "amountMinor": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "currency": {
+                      "type": "string",
+                      "pattern": "^[A-Z]{3}$",
+                      "description": "ISO 4217 currency code"
+                    }
+                  },
+                  "required": [
+                    "amountMinor",
+                    "currency"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "color",
+                "status",
+                "price"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "apiVersion",
+          "occurrenceId",
+          "revision",
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "PricingAssignments": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "apiVersion": {
+            "type": "string",
+            "const": "v1"
+          },
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "occurrenceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "layoutVersionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "catalogRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "assignments": {
+            "type": "object",
+            "properties": {
+              "seatSegments": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "gaZoneSegments": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "seatSegments",
+              "gaZoneSegments"
+            ],
+            "additionalProperties": false
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "apiVersion",
+          "schemaVersion",
+          "occurrenceId",
+          "layoutVersionId",
+          "catalogRevision",
+          "assignments",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "PricingAssignmentsWrite": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "apiVersion": {
+            "type": "string",
+            "const": "v1"
+          },
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "occurrenceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "layoutVersionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "catalogRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "assignments": {
+            "type": "object",
+            "properties": {
+              "seatSegments": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "gaZoneSegments": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "seatSegments",
+              "gaZoneSegments"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "apiVersion",
+          "schemaVersion",
+          "occurrenceId",
+          "layoutVersionId",
+          "catalogRevision",
+          "assignments"
+        ],
+        "additionalProperties": false
+      },
       "Occurrence": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -11907,7 +12626,10 @@
               "idempotency_conflict",
               "hold_expired",
               "rate_limited",
-              "service_unavailable"
+              "service_unavailable",
+              "pricing_catalog_conflict",
+              "layout_version_conflict",
+              "invalid_pricing_assignment"
             ]
           },
           "message": {
@@ -11923,6 +12645,40 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "error",
+                    "warning"
+                  ]
+                },
+                "code": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "targetId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "severity",
+                "code",
+                "message"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [

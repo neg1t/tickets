@@ -22,6 +22,9 @@ import {
   apiPublishedLayoutSchema,
   apiSeatAvailabilitySchema,
   apiSeatPricesSchema,
+  apiPricingCatalogSchema,
+  apiPricingAssignmentsSchema,
+  apiPricingAssignmentsWriteSchema,
   type ApiAssetUploadRequest,
   type ApiHallRecord,
   type ApiHallSummary,
@@ -30,6 +33,10 @@ import {
   type ApiOrder,
   type ApiPublishedVersion,
   type ApiSeatSelection,
+  type ApiPricingCatalog,
+  type ApiPricingAssignments,
+  type ApiPricingAssignmentsWrite,
+  type ApiError,
 } from '@hall-platform/api-contracts';
 
 export class HallApiError extends Error {
@@ -37,6 +44,7 @@ export class HallApiError extends Error {
     public readonly code: string,
     message: string,
     public readonly currentRevision?: number,
+    public readonly issues?: ApiError['issues'],
   ) {
     super(message);
     this.name = 'HallApiError';
@@ -67,6 +75,7 @@ function apiFailure(error: unknown): HallApiError {
         parsed.data.code,
         parsed.data.message,
         parsed.data.currentRevision,
+        parsed.data.issues,
       );
     return new HallApiError(
       error.response ? 'http_error' : 'network_error',
@@ -256,6 +265,53 @@ export function createHallApiClient(options: HallApiClientOptions) {
       return request({ method: 'GET', url: `/api/v1/occurrences/${encodeURIComponent(id)}/prices`,
         ...(signal ? { signal } : {}),
       }, apiSeatPricesSchema);
+    },
+    async getPricingSegments(id: string, signal?: AbortSignal): Promise<ApiPricingCatalog> {
+      const catalog = await request({
+        method: 'GET',
+        url: `/api/v1/occurrences/${encodeURIComponent(id)}/pricing-segments`,
+        ...(signal ? { signal } : {}),
+      }, apiPricingCatalogSchema);
+      if (catalog.occurrenceId !== id)
+        throw new HallApiError('invalid_response', 'Pricing catalog occurrence does not match the request');
+      return catalog;
+    },
+    async getPricingAssignments(id: string, signal?: AbortSignal): Promise<ApiPricingAssignments> {
+      const assignments = await request({
+        method: 'GET',
+        url: `/api/v1/occurrences/${encodeURIComponent(id)}/pricing-assignments`,
+        ...(signal ? { signal } : {}),
+      }, apiPricingAssignmentsSchema);
+      if (assignments.occurrenceId !== id)
+        throw new HallApiError('invalid_response', 'Pricing assignments occurrence does not match the request');
+      return assignments;
+    },
+    async savePricingAssignments(
+      id: string,
+      body: ApiPricingAssignmentsWrite,
+      expectedRevision: number,
+      idempotencyKey: string,
+      signal?: AbortSignal,
+    ): Promise<ApiPricingAssignments> {
+      input(apiIdempotencyKeySchema, idempotencyKey);
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
+        throw new HallApiError('invalid_request', 'Invalid expected revision');
+      const checkedBody = input(apiPricingAssignmentsWriteSchema, body);
+      if (checkedBody.occurrenceId !== id)
+        throw new HallApiError('invalid_request', 'Pricing assignments occurrence does not match the request');
+      const assignments = await request({
+        method: 'PUT',
+        url: `/api/v1/occurrences/${encodeURIComponent(id)}/pricing-assignments`,
+        headers: {
+          'If-Match': `"${expectedRevision}"`,
+          'Idempotency-Key': idempotencyKey,
+        },
+        data: checkedBody,
+        ...(signal ? { signal } : {}),
+      }, apiPricingAssignmentsSchema);
+      if (assignments.occurrenceId !== id)
+        throw new HallApiError('invalid_response', 'Pricing assignments occurrence does not match the request');
+      return assignments;
     },
     async listOccurrences(signal?: AbortSignal): Promise<ApiOccurrence[]> {
       const result = await request({ method: 'GET', url: '/api/v1/occurrences',

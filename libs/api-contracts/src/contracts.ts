@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   hallLayoutDraftSchema,
   layoutSnapshotSchema,
+  pricingMoneySchema,
   seatStatusSchema,
 } from '@hall-platform/domain';
 
@@ -10,12 +11,7 @@ export const apiIdempotencyKeySchema = z.string().min(1).max(128).regex(/^[A-Za-
 const idSchema = z.string().min(1).max(200).refine((id) => id.trim() === id);
 const revisionSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const dateTimeSchema = z.iso.datetime({ offset: true });
-const currencyCodes = new Set(Intl.supportedValuesOf('currency'));
-
-export const apiMoneySchema = z.strictObject({
-  amountMinor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-  currency: z.string().regex(/^[A-Z]{3}$/).refine((code) => currencyCodes.has(code)).describe('ISO 4217 currency code'),
-});
+export const apiMoneySchema = pricingMoneySchema;
 export type ApiMoney = z.infer<typeof apiMoneySchema>;
 
 export const apiHallSummarySchema = z.strictObject({
@@ -211,9 +207,17 @@ export const apiErrorSchema = z.strictObject({
     'validation_failed', 'unauthorized', 'forbidden', 'not_found',
     'revision_conflict', 'availability_conflict', 'idempotency_conflict',
     'hold_expired', 'rate_limited', 'service_unavailable',
+    'pricing_catalog_conflict', 'layout_version_conflict',
+    'invalid_pricing_assignment',
   ]),
   message: z.string().min(1),
   currentRevision: revisionSchema.optional(),
   retryAfterMs: revisionSchema.optional(),
+  issues: z.array(z.strictObject({
+    severity: z.enum(['error', 'warning']),
+    code: z.string().min(1),
+    message: z.string().min(1),
+    targetId: idSchema.optional(),
+  })).optional(),
 });
 export type ApiError = z.infer<typeof apiErrorSchema>;

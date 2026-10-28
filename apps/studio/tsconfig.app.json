@@ -40,19 +40,28 @@
       "path": "../../libs/seat-view/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/renderer-konva/tsconfig.lib.json"
+      "path": "../../libs/renderer-webgl/tsconfig.lib.json"
     },
     {
       "path": "../../libs/renderer-core/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/renderer-webgl/tsconfig.lib.json"
+      "path": "../../libs/renderer-konva/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/pricing-editor/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/local-storage/tsconfig.lib.json"
     },
     {
       "path": "../../libs/hall-viewer/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/local-storage/tsconfig.lib.json"
+      "path": "../../libs/fixtures/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/domain/tsconfig.lib.json"
     },
     {
       "path": "../../libs/hall-editor/tsconfig.lib.json"
@@ -62,12 +71,6 @@
     },
     {
       "path": "../../libs/api-axios/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/fixtures/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/domain/tsconfig.lib.json"
     }
   ]
 }

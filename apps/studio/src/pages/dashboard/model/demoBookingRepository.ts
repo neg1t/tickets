@@ -1,13 +1,29 @@
 import type { SeatSelectionItem } from '@hall-platform/seat-view';
-import { layoutSnapshotSchema, seatStatusSchema } from '@hall-platform/domain';
+import {
+  layoutSnapshotSchema,
+  pricingAssignmentDocumentSchema,
+  seatStatusSchema,
+  type PricingAssignmentDocument,
+  type PricingCatalog,
+} from '@hall-platform/domain';
 import {
   cancelDemoHold,
   confirmDemoHold,
+  demoPriceQuoteSchema,
   holdDemoSelection,
   type DemoOccurrence,
 } from './demoBooking.js';
+import {
+  demoPricingAssignmentRecordSchema,
+  demoPricingRecoveryRecordSchema,
+  type DemoPricingAssignmentRecord,
+  type DemoPricingRecoveryRecord,
+  buildDemoPricingPrices,
+} from './demoPricing.js';
+import {
+  demoBookingTransaction,
+} from '../../../shared/storage/demoBookingDatabase.js';
 
-const databaseName = 'hall-platform-demo-booking';
 const ownerKey = 'hall-platform-demo-booking-owner';
 const changeKey = 'hall-platform-demo-booking-change';
 let fallbackOwnerId: string | null = null;
@@ -31,10 +47,10 @@ function isSelection(value: unknown): boolean {
   );
 }
 
-function readOccurrence(value: unknown): DemoOccurrence | null {
+export function parseDemoOccurrence(value: unknown): DemoOccurrence | null {
   if (
     !isRecord(value) ||
-    (value.schemaVersion !== undefined && value.schemaVersion !== 1)
+    (value.schemaVersion !== undefined && value.schemaVersion !== 1 && value.schemaVersion !== 2)
   )
     return null;
   if (
@@ -74,27 +90,61 @@ function readOccurrence(value: unknown): DemoOccurrence | null {
     !Object.values(value.prices.zones).every(validPrice)
   )
     return null;
+  const version = value.schemaVersion === 2 ? 2 : 1;
   if (
-    !value.holds.every(
+    !value.holds.every((hold: unknown) => {
+      if (
+        !isRecord(hold) ||
+        typeof hold.id !== 'string' ||
+        !Number.isFinite(hold.expiresAt) ||
+        !isSelection(hold.selection) ||
+        (hold.ownerId !== undefined && typeof hold.ownerId !== 'string')
+      ) return false;
+      return version === 1 || demoPriceQuoteSchema.safeParse(hold.quote).success;
+    })
+  )
+    return null;
+  if (
+    !value.orders.every((order: unknown) => {
+      if (
+        !isRecord(order) ||
+        typeof order.id !== 'string' ||
+        !Number.isFinite(order.confirmedAt) ||
+        !isSelection(order.selection)
+      ) return false;
+      return version === 1 || order.quote === null || demoPriceQuoteSchema.safeParse(order.quote).success;
+    })
+  )
+    return null;
+  const legacyActiveHold =
+    version === 1 &&
+    value.holds.some(
       (hold: unknown) =>
         isRecord(hold) &&
-        typeof hold.id === 'string' &&
-        Number.isFinite(hold.expiresAt) &&
-        isSelection(hold.selection),
-    )
-  )
-    return null;
-  if (
-    !value.orders.every(
-      (order: unknown) =>
-        isRecord(order) &&
-        typeof order.id === 'string' &&
-        Number.isFinite(order.confirmedAt) &&
-        isSelection(order.selection),
-    )
-  )
-    return null;
-  return value as DemoOccurrence;
+        typeof hold.expiresAt === 'number' &&
+        hold.expiresAt > Date.now() &&
+        !demoPriceQuoteSchema.safeParse(hold.quote).success,
+    );
+  const holds = value.holds.flatMap((hold: unknown) => {
+    if (!isRecord(hold)) return [];
+    const quote = demoPriceQuoteSchema.safeParse(hold.quote);
+    if (!quote.success) return [];
+    return [{ ...hold, quote: quote.data }];
+  });
+  const orders = value.orders.map((order: unknown) => {
+    if (!isRecord(order)) return order;
+    const quote = demoPriceQuoteSchema.safeParse(order.quote);
+    return { ...order, quote: quote.success ? quote.data : null };
+  });
+  return {
+    ...value,
+    schemaVersion: 2,
+    holds,
+    orders,
+    ...((value.legacyQuoteNotice === true || legacyActiveHold)
+      ? { legacyQuoteNotice: true }
+      : {}),
+  } as DemoOccurrence;
 }
 
 export function getDemoOwnerId(): string {
@@ -160,19 +210,6 @@ export function subscribeToDemoChanges(
   };
 }
 
-function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(databaseName, 1);
-    request.onupgradeneeded = () => {
-      request.result.createObjectStore('occurrences', { keyPath: 'id' });
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-    request.onblocked = () =>
-      reject(new Error('Хранилище бронирований занято другой вкладкой'));
-  });
-}
-
 async function transactionResult<T>(
   mode: IDBTransactionMode,
   operation: (
@@ -181,71 +218,49 @@ async function transactionResult<T>(
     rejectValue: (error: Error) => void,
   ) => void,
 ): Promise<T> {
-  const database = await openDatabase();
-  return new Promise<T>((resolve, reject) => {
-    const transaction = database.transaction('occurrences', mode);
-    const store = transaction.objectStore('occurrences');
-    let value: T;
-    let failure: Error | null = null;
-    transaction.oncomplete = () => {
-      database.close();
-      resolve(value);
-    };
-    transaction.onabort = () => {
-      database.close();
-      reject(
-        failure ??
-          transaction.error ??
-          new Error('Локальное бронирование не сохранено'),
-      );
-    };
-    transaction.onerror = () => {
-      failure ??= transaction.error;
-    };
-    try {
-      operation(
-        store,
-        (result) => {
-          value = result;
-        },
-        (error) => {
-          failure = error;
-          transaction.abort();
-        },
-      );
-    } catch (error) {
-      failure = error instanceof Error ? error : new Error(String(error));
-      transaction.abort();
-    }
-  });
+  return demoBookingTransaction(['occurrences'], mode, (transaction, resolve, reject) =>
+    operation(transaction.objectStore('occurrences'), resolve, reject),
+  );
 }
 
 export const demoBookingRepository = {
   list: () =>
-    transactionResult<DemoOccurrence[]>('readonly', (store, resolveValue) => {
+    transactionResult<DemoOccurrence[]>('readwrite', (store, resolveValue) => {
       const request = store.getAll();
-      request.onsuccess = () =>
-        resolveValue(
-          request.result
-            .map(readOccurrence)
-            .filter((item): item is DemoOccurrence => item !== null),
-        );
+      request.onsuccess = () => {
+        const occurrences = request.result
+          .map(parseDemoOccurrence)
+          .filter((item): item is DemoOccurrence => item !== null);
+        for (const occurrence of occurrences) {
+          const stored = request.result.find(
+            (candidate: unknown) => isRecord(candidate) && candidate.id === occurrence.id,
+          );
+          if (isRecord(stored) && stored.schemaVersion !== 2)
+            store.put(occurrence);
+        }
+        resolveValue(occurrences);
+      };
     }),
   get: (id: string) =>
     transactionResult<DemoOccurrence | null>(
-      'readonly',
+      'readwrite',
       (store, resolveValue) => {
         const request = store.get(id);
-        request.onsuccess = () => resolveValue(readOccurrence(request.result));
+        request.onsuccess = () => {
+          const occurrence = parseDemoOccurrence(request.result);
+          if (occurrence && isRecord(request.result) && request.result.schemaVersion !== 2)
+            store.put(occurrence);
+          resolveValue(occurrence);
+        };
       },
     ),
   ensure: (occurrence: DemoOccurrence) =>
     transactionResult<DemoOccurrence>('readwrite', (store, resolveValue) => {
       const request = store.get(occurrence.id);
       request.onsuccess = () => {
-        const result = readOccurrence(request.result) ?? occurrence;
-        if (!readOccurrence(request.result))
-          store.put({ ...result, schemaVersion: 1 });
+        const result = parseDemoOccurrence(request.result) ?? occurrence;
+        if (!isRecord(request.result) || request.result.schemaVersion !== 2)
+          store.put(result);
         resolveValue(result);
       };
     }),
@@ -258,15 +273,17 @@ export const demoBookingRepository = {
       (store, resolveValue, rejectValue) => {
         const request = store.get(id);
         request.onsuccess = () => {
-          const current = readOccurrence(request.result);
+          const current = parseDemoOccurrence(request.result);
           if (!current) {
             rejectValue(new Error('Демо-мероприятие не найдено'));
             return;
           }
           try {
             const next = mutate(current);
-            store.put({ ...next, schemaVersion: 1 });
-            resolveValue(next);
+            const validated = parseDemoOccurrence({ ...next, schemaVersion: 2 });
+            if (!validated) throw new Error('Демо-бронирование содержит некорректные данные');
+            store.put(validated);
+            resolveValue(validated);
           } catch (error) {
             rejectValue(
               error instanceof Error ? error : new Error(String(error)),
@@ -290,11 +307,171 @@ export const demoBookingRepository = {
     demoBookingRepository.update(id, (current) =>
       cancelDemoHold(current, holdId, getDemoOwnerId()),
     ),
-  clear: async () => {
-    await transactionResult<void>('readwrite', (store, resolveValue) => {
-      store.clear();
+  getPricingAssignments: async (occurrenceId: string) =>
+    demoBookingTransaction<DemoPricingAssignmentRecord | null>(
+      ['pricingAssignments'],
+      'readonly',
+      (transaction, resolveValue) => {
+        const request = transaction.objectStore('pricingAssignments').get(occurrenceId);
+        request.onsuccess = () => {
+          if (request.result === undefined) {
+            resolveValue(null);
+            return;
+          }
+          const parsed = demoPricingAssignmentRecordSchema.safeParse(request.result);
+          if (!parsed.success || parsed.data.occurrenceId !== occurrenceId) {
+            resolveValue(null);
+            return;
+          }
+          resolveValue(parsed.data);
+        };
+      },
+    ),
+  getPricingRecovery: async (occurrenceId: string) =>
+    demoBookingTransaction<DemoPricingRecoveryRecord | null>(
+      ['pricingRecovery'],
+      'readonly',
+      (transaction, resolveValue) => {
+        const request = transaction.objectStore('pricingRecovery').get(occurrenceId);
+        request.onsuccess = () => {
+          if (request.result === undefined) {
+            resolveValue(null);
+            return;
+          }
+          const parsed = demoPricingRecoveryRecordSchema.safeParse(request.result);
+          if (
+            !parsed.success ||
+            parsed.data.occurrenceId !== occurrenceId ||
+            parsed.data.document.occurrenceId !== occurrenceId ||
+            parsed.data.document.layoutVersionId !== parsed.data.layoutVersionId ||
+            parsed.data.document.catalogRevision !== parsed.data.catalogRevision
+          ) {
+            resolveValue(null);
+            return;
+          }
+          resolveValue(parsed.data);
+        };
+      },
+    ),
+  savePricingRecovery: async (record: DemoPricingRecoveryRecord) => {
+    const parsed = demoPricingRecoveryRecordSchema.parse(record);
+    if (
+      parsed.document.occurrenceId !== parsed.occurrenceId ||
+      parsed.document.layoutVersionId !== parsed.layoutVersionId ||
+      parsed.document.catalogRevision !== parsed.catalogRevision ||
+      parsed.document.revision !== parsed.baseRevision
+    ) throw new Error('Контекст черновика цен не совпадает с восстановлением');
+    await demoBookingTransaction<void>(['pricingRecovery'], 'readwrite', (transaction, resolveValue) => {
+      transaction.objectStore('pricingRecovery').put(parsed);
       resolveValue();
     });
+  },
+  clearPricingRecovery: async (occurrenceId: string) => {
+    await demoBookingTransaction<void>(['pricingRecovery'], 'readwrite', (transaction, resolveValue) => {
+      transaction.objectStore('pricingRecovery').delete(occurrenceId);
+      resolveValue();
+    });
+  },
+  savePricingAssignments: async (input: {
+    occurrenceId: string;
+    expectedAssignmentRevision: number;
+    expectedOccurrenceRevision: number;
+    catalog: PricingCatalog;
+    document: PricingAssignmentDocument;
+  }) => {
+    const result = await demoBookingTransaction<{
+      occurrence: DemoOccurrence;
+      document: PricingAssignmentDocument;
+    }>(['occurrences', 'pricingAssignments'], 'readwrite', (transaction, resolveValue, rejectValue) => {
+      const occurrenceStore = transaction.objectStore('occurrences');
+      const assignmentStore = transaction.objectStore('pricingAssignments');
+      const occurrenceRequest = occurrenceStore.get(input.occurrenceId);
+      const assignmentRequest = assignmentStore.get(input.occurrenceId);
+      let occurrenceReady = false;
+      let assignmentReady = false;
+      let storedOccurrence: DemoOccurrence | null = null;
+      let storedDocument: PricingAssignmentDocument | null = null;
+      const saveWhenReady = () => {
+        if (!occurrenceReady || !assignmentReady) return;
+        if (!storedOccurrence) {
+          rejectValue(new Error('Демо-мероприятие не найдено'));
+          return;
+        }
+        if (storedOccurrence.revision !== input.expectedOccurrenceRevision) {
+          rejectValue(new Error('Данные мероприятия изменились; перезагрузите цены'));
+          return;
+        }
+        if ((storedDocument?.revision ?? 0) !== input.expectedAssignmentRevision) {
+          rejectValue(new Error('Назначения цен изменились в другой вкладке'));
+          return;
+        }
+        const nextDocument = {
+          ...input.document,
+          revision: input.expectedAssignmentRevision + 1,
+        };
+        const validation = pricingAssignmentDocumentSchema.safeParse(nextDocument);
+        if (!validation.success) {
+          rejectValue(new Error('Документ назначений цен некорректен'));
+          return;
+        }
+        let prices;
+        try {
+          prices = buildDemoPricingPrices({
+            occurrence: storedOccurrence,
+            catalog: input.catalog,
+            document: validation.data,
+          });
+        } catch (error) {
+          rejectValue(error instanceof Error ? error : new Error(String(error)));
+          return;
+        }
+        const updatedOccurrence = {
+          ...storedOccurrence,
+          revision: storedOccurrence.revision + 1,
+          prices,
+          schemaVersion: 2 as const,
+        };
+        const record = demoPricingAssignmentRecordSchema.parse({
+          schemaVersion: 1,
+          occurrenceId: input.occurrenceId,
+          document: validation.data,
+        });
+        occurrenceStore.put(updatedOccurrence);
+        assignmentStore.put(record);
+        resolveValue({ occurrence: updatedOccurrence, document: validation.data });
+      };
+      occurrenceRequest.onsuccess = () => {
+        storedOccurrence = parseDemoOccurrence(occurrenceRequest.result);
+        occurrenceReady = true;
+        saveWhenReady();
+      };
+      assignmentRequest.onsuccess = () => {
+        if (assignmentRequest.result !== undefined) {
+          const parsed = demoPricingAssignmentRecordSchema.safeParse(assignmentRequest.result);
+          if (!parsed.success || parsed.data.occurrenceId !== input.occurrenceId) {
+            rejectValue(new Error('Сохранённые назначения цен повреждены'));
+            return;
+          }
+          storedDocument = parsed.data.document;
+        }
+        assignmentReady = true;
+        saveWhenReady();
+      };
+    });
+    announceChange(input.occurrenceId);
+    return result;
+  },
+  clear: async () => {
+    await demoBookingTransaction<void>(
+      ['occurrences', 'pricingAssignments', 'pricingRecovery'],
+      'readwrite',
+      (transaction, resolveValue) => {
+        transaction.objectStore('occurrences').clear();
+        transaction.objectStore('pricingAssignments').clear();
+        transaction.objectStore('pricingRecovery').clear();
+        resolveValue();
+      },
+    );
     announceChange('*');
   },
 };

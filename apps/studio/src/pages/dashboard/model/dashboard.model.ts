@@ -43,6 +43,12 @@ import {
   getDemoOwnerId,
   subscribeToDemoChanges,
 } from './demoBookingRepository.js';
+import {
+  loadDemoPricingSession,
+  saveDemoPricingSession,
+  type DemoPricingSession,
+} from './demoPricingPageModel.js';
+import type { PricingAssignmentDocument } from '@hall-platform/domain';
 
 const repository = createLocalHallRepository();
 const activeHallKey = 'hall-platform-active-hall';
@@ -473,6 +479,13 @@ export const openDemoEventFx = createEffect(async (id: string) => {
   if (!occurrence) throw new Error('Демо-мероприятие не найдено');
   return occurrence;
 });
+export const openDemoPricingFx = createEffect((id: string) =>
+  loadDemoPricingSession(id),
+);
+export const saveDemoPricingFx = createEffect(
+  (input: { session: DemoPricingSession; document: PricingAssignmentDocument }) =>
+    saveDemoPricingSession(input),
+);
 export const refreshDemoOccurrenceFx = createEffect(async (id: string) =>
   demoBookingRepository.get(id),
 );
@@ -971,7 +984,7 @@ for (const event of opened)
   $versions.on(event, (_, result) => result.versions ?? []);
 
 export const $mode = createStore<
-  'catalog' | 'preview' | 'editor' | 'published' | 'buyer' | 'events'
+  'catalog' | 'preview' | 'editor' | 'published' | 'buyer' | 'events' | 'pricing'
 >('catalog')
   .on(catalogOpened, () => 'catalog')
   .on(editorOpened, () => 'editor')
@@ -981,6 +994,7 @@ export const $mode = createStore<
   .on(demoEventsOpened, () => 'events')
   .on(openBuyerFx.doneData, () => 'buyer')
   .on(openDemoEventFx.doneData, () => 'buyer')
+  .on(openDemoPricingFx.doneData, () => 'pricing')
   .on(acceptedPublished, () => 'published');
 for (const event of [
   acceptedOpenHall,
@@ -1008,6 +1022,15 @@ export const $demoEvents = createStore<DemoOccurrence[]>([])
     ...events.filter((event) => event.id !== occurrence.id),
     occurrence,
   ])
+  .on(openDemoPricingFx.doneData, (events, session) => [
+    ...events.filter((event) => event.id !== session.occurrence.id),
+    session.occurrence,
+  ])
+  .on(saveDemoPricingFx.doneData, (events, result) =>
+    events.map((event) =>
+      event.id === result.occurrence.id ? result.occurrence : event,
+    ),
+  )
   .on(holdDemoFx.doneData, (events, occurrence) =>
     events.map((event) => (event.id === occurrence.id ? occurrence : event)),
   )
@@ -1026,6 +1049,32 @@ export const $demoEvents = createStore<DemoOccurrence[]>([])
         )
       : events,
   );
+
+export const $demoPricingSession = createStore<DemoPricingSession | null>(null)
+  .on(openDemoPricingFx.doneData, (_, session) => session)
+  .on(saveDemoPricingFx.doneData, (session, result) => {
+    if (!session || session.occurrence.id !== result.occurrence.id) return session;
+    return {
+      ...session,
+      occurrence: result.occurrence,
+      document: result.document,
+      baseline: result.document,
+      restoredRecovery: false,
+    };
+  })
+  .reset(
+    catalogOpened,
+    editorOpened,
+    previewOpened,
+    demoEventsOpened,
+    openBuyerFx.doneData,
+    openDemoEventFx.doneData,
+  );
+
+export const $demoPricingError = createStore<string | null>(null)
+  .on(openDemoPricingFx.failData, (_, error) => error.message)
+  .on(saveDemoPricingFx.failData, (_, error) => error.message)
+  .reset(openDemoPricingFx.doneData, saveDemoPricingFx.doneData, demoEventsOpened);
 
 export const $buyerOccurrence = createStore<DemoOccurrence | null>(null)
   .on(openBuyerFx.doneData, (_, occurrence) => occurrence)

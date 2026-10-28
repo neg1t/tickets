@@ -17,7 +17,7 @@ function mapPrices(prices: Record<string, ApiMoney & { category?: string | undef
   return Object.fromEntries(Object.entries(prices).map(([id, price]) => [
     id,
     {
-      amount: minorToMajor(price),
+      amount: minorToMajor({ amountMinor: price.amountMinor, currency: price.currency }),
       currency: price.currency,
       ...(price.category ? { category: price.category } : {}),
     },

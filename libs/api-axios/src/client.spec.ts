@@ -109,6 +109,57 @@ describe('Axios hall API client', () => {
     client.dispose();
   });
 
+  it('reads the pricing catalog and assignments and saves only IDs with revision and idempotency headers', async () => {
+    const catalog = {
+      apiVersion: 'v1', occurrenceId: 'occurrence-a', revision: 7,
+      items: [{ id: 'vip', name: 'VIP', color: '#663399', status: 'active', price: { amountMinor: 9000, currency: 'RUB' } }],
+    };
+    const assignments = {
+      apiVersion: 'v1', schemaVersion: 1, occurrenceId: 'occurrence-a',
+      layoutVersionId: 'layout-a', revision: 5, catalogRevision: 7,
+      assignments: { seatSegments: { 'seat-a': 'vip' }, gaZoneSegments: {} },
+    };
+    respond = (request) => {
+      if (request.url.endsWith('/pricing-segments')) return { status: 200, body: catalog };
+      if (request.url.endsWith('/pricing-assignments') && request.method === 'GET')
+        return { status: 200, body: assignments };
+      if (request.url.endsWith('/pricing-assignments') && request.method === 'PUT')
+        return { status: 200, body: { ...assignments, revision: 6 } };
+      return { status: 404, body: { apiVersion: 'v1', code: 'not_found', message: 'Missing' } };
+    };
+    const client = createHallApiClient({ baseURL, getToken: () => 'organizer-token' });
+    expect((await client.getPricingSegments('occurrence-a')).revision).toBe(7);
+    expect((await client.getPricingAssignments('occurrence-a')).revision).toBe(5);
+    const saved = await client.savePricingAssignments('occurrence-a', {
+      apiVersion: 'v1', schemaVersion: 1, occurrenceId: 'occurrence-a',
+      layoutVersionId: 'layout-a', catalogRevision: 7,
+      assignments: { seatSegments: { 'seat-a': 'vip' }, gaZoneSegments: {} },
+    }, 5, 'pricing-save-1');
+
+    expect(saved.revision).toBe(6);
+    expect(requests.map(({ method, url }) => `${method} ${url}`)).toEqual([
+      'GET /api/v1/occurrences/occurrence-a/pricing-segments',
+      'GET /api/v1/occurrences/occurrence-a/pricing-assignments',
+      'PUT /api/v1/occurrences/occurrence-a/pricing-assignments',
+    ]);
+    expect(requests[2]).toMatchObject({
+      headers: {
+        authorization: 'Bearer organizer-token',
+        'if-match': '"5"',
+        'idempotency-key': 'pricing-save-1',
+      },
+      body: {
+        apiVersion: 'v1',
+        occurrenceId: 'occurrence-a',
+        layoutVersionId: 'layout-a',
+        catalogRevision: 7,
+        assignments: { seatSegments: { 'seat-a': 'vip' }, gaZoneSegments: {} },
+      },
+    });
+    expect(requests[2]?.body).not.toHaveProperty('prices');
+    client.dispose();
+  });
+
   it('retries a read after a temporary server error but never retries a save', async () => {
     const draft = createEmptyDraft('API hall');
     respond = () => requests.length === 1

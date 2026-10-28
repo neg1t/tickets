@@ -1,0 +1,94 @@
+.studio-demo-pricing-page {
+  min-height: 100vh;
+  background: var(--hall-color-background, #f5f7f9);
+}
+
+.studio-demo-pricing-top {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px;
+  border-bottom: 1px solid #d8e0e7;
+  background: rgb(255 255 255 / 94%);
+}
+
+.studio-demo-pricing-top button,
+.studio-demo-preview-heading button {
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid #cbd6df;
+  border-radius: 8px;
+  background: #fff;
+  color: #193047;
+  font: inherit;
+  cursor: pointer;
+}
+
+.studio-demo-pricing-content {
+  display: grid;
+  gap: 15px;
+  max-width: 1440px;
+  padding: 26px 24px 60px;
+  margin: 0 auto;
+}
+
+.studio-demo-pricing-content > h1 {
+  margin: 0;
+  font-size: 26px;
+}
+
+.studio-demo-pricing-help,
+.studio-demo-preview-heading p {
+  margin: 0;
+  color: #586c7d;
+  font-size: 14px;
+}
+
+.studio-demo-pricing-notice {
+  padding: 10px 12px;
+  border: 1px solid #d5c58c;
+  border-radius: 9px;
+  background: #fff9e8;
+}
+
+.studio-demo-pricing-notice.is-error {
+  border-color: #e4b6b6;
+  background: #fff3f2;
+  color: #8f2525;
+}
+
+.studio-demo-preview {
+  display: grid;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid #d8e0e7;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.studio-demo-preview-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.studio-demo-preview-heading h2 {
+  margin: 0 0 5px;
+  font-size: 17px;
+}
+
+@media (max-width: 600px) {
+  .studio-demo-pricing-top {
+    flex-wrap: wrap;
+    padding: 10px 14px;
+  }
+
+  .studio-demo-pricing-content {
+    padding: 20px 14px 44px;
+  }
+}

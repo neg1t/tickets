@@ -1,0 +1,31 @@
+{
+  "name": "@hall-platform/pricing-editor",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    "./styles.css": "./styles.css",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@hall-platform/domain": "workspace:*",
+    "@hall-platform/geometry": "workspace:*",
+    "@hall-platform/hall-viewer": "workspace:*",
+    "@hall-platform/renderer-core": "workspace:*",
+    "effector": "^23.4.4",
+    "effector-react": "^23.3.0",
+    "tslib": "^2.3.0"
+  },
+  "peerDependencies": {
+    "react": ">=19.0.0 <20",
+    "react-dom": ">=19.0.0 <20"
+  }
+}

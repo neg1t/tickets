@@ -6,11 +6,48 @@ import type {
 } from '@hall-platform/seat-view';
 import { validateSeatPrice, validateSelection } from '@hall-platform/seat-view';
 import type { SeatStatus } from '@hall-platform/domain';
+import { pricingMoneySchema } from '@hall-platform/domain';
+import { z } from 'zod';
+
+export const demoPriceQuoteLineSchema = z.strictObject({
+  targetKind: z.enum(['seat', 'generalAdmission']),
+  targetId: z.string().min(1),
+  quantity: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  unitAmountMinor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  currency: z.string().regex(/^[A-Z]{3}$/),
+});
+
+export const demoPriceQuoteSchema = z
+  .strictObject({
+    schemaVersion: z.literal(1),
+    lines: z.array(demoPriceQuoteLineSchema).min(1),
+    total: pricingMoneySchema,
+  })
+  .superRefine((quote, context) => {
+    const currencies = new Set(quote.lines.map(({ currency }) => currency));
+    const total = quote.lines.reduce(
+      (amount, line) => amount + BigInt(line.unitAmountMinor) * BigInt(line.quantity),
+      0n,
+    );
+    if (currencies.size !== 1 || !currencies.has(quote.total.currency)) {
+      context.addIssue({ code: 'custom', path: ['total', 'currency'], message: 'Quote currencies must match.' });
+    }
+    if (total > BigInt(Number.MAX_SAFE_INTEGER) || Number(total) !== quote.total.amountMinor) {
+      context.addIssue({ code: 'custom', path: ['total', 'amountMinor'], message: 'Quote total does not match its lines.' });
+    }
+    const keys = quote.lines.map(({ targetKind, targetId }) => `${targetKind}:${targetId}`);
+    if (new Set(keys).size !== keys.length) {
+      context.addIssue({ code: 'custom', path: ['lines'], message: 'Quote lines must have unique targets.' });
+    }
+  });
+
+export type DemoPriceQuote = z.infer<typeof demoPriceQuoteSchema>;
 
 export type DemoHold = {
   id: string;
   ownerId?: string;
   selection: SeatSelectionItem[];
+  quote: DemoPriceQuote;
   expiresAt: number;
 };
 
@@ -29,10 +66,12 @@ export function findOwnActiveHold(
 export type DemoOrder = {
   id: string;
   selection: SeatSelectionItem[];
+  quote: DemoPriceQuote | null;
   confirmedAt: number;
 };
 
 export type DemoOccurrence = {
+  schemaVersion: 2;
   id: string;
   revision: number;
   hallId: string;
@@ -44,6 +83,8 @@ export type DemoOccurrence = {
   prices: SeatPriceMap;
   holds: DemoHold[];
   orders: DemoOrder[];
+  /** Set during the one-time migration when a live legacy hold is cancelled. */
+  legacyQuoteNotice?: boolean;
 };
 
 export function preferLatestDemoOccurrence(
@@ -81,6 +122,7 @@ export function createDemoOccurrence(
     'unavailable',
   ] as const;
   return {
+    schemaVersion: 2,
     id,
     revision: 0,
     hallId,
@@ -95,11 +137,7 @@ export function createDemoOccurrence(
     ),
     zoneCapacity: Object.fromEntries(
       snapshot.zones
-        .filter(
-          (zone) =>
-            zone.kind === 'ga' ||
-            !snapshot.seats.some((seat) => seat.zoneId === zone.id),
-        )
+        .filter((zone) => zone.kind === 'ga')
         .map((zone) => [zone.id, zone.capacity ?? 20]),
     ),
     prices: {
@@ -210,6 +248,49 @@ export function getDemoTotal(
   return Number(minorTotal) / 10 ** fractionDigits;
 }
 
+export function createDemoPriceQuote(
+  occurrence: DemoOccurrence,
+  selection: readonly SeatSelectionItem[],
+): DemoPriceQuote {
+  let currency: string | null = null;
+  let totalMinor = 0n;
+  const lines = selection.map((item) => {
+    if (!item || (item.kind !== 'seat' && item.kind !== 'generalAdmission'))
+      throw new Error('Некорректный выбор билетов');
+    const targetId = item.kind === 'seat' ? item.seatId : item.zoneId;
+    if (typeof targetId !== 'string' || !targetId || targetId.trim() !== targetId)
+      throw new Error('Некорректный выбор билетов');
+    const quantity = item.kind === 'seat' ? 1 : item.quantity;
+    if (!Number.isSafeInteger(quantity) || quantity < 1)
+      throw new Error('Некорректное количество билетов');
+    const price = item.kind === 'seat'
+      ? occurrence.prices.seats[item.seatId]
+      : occurrence.prices.zones?.[item.zoneId];
+    const checked = validateSeatPrice(price);
+    if (!checked.valid) throw new Error('Цена билета недоступна');
+    if (currency !== null && currency !== checked.currency)
+      throw new Error('Нельзя складывать билеты разных валют');
+    currency = checked.currency;
+    totalMinor += BigInt(checked.minorUnits) * BigInt(quantity);
+    if (totalMinor > BigInt(Number.MAX_SAFE_INTEGER))
+      throw new Error('Не удалось рассчитать стоимость билетов');
+    return {
+      targetKind: item.kind,
+      targetId,
+      quantity,
+      unitAmountMinor: checked.minorUnits,
+      currency: checked.currency,
+    };
+  });
+  if (currency === null || lines.length === 0)
+    throw new Error('Выберите места или билеты');
+  return demoPriceQuoteSchema.parse({
+    schemaVersion: 1,
+    lines,
+    total: { amountMinor: Number(totalMinor), currency },
+  });
+}
+
 export function holdDemoSelection(
   occurrence: DemoOccurrence,
   selection: readonly SeatSelectionItem[],
@@ -238,6 +319,7 @@ export function holdDemoSelection(
       throw new Error('Некорректный выбор билетов');
     throw new Error('Недостаточно билетов в секторе');
   }
+  const quote = createDemoPriceQuote(occurrence, selection);
   return {
     ...occurrence,
     revision: (occurrence.revision ?? 0) + 1,
@@ -247,6 +329,7 @@ export function holdDemoSelection(
         id: crypto.randomUUID(),
         ...(ownerId ? { ownerId } : {}),
         selection: [...selection],
+        quote,
         expiresAt: now + 5 * 60_000,
       },
     ],
@@ -286,7 +369,12 @@ export function confirmDemoHold(
     holds: occurrence.holds.filter((item) => item.id !== holdId),
     orders: [
       ...occurrence.orders,
-      { id: crypto.randomUUID(), selection: hold.selection, confirmedAt: now },
+      {
+        id: crypto.randomUUID(),
+        selection: hold.selection,
+        quote: hold.quote,
+        confirmedAt: now,
+      },
     ],
   };
 }

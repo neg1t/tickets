@@ -85,6 +85,8 @@ export type SeatViewProps = {
   readonly locale?: string;
   readonly loading?: boolean;
   readonly buying?: boolean;
+  /** Disable checkout while retaining price and availability preview. */
+  readonly purchaseDisabled?: boolean;
   readonly error?: string | null;
   readonly onSelectionChange: (selection: SeatSelectionItem[]) => void;
   readonly onBuyClick: (data: SeatViewData) => void | Promise<void>;
@@ -239,6 +241,7 @@ export function SeatView(props: SeatViewProps) {
     locale = 'ru-RU',
     loading = false,
     buying = false,
+    purchaseDisabled = false,
     error = null,
     onSelectionChange,
     onBuyClick,
@@ -759,7 +762,7 @@ export function SeatView(props: SeatViewProps) {
               };
             })}
             disabled={locked}
-            buyDisabled={!selectionValid}
+            buyDisabled={!selectionValid || purchaseDisabled}
             buying={buying || pending}
             issue={
               selection.length > 0 && !selectionValid ? (

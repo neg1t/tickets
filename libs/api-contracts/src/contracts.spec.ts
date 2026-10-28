@@ -9,6 +9,11 @@ import {
   apiAssetUploadRequestSchema,
   apiValidationResultSchema,
 } from './contracts.js';
+import {
+  apiPricingAssignmentsSchema,
+  apiPricingAssignmentsWriteSchema,
+  apiPricingCatalogSchema,
+} from './pricing.js';
 
 describe('versioned API contracts', () => {
   it('accepts only safe integer minor amounts with an ISO currency', () => {
@@ -58,5 +63,34 @@ describe('versioned API contracts', () => {
     expect(apiValidationResultSchema.parse({ apiVersion: 'v1', issues: [
       { severity: 'warning', code: 'seat_gap', message: 'Check spacing' },
     ] }).issues).toHaveLength(1);
+  });
+
+  it('validates the pricing catalog, revisioned assignments, and target-specific errors', () => {
+    const catalog = {
+      apiVersion: 'v1',
+      occurrenceId: 'occ-1',
+      revision: 4,
+      items: [{
+        id: 'standard', name: 'Standard', color: '#336699', status: 'active',
+        price: { amountMinor: 12500, currency: 'RUB' },
+      }],
+    };
+    expect(apiPricingCatalogSchema.parse(catalog)).toEqual(catalog);
+    expect(apiPricingCatalogSchema.safeParse({
+      ...catalog,
+      items: [...catalog.items, catalog.items[0]],
+    }).success).toBe(false);
+
+    const write = {
+      apiVersion: 'v1', schemaVersion: 1, occurrenceId: 'occ-1',
+      layoutVersionId: 'layout-1', catalogRevision: 4,
+      assignments: { seatSegments: { 'seat-1': 'standard' }, gaZoneSegments: {} },
+    };
+    expect(apiPricingAssignmentsWriteSchema.parse(write)).toEqual(write);
+    expect(apiPricingAssignmentsSchema.parse({ ...write, revision: 2 }).revision).toBe(2);
+    expect(apiErrorSchema.parse({
+      apiVersion: 'v1', code: 'invalid_pricing_assignment', message: 'Invalid target',
+      issues: [{ severity: 'error', code: 'unknown_seat', message: 'Missing seat', targetId: 'seat-old' }],
+    }).issues?.[0]?.targetId).toBe('seat-old');
   });
 });

@@ -10,6 +10,7 @@ import {
 import { CatalogPage } from '../../catalog/ui/CatalogPage.js';
 import { EditorPage } from '../../editor/ui/EditorPage.js';
 import { BuyerPage } from './BuyerPage.js';
+import { DemoPricingPage } from './DemoPricingPage.js';
 import {
   $activeHoldId,
   $bookingError,
@@ -17,6 +18,8 @@ import {
   $catalog,
   $changeCount,
   $demoEvents,
+  $demoPricingSession,
+  $demoPricingError,
   $dirty,
   $draft,
   $error,
@@ -41,6 +44,8 @@ import {
   newHallRequested,
   openBuyerFx,
   openDemoEventFx,
+  openDemoPricingFx,
+  saveDemoPricingFx,
   requestOpenHall,
   requestCreatePerformanceHall,
   requestImportDraft,
@@ -107,6 +112,8 @@ export function DashboardPage() {
     ready,
     buyerOccurrence,
     demoEvents,
+    demoPricingSession,
+    demoPricingError,
     activeHoldId,
     receipt,
     bookingError,
@@ -114,6 +121,7 @@ export function DashboardPage() {
     savePending,
     publishPending,
     performanceHallPending,
+    pricingPending,
   ] = useUnit([
     $draft,
     $mode,
@@ -128,6 +136,8 @@ export function DashboardPage() {
     $ready,
     $buyerOccurrence,
     $demoEvents,
+    $demoPricingSession,
+    $demoPricingError,
     $activeHoldId,
     $receipt,
     $bookingError,
@@ -135,6 +145,7 @@ export function DashboardPage() {
     saveDraftFx.pending,
     publishDraftFx.pending,
     createPerformanceHallFx.pending,
+    saveDemoPricingFx.pending,
   ]);
   const [
     initialize,
@@ -142,6 +153,8 @@ export function DashboardPage() {
     seedDemoOccurrences,
     openBuyer,
     openDemoEvent,
+    openDemoPricing,
+    saveDemoPricing,
     holdDemo,
     confirmDemo,
     cancelDemo,
@@ -151,6 +164,8 @@ export function DashboardPage() {
     seedDemoOccurrencesFx,
     openBuyerFx,
     openDemoEventFx,
+    openDemoPricingFx,
+    saveDemoPricingFx,
     holdDemoFx,
     confirmDemoFx,
     cancelDemoFx,
@@ -453,6 +468,7 @@ export function DashboardPage() {
         <div className="studio-buyer-content">
           <span className="studio-eyebrow">Демо</span>
           <h1>Демо-мероприятия</h1>
+          {demoPricingError && <p role="alert" className="studio-alert">{demoPricingError}</p>}
           <div className="demo-events" aria-label="Демо-мероприятия">
             {demoEvents.map((event) => (
               <article key={event.id} className="hall-card">
@@ -473,11 +489,36 @@ export function DashboardPage() {
                 >
                   Выбрать билеты
                 </button>
+                <button
+                  type="button"
+                  className="studio-button"
+                  disabled={pricingPending}
+                  onClick={() => void openDemoPricing(event.id).catch(() => undefined)}
+                >
+                  Настроить цены
+                </button>
               </article>
             ))}
           </div>
         </div>
       </main>
+    );
+  }
+
+  if (mode === 'pricing') {
+    return (
+      <DemoPricingPage
+        key={`${demoPricingSession?.occurrence.id ?? 'loading'}:${demoPricingSession?.occurrence.layout.snapshot.layoutVersionId ?? 'layout'}:${demoPricingSession?.baseline.revision ?? 'revision'}`}
+        session={demoPricingSession}
+        saving={pricingPending}
+        error={demoPricingError}
+        onBack={openDemoEvents}
+        onBuyer={() => {
+          if (demoPricingSession)
+            void openDemoEvent(demoPricingSession.occurrence.id).catch(() => undefined);
+        }}
+        onSave={(input) => saveDemoPricing(input)}
+      />
     );
   }
 

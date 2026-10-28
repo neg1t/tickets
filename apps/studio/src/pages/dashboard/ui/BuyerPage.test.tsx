@@ -6,9 +6,9 @@ import { BuyerPage } from './BuyerPage.js';
 const seatViewRender = vi.hoisted(() => vi.fn());
 
 vi.mock('@hall-platform/seat-view', () => ({
-  SeatView: () => {
+  SeatView: (props: { purchaseDisabled?: boolean }) => {
     seatViewRender();
-    return <div data-testid="seat-view" />;
+    return <div data-testid="seat-view"><button disabled={props.purchaseDisabled}>Купить</button></div>;
   },
 }));
 
@@ -81,6 +81,7 @@ describe('BuyerPage idle rendering', () => {
           id: 'other-hold',
           ownerId: 'another-tab',
           selection: [],
+          quote: { schemaVersion: 1, lines: [{ targetKind: 'seat', targetId: 'seat-1', quantity: 1, unitAmountMinor: 100, currency: 'RUB' }], total: { amountMinor: 100, currency: 'RUB' } },
           expiresAt: Date.now() + 2000,
         },
       ],

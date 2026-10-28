@@ -4,11 +4,13 @@
 @source '../../../libs/ui/src';
 @source '../../../libs/hall-editor/src';
 @source '../../../libs/seat-view/src';
+@source '../../../libs/pricing-editor/src';
 @import '../../../libs/design-tokens/styles.css';
 @import '../../../libs/ui/styles.css';
 @import '@hall-platform/renderer-konva/styles.css';
 @import '@hall-platform/hall-editor/styles.css';
 @import '@hall-platform/seat-view/styles.css';
+@import '@hall-platform/pricing-editor/styles.css';
 
 @theme inline {
   --color-hall-ink: var(--hall-color-ink);
