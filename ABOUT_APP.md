@@ -173,6 +173,68 @@ API-контракт задаёт формат JSON и жизненный цик
 
 В локальной демоверсии похожие сущности лежат в object stores IndexedDB (`halls`, `versions`, `assets`, `recovery` и метаданные). Это браузерное сохранение не синхронизируется между пользователями и устройствами.
 
+### 6.1. Handoff-схема для backend-команды
+
+Нормативный контракт обмена — `libs/api-contracts/openapi.json`; схемы Zod в `libs/api-contracts/src/contracts.ts` и доменные схемы в `libs/domain` задают текущую форму объектов. Ниже приведена логическая модель хранения. Она описывает связи и содержимое, а выбор таблиц, ORM и формата столбцов остаётся backend-команде.
+
+```mermaid
+erDiagram
+  TENANT ||--o{ HALL : owns
+  HALL ||--|| HALL_DRAFT : has
+  HALL ||--o{ LAYOUT_VERSION : publishes
+  LAYOUT_VERSION ||--|| LAYOUT_SNAPSHOT : contains
+  LAYOUT_VERSION ||--o{ OCCURRENCE : assigned_to
+  OCCURRENCE ||--o{ INVENTORY_ITEM : tracks
+  OCCURRENCE ||--o{ PRICE_ITEM : prices
+  OCCURRENCE ||--o{ HOLD : reserves
+  HOLD ||--|{ HOLD_ITEM : contains
+  HOLD ||--o| ORDER : converts_to
+  ORDER ||--|{ ORDER_ITEM : contains
+  ASSET ||--o{ BACKGROUND : referenced_by
+```
+
+| Сущность | Что нужно хранить |
+| --- | --- |
+| `Hall` | `id`, владелец/tenant, имя, `revision`, `updatedAt`, номер последней публикации |
+| `HallDraft` | Текущий `HallLayoutDraft` и revision для optimistic concurrency |
+| `LayoutVersion` | `versionId`, `hallId`, номер версии, время публикации и неизменяемый снимок схемы |
+| `LayoutSnapshot` | `id`, `layoutVersionId`, массивы `floors`, `zones`, `rows`, `seats`, `tables`, `backgrounds`, `decorations` |
+| `Occurrence` | ID и расписание мероприятия, ссылка на конкретный `layoutVersionId` |
+| `InventoryItem` | На каждый occurrence — статус по `seatId`; для GA-зоны — доступное количество по `zoneId` |
+| `PriceItem` | На каждый occurrence — цена места/зоны: `amountMinor`, ISO-код `currency`, необязательная категория |
+| `Hold` / `HoldItem` | Occurrence, владелец из авторизованной сессии, выбранные места/количество, серверная сумма, срок истечения и состояние |
+| `Order` / `OrderItem` | Ссылка на hold, occurrence, позиции, серверная сумма, состояние и время создания |
+| `Asset` | Метаданные PDF и ссылка на объектное хранилище; бинарные данные не следует помещать в строку схемы зала |
+
+`LayoutSnapshot` — независимое описание геометрии. Место хранит стабильный ID, этаж и зону, подпись, координату `(x, y)` и размещение (`standalone`, `row` или `table`). Ряд хранит кривую и параметры генерации; стол — форму, размеры/вместимость и позиции. Координаты задаются в мировых единицах: начало в левом верхнем углу, ось Y направлена вниз; углы поворота в модели хранятся в радианах. GA хранится как вместимость зоны, а не как синтетические seat ID.
+
+**Что относится к залу:** черновик, версия документа и геометрия. **Что относится к occurrence:** наличие, цены, удержания и заказы. Черновик изменяемый; опубликованная версия неизменяема. Изменение черновика не меняет версию, к которой уже привязано мероприятие.
+
+### Что API загружает и сохраняет
+
+| Сценарий | Запрос/ответ | Что является серверной записью |
+| --- | --- | --- |
+| Каталог организатора | `GET /api/v1/halls` → summaries с `id`, именем, revision и счётчиками | Список залов в пределах доступа текущего tenant |
+| Открыть зал | `GET /api/v1/halls/{id}` → `ApiHallRecord` с `revision` и `draft` | Серверный черновик и версия для последующего сравнения |
+| Создать зал | `POST /api/v1/halls` с `{ apiVersion, draft }` и `Idempotency-Key` | Новый зал и первый черновик |
+| Сохранить черновик | `PUT /api/v1/layouts/{id}/draft` с `{ apiVersion, draft }`, `If-Match: "<revision>"`, `Idempotency-Key` | Полная новая редакция черновика и увеличенная revision; устаревшая revision получает `409` |
+| Опубликовать | `POST /api/v1/layouts/{id}/publish` с ожидаемой revision и `warningsAcknowledged` | Новая неизменяемая версия; ответ включает обновлённую запись и опубликованный снимок |
+| Открыть покупательскую схему | `GET /api/v1/occurrences/{id}` → опубликованная геометрия, prices, availability, `ownHold` | Чтение привязанной версии и данных конкретного occurrence |
+| Удержать места | `POST /api/v1/occurrences/{id}/holds` с selection и `availabilityRevision` | Сервер атомарно проверяет и резервирует места; сам вычисляет сумму и срок действия |
+| Создать заказ | `POST /api/v1/orders` с `holdId`, затем `POST /api/v1/orders/{id}/checkout` | Заказ строится из удержания; клиент не задаёт доверенную сумму |
+
+Черновик передаётся как один объект `draft`: `schemaVersion`, `hallName`, `snapshot`, `zoneBounds`, `assets`, `calibration`. `ApiHallRecord.id` совпадает с `draft.snapshot.id`. Ответ покупателю содержит только публичную часть схемы: PDF-подложки с приватными файлами удаляются из `layout`; доступность и цены всегда относятся к тому же `occurrenceId` и опубликованной версии.
+
+Selection до запроса удержания — временное состояние host-приложения. В геометрию зала его сохранять не нужно. После `POST .../holds` выбор становится серверным удержанием с `holdId`, `expiresAt`, selection и итогом. Все изменяющие запросы используют idempotency key; владелец удержания и tenant определяются сервером по токену, а не по полям тела запроса.
+
+### Контракт файлов PDF — требуется согласовать
+
+Сейчас доменная схема черновика требует, чтобы `assets[assetId]` содержал `dataUrl` с PDF в Base64. Одновременно API объявляет `upload-intents` с `uploadUrl` и операцию завершения загрузки. Клиент умеет создать intent и завершить загрузку, но текущая DTO черновика всё ещё требует Base64-данные. До реализации PDF-сохранения backend-команде и frontend нужно согласовать wire-формат: оставить Base64 в `draft` либо изменить API DTO так, чтобы черновик хранил ссылку на asset, а байты шли отдельной загрузкой. Рекомендуемый для больших PDF вариант — отдельная загрузка бинарного файла и ссылка/метаданные в черновике; это потребует согласованного изменения DTO и клиента.
+
+### Что считать источником истины
+
+Этот handoff описывает текущий контракт `tickets-frontend` с маршрутами `/api/v1/...`. Файл `../seating-configurator.md` описывает другой C# API с маршрутами `/api/seating-configurations` и другой моделью ревизий. Backend-команда должна либо реализовать текущий OpenAPI, либо согласовать отображение между двумя контрактами до начала интеграции; это не взаимозаменяемые DTO.
+
 ## 7. Использование из Flutter
 
 Flutter-клиент может обращаться к REST API по HTTPS через `dio` или `http`. Он загружает JSON мероприятия, преобразует `layout.snapshot` в свои модели и рисует схему нативными средствами Flutter, например с помощью `CustomPainter`.
