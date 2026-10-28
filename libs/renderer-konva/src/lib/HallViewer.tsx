@@ -1036,9 +1036,14 @@ export function HallViewer(props: HallViewerProps) {
           !native.metaKey))
         ? { kind: 'row' as const, id: clickedSeatRowId }
         : null;
+    const handleOwnsClickedSeat = Boolean(
+      nearbyHandle?.target.kind === 'row' &&
+      clickedSeatRowId === nearbyHandle.target.id,
+    );
     const handleConflictsWithTarget = Boolean(
       nearbyHandle &&
       exactTarget &&
+      !handleOwnsClickedSeat &&
       `${nearbyHandle.target.kind}:${nearbyHandle.target.id}` !==
         `${exactTarget.kind}:${exactTarget.id}`,
     );
@@ -1049,9 +1054,7 @@ export function HallViewer(props: HallViewerProps) {
       ),
     );
     const handle =
-      parentRowTarget || handleConflictsWithTarget || handleLocked
-        ? null
-        : nearbyHandle;
+      handleConflictsWithTarget || handleLocked ? null : nearbyHandle;
     const target =
       handle?.target ??
       parentRowTarget ??
