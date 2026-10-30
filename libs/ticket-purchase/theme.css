@@ -1,0 +1,42 @@
+.ticket-purchase {
+  --tp-color-accent: #bc2d9b;
+  --tp-color-ink: #323544;
+  --tp-color-surface: #fff;
+  --tp-color-muted: #717278;
+  --tp-color-border: #eee;
+  --tp-color-background: #f5f5f5;
+  --tp-font-family: Manrope, system-ui, sans-serif;
+  --tp-radius: 12px;
+
+  --hall-font-family: var(--tp-font-family);
+  --hall-color-ink: var(--tp-color-ink);
+  --hall-color-surface: var(--tp-color-surface);
+  --hall-color-background: var(--tp-color-background);
+  --hall-color-accent: var(--tp-color-accent);
+  --hall-color-accent-ink: #fff;
+  --hall-color-border: var(--tp-color-border);
+  --hall-color-muted: var(--tp-color-muted);
+  --hall-color-focus: var(--tp-color-accent);
+  --hall-radius-sm: 8px;
+  --hall-radius-md: 12px;
+  --hall-radius-lg: 24px;
+
+  color: var(--tp-color-ink);
+  font-family: var(--tp-font-family);
+  font-size: 14px;
+  line-height: 1.4;
+  width: 100%;
+}
+
+.ticket-purchase,
+.ticket-purchase *,
+.ticket-purchase *::before,
+.ticket-purchase *::after {
+  box-sizing: border-box;
+}
+
+.ticket-purchase img {
+  display: block;
+  max-width: 100%;
+}
+

@@ -8,10 +8,17 @@
   "types": "./dist/index.d.ts",
   "exports": {
     "./package.json": "./package.json",
+    "./styles.css": "./styles.css",
+    "./theme.css": "./theme.css",
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./dom": {
+      "types": "./dist/dom.d.ts",
+      "import": "./dist/dom.js",
+      "default": "./dist/dom.js"
     },
     "./http": {
       "types": "./dist/http.d.ts",
@@ -22,6 +29,11 @@
   "dependencies": {
     "@hall-platform/api-axios": "workspace:*",
     "@hall-platform/api-contracts": "workspace:*",
-    "@hall-platform/domain": "workspace:*"
+    "@hall-platform/domain": "workspace:*",
+    "@hall-platform/ui": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": ">=19.0.0 <20",
+    "react-dom": ">=19.0.0 <20"
   }
 }
