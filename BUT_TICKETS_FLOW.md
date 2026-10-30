@@ -237,12 +237,12 @@
 
 **Файлы:** конфигурации `libs/ticket-purchase`, `TicketPurchaseProvider.tsx`, `TicketPurchaseWidget.tsx`, `ui/PurchaseLayout.tsx`, `ui/PurchaseStepper.tsx`, `ui/EventSummary.tsx`, `theme.css`, `styles.css`, `i18n/messages.ts`.
 
-- [ ] Зарегистрировать Nx-библиотеку и ESM/types/CSS exports; HTTP и DOM adapters вынести в subpath exports, React оставить peer dependency.
-- [ ] Создать provider/controller per instance; public hooks не зависят от App/router.
-- [ ] Реализовать scoped Figma theme и UI primitives на существующих Button/Field/Dialog.
-- [ ] Собрать desktop/mobile shell по ширине контейнера; шаги, карточка, навигация и loading/error состояния.
-- [ ] Обеспечить hostActions для возврата/подробностей/истории/билетов; не захватывать навигацию сайта глобально.
-- [ ] Добавить consumer example, который собирается только через exports пакета; проверить два виджета и host CSS без пересечения состояния/стилей.
+- [x] Зарегистрировать Nx-библиотеку и ESM/types/CSS exports; HTTP и DOM adapters вынести в subpath exports, React оставить peer dependency.
+- [x] Создать provider/controller per instance; public hooks не зависят от App/router.
+- [x] Реализовать scoped Figma theme и UI primitives на существующих Button/Field/Dialog.
+- [x] Собрать desktop/mobile shell по ширине контейнера; шаги, карточка, навигация и loading/error состояния.
+- [x] Обеспечить hostActions для возврата/подробностей/истории/билетов; не захватывать навигацию сайта глобально.
+- [x] Добавить consumer example, который собирается только через exports пакета; проверить два виджета и host CSS без пересечения состояния/стилей.
 
 **Приёмка:** ни header/footer, ни парковки, ни рекомендательных секций; новый widget не меняет тему Studio и окружающего сайта.
 
