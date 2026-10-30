@@ -219,6 +219,7 @@ const buyerErrorSamples = {
   holdExpired: { summary: 'Hold expired before order creation', value: buyerErrorExample('hold_expired', 'The hold expired before an order could be created.') },
   quoteExpired: { summary: 'Quote expired before checkout', value: buyerErrorExample('quote_expired', 'The quote expired before checkout.') },
   codeExpired: { summary: 'Email code expired', value: buyerErrorExample('code_expired', 'The email verification code expired.') },
+  holdConverted: { summary: 'Hold converted while cancellation was in flight', value: buyerErrorExample('revision_conflict', 'The hold was converted to an order before cancellation committed. Resume the purchase session to retrieve the order.', { currentRevision: 7 }) },
   verificationRequired: { summary: 'Email verification required', value: buyerErrorExample('verification_required', 'Verify the contact email before checkout.', { fieldErrors: [{ path: ['contact', 'email'], message: 'Verify this email before checkout.' }] }) },
   invalidCode: { summary: 'Email code does not match', value: buyerErrorExample('invalid_code', 'The code does not match the active challenge.', { fieldErrors: [{ path: ['code'], message: 'Enter the code sent for the active challenge.' }] }) },
   invalidPromo: { summary: 'Promotion cannot be applied', value: buyerErrorExample('invalid_promo', 'The promotion code is invalid or no longer active.', { fieldErrors: [{ path: ['promoCode'], message: 'This promotion cannot be applied.' }] }) },
@@ -231,7 +232,9 @@ type BuyerErrorVariant = Partial<Record<'409' | '410' | '422' | '503', readonly 
 const buyerErrorVariantResponse = (status: '409' | '410' | '422' | '503', samples: readonly (keyof typeof buyerErrorSamples)[]) => ({
   ...buyerErrorsByStatus[status],
   description: status === '409'
-    ? samples.includes('revisionConflict')
+    ? samples.includes('holdConverted')
+      ? 'Cancellation raced with order conversion. The hold was not cancelled; resume the purchase session to retrieve the order. A stale If-Match revision also returns currentRevision, and a key conflict requires a new key for a different logical request.'
+      : samples.includes('revisionConflict')
       ? 'The supplied revision is stale or the Idempotency-Key conflicts with a prior request. Read current state, compare currentRevision, and reconcile before retrying a revision conflict; a key conflict requires a new key for the new logical request.'
       : samples.some((sample) => ['availabilityConflict', 'priceChanged', 'layoutChanged'].includes(sample))
         ? 'Availability, layout, price, or idempotency state changed. Refresh the current occurrence context before retrying; a key conflict requires a new key for a different logical request.'
@@ -341,7 +344,7 @@ export const openApiDocument = {
     title: 'Hall Platform API',
     version: '1.0.0',
     description:
-      'Proposed backend contract for agreement; it is not a claim that a backend exists. The backend owns durable persistence for immutable published layout versions and occurrence mappings, pricing assignments and revisions, inventory and capacity, buyer sessions and contact verification, holds and expiry, order-line snapshots, quote breakdowns, payment attempts, tickets, and idempotency results. Server transactions must prevent a seat from being sold twice, keep general-admission capacity nonnegative, reject confirmation of expired holds, make provider callbacks idempotent, and reuse payment attempts on checkout retry. Public projections are built server-side; draft editor assets remain in admin storage. Physical tables and indexes are intentionally unspecified. Session restoration mechanism, payment inventory lease, and handling of late provider callbacks after expiry remain open integration decisions.',
+      'Proposed backend contract for agreement; it is not a claim that a backend exists. The backend owns durable persistence for immutable published layout versions and occurrence mappings, pricing assignments and revisions, inventory and capacity, buyer sessions and contact verification, holds and expiry, order-line snapshots, quote breakdowns, payment attempts, tickets, and idempotency results. Server transactions must prevent a seat from being sold twice, keep general-admission capacity nonnegative, reject confirmation of expired holds, make provider callbacks idempotent, and reuse payment attempts on checkout retry. Public projections are built server-side; draft editor assets remain in admin storage. Physical tables and indexes are intentionally unspecified. Open backend/native decisions: guest mode, session TTL, token refresh, redirect/deep-link allowlist, OTP provider, fees and discounts, payment provider, ticket issuance, session restoration, payment inventory lease, and handling of late provider callbacks after expiry.',
   },
   servers: [{ url: 'http://localhost:8080', description: 'Example backend URL; no server is bundled' }],
   security: [{ bearerAuth: [] }],
@@ -699,12 +702,12 @@ export const openApiDocument = {
       delete: {
         operationId: 'cancelBuyerHold',
         summary: 'Cancel an owned hold and release its inventory',
-        description: buyerOperationDescription('Releases this purchase session’s hold. Cancellation is idempotent: an already cancelled or expired hold is treated as released and returns 204.'),
+        description: buyerOperationDescription('Requires If-Match with the expected hold revision returned by GET /api/v2/buyer/holds/{id}. Releases this purchase session’s hold. Replaying the same Idempotency-Key and request returns the original response. A new cancellation request for an already cancelled or expired hold is a no-op and returns 204 when it supplies that hold’s latest revision. If order conversion races with cancellation and conversion wins, the server returns 409 without cancelling the converted hold; resume the purchase session to retrieve the order.'),
         security: buyerSessionSecurity,
-        parameters: [purchaseSession, id, key],
+        parameters: [purchaseSession, id, match, key],
         responses: {
-          '204': { description: 'Hold released; repeated cancellation of the same hold also succeeds without a body.' },
-          ...buyerErrors('401', '403', '404', '409', '429', '503', { '409': ['idempotencyConflict'] }),
+          '204': { description: 'Hold released or already cancelled/expired at the supplied latest revision. Same-key retries replay this response; there is no response body.' },
+          ...buyerErrors('401', '403', '404', '409', '429', '503', { '409': ['revisionConflict', 'holdConverted', 'idempotencyConflict'] }),
         },
       },
     },
@@ -842,7 +845,7 @@ export const openApiDocument = {
         },
       },
     },
-    '/api/v2/buyer/orders/{id}/quote': {
+    '/api/v2/buyer/orders/{id}/quotes': {
       post: {
         operationId: 'createBuyerQuote',
         summary: 'Calculate an authoritative quote for an order',

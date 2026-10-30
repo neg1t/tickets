@@ -63,7 +63,7 @@ describe('OpenAPI contract', () => {
       ['/api/v2/buyer/sessions/current/email-challenges', 'post'],
       ['/api/v2/buyer/email-challenges/{id}/verify', 'post'],
       ['/api/v2/buyer/orders', 'post'],
-      ['/api/v2/buyer/orders/{id}/quote', 'post'],
+      ['/api/v2/buyer/orders/{id}/quotes', 'post'],
       ['/api/v2/buyer/orders/{id}/checkout', 'post'],
       ['/api/v2/buyer/orders/{id}', 'get'],
       ['/api/v2/buyer/orders/{id}/tickets', 'get'],
@@ -92,13 +92,51 @@ describe('OpenAPI contract', () => {
     expect(paths).not.toHaveProperty('/api/v2/buyer/tickets');
   });
 
+  it('uses the planned plural quote route and requires a revision when cancelling a hold', () => {
+    const paths = openApiDocument.paths as unknown as Record<string, Record<string, {
+      parameters?: unknown[];
+      description?: string;
+      responses?: Record<string, {
+        description?: string;
+        content?: Record<string, { examples?: Record<string, { value?: unknown }> }>;
+      }>;
+    }>>;
+    expect(paths).toHaveProperty('/api/v2/buyer/orders/{id}/quotes');
+    expect(paths).not.toHaveProperty('/api/v2/buyer/orders/{id}/quote');
+
+    const holdOperations = paths['/api/v2/buyer/holds/{id}'];
+    const cancelHold = holdOperations?.delete;
+    if (!cancelHold) throw new Error('Expected DELETE /api/v2/buyer/holds/{id}');
+    expect(cancelHold.parameters).toContainEqual({ $ref: '#/components/parameters/IfMatch' });
+    expect(openApiDocument.components.parameters.IfMatch).toMatchObject({
+      in: 'header', name: 'If-Match', required: true,
+    });
+    expect(cancelHold.description).toContain('expected hold revision');
+    expect(cancelHold.description).toContain('cancellation and conversion');
+    const conflict = cancelHold.responses?.['409'];
+    if (!conflict) throw new Error('Expected a 409 cancellation conflict response');
+    expect(conflict.description).toContain('conversion');
+    expect(conflict.content?.['application/json']?.examples).toHaveProperty('holdConverted');
+  });
+
+  it('lists unresolved backend and native integration decisions in the OpenAPI handoff', () => {
+    const description = openApiDocument.info.description.toLowerCase();
+    for (const decision of [
+      'guest mode', 'session ttl', 'token refresh', 'redirect/deep-link allowlist',
+      'otp provider', 'fees and discounts', 'payment provider', 'ticket issuance',
+      'session restoration', 'payment inventory lease', 'late provider callbacks',
+    ]) {
+      expect(description).toContain(decision);
+    }
+  });
+
   it('requires buyer mutation revisions and documents expired and unprocessable responses', () => {
     const paths = openApiDocument.paths as unknown as Record<string, {
       post?: Record<string, unknown>;
       put?: Record<string, unknown>;
     }>;
     const contact = paths['/api/v2/buyer/sessions/current/contact']!.put as Record<string, unknown>;
-    const quote = paths['/api/v2/buyer/orders/{id}/quote']!.post as Record<string, unknown>;
+    const quote = paths['/api/v2/buyer/orders/{id}/quotes']!.post as Record<string, unknown>;
     const schemas = openApiDocument.components.schemas as unknown as Record<string, { required?: string[] }>;
     const contactResponses = contact.responses as Record<string, unknown>;
     const quoteResponses = quote.responses as Record<string, unknown>;
@@ -200,7 +238,7 @@ describe('OpenAPI contract', () => {
     expect(idempotency).toContain('same body');
     expect(idempotency).toContain('409');
     expect(idempotency).toContain('same response');
-    const quote = openApiDocument.paths['/api/v2/buyer/orders/{id}/quote'].post;
+    const quote = openApiDocument.paths['/api/v2/buyer/orders/{id}/quotes'].post;
     const checkout = openApiDocument.paths['/api/v2/buyer/orders/{id}/checkout'].post;
     expect(quote.description).toContain('orderRevision');
     expect(checkout.description).toContain('orderRevision');

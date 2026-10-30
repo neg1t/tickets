@@ -3,7 +3,7 @@
   "info": {
     "title": "Hall Platform API",
     "version": "1.0.0",
-    "description": "Proposed backend contract for agreement; it is not a claim that a backend exists. The backend owns durable persistence for immutable published layout versions and occurrence mappings, pricing assignments and revisions, inventory and capacity, buyer sessions and contact verification, holds and expiry, order-line snapshots, quote breakdowns, payment attempts, tickets, and idempotency results. Server transactions must prevent a seat from being sold twice, keep general-admission capacity nonnegative, reject confirmation of expired holds, make provider callbacks idempotent, and reuse payment attempts on checkout retry. Public projections are built server-side; draft editor assets remain in admin storage. Physical tables and indexes are intentionally unspecified. Session restoration mechanism, payment inventory lease, and handling of late provider callbacks after expiry remain open integration decisions."
+    "description": "Proposed backend contract for agreement; it is not a claim that a backend exists. The backend owns durable persistence for immutable published layout versions and occurrence mappings, pricing assignments and revisions, inventory and capacity, buyer sessions and contact verification, holds and expiry, order-line snapshots, quote breakdowns, payment attempts, tickets, and idempotency results. Server transactions must prevent a seat from being sold twice, keep general-admission capacity nonnegative, reject confirmation of expired holds, make provider callbacks idempotent, and reuse payment attempts on checkout retry. Public projections are built server-side; draft editor assets remain in admin storage. Physical tables and indexes are intentionally unspecified. Open backend/native decisions: guest mode, session TTL, token refresh, redirect/deep-link allowlist, OTP provider, fees and discounts, payment provider, ticket issuance, session restoration, payment inventory lease, and handling of late provider callbacks after expiry."
   },
   "servers": [
     {
@@ -3638,7 +3638,7 @@
       "delete": {
         "operationId": "cancelBuyerHold",
         "summary": "Cancel an owned hold and release its inventory",
-        "description": "Releases this purchase session’s hold. Cancellation is idempotent: an already cancelled or expired hold is treated as released and returns 204.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
+        "description": "Requires If-Match with the expected hold revision returned by GET /api/v2/buyer/holds/{id}. Releases this purchase session’s hold. Replaying the same Idempotency-Key and request returns the original response. A new cancellation request for an already cancelled or expired hold is a no-op and returns 204 when it supplies that hold’s latest revision. If order conversion races with cancellation and conversion wins, the server returns 409 without cancelling the converted hold; resume the purchase session to retrieve the order.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [
           {
             "buyerSessionAuth": []
@@ -3652,12 +3652,15 @@
             "$ref": "#/components/parameters/Id"
           },
           {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
             "$ref": "#/components/parameters/IdempotencyKey"
           }
         ],
         "responses": {
           "204": {
-            "description": "Hold released; repeated cancellation of the same hold also succeeds without a body."
+            "description": "Hold released or already cancelled/expired at the supplied latest revision. Same-key retries replay this response; there is no response body."
           },
           "401": {
             "description": "The buyer-session credential is missing, invalid, or expired.",
@@ -3720,13 +3723,31 @@
             }
           },
           "409": {
-            "description": "The Idempotency-Key was already used with a different request body. Use a new key for a different logical request.",
+            "description": "Cancellation raced with order conversion. The hold was not cancelled; resume the purchase session to retrieve the order. A stale If-Match revision also returns currentRevision, and a key conflict requires a new key for a different logical request.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
                 },
                 "examples": {
+                  "revisionConflict": {
+                    "summary": "Buyer state changed",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "revision_conflict",
+                      "message": "The buyer state changed. Read current state before retrying.",
+                      "currentRevision": 8
+                    }
+                  },
+                  "holdConverted": {
+                    "summary": "Hold converted while cancellation was in flight",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "revision_conflict",
+                      "message": "The hold was converted to an order before cancellation committed. Resume the purchase session to retrieve the order.",
+                      "currentRevision": 7
+                    }
+                  },
                   "idempotencyConflict": {
                     "summary": "Idempotency key reused with another request",
                     "value": {
@@ -5542,7 +5563,7 @@
         }
       }
     },
-    "/api/v2/buyer/orders/{id}/quote": {
+    "/api/v2/buyer/orders/{id}/quotes": {
       "post": {
         "operationId": "createBuyerQuote",
         "summary": "Calculate an authoritative quote for an order",
