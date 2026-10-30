@@ -225,11 +225,11 @@
 
 **Файлы:** `libs/seat-view/src/lib/{SeatView.tsx,SeatMap.tsx,SeatSelectionProvider.tsx,useSeatSelection.ts}`, `src/index.ts`, тесты рядом.
 
-- [ ] Сначала закрепить текущие сценарии SeatView: выбор seat/GA, deselect, controlled selection, отказ при недоступности, resync и renderer fallback.
-- [ ] Выделить карту и общую выборку состояния в самостоятельные части, сохранить индексы/камеру/LOD и callbacks.
-- [ ] Собрать старый SeatView из выделенных частей с прежним внешним контрактом. Новый TicketSelectionStep использует карту без старой встроенной корзины/лишних toolbar.
-- [ ] Обеспечить собственный hold как выбираемые пользователем места, не считая любой чужой held доступным. Источник ownership — серверный ownHold, не догадка по seat status.
-- [ ] Новый список выбранных билетов и canvas читают одну selection; удаление, GA quantity и conflict отражаются одновременно.
+- [x] Сначала закрепить текущие сценарии SeatView: выбор seat/GA, deselect, controlled selection, отказ при недоступности, resync и renderer fallback.
+- [x] Выделить карту и общую выборку состояния в самостоятельные части, сохранить индексы/камеру/LOD и callbacks.
+- [x] Собрать старый SeatView из выделенных частей с прежним внешним контрактом. Новый TicketSelectionStep использует карту без старой встроенной корзины/лишних toolbar.
+- [x] Обеспечить собственный hold как выбираемые пользователем места, не считая любой чужой held доступным. Источник ownership — серверный ownHold, не догадка по seat status.
+- [x] Новый список выбранных билетов и canvas читают одну selection; удаление, GA quantity и conflict отражаются одновременно.
 
 **Приёмка:** существующие Studio/API Studio/embed consumers не сломаны; новый layout не создаёт второй canvas и отдельный набор правил выбора.
 
