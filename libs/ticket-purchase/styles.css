@@ -390,6 +390,10 @@
     margin-top: 24px;
   }
 
+  .ticket-purchase .tp-stepper {
+    display: none;
+  }
+
   .ticket-purchase .tp-stepper ol {
     flex-direction: row;
     justify-content: space-between;
@@ -442,10 +446,6 @@
 }
 
 @media (max-width: 380px) {
-  .ticket-purchase .tp-layout {
-    padding-inline: 16px;
-  }
-
   .ticket-purchase .tp-event-summary {
     gap: 12px;
     padding: 12px;
