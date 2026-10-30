@@ -213,11 +213,11 @@
 
 **Изменить:** `libs/api-axios/src/client.ts`, `mapping.ts`, `index.ts`; новый `buyerClient.ts` и `buyerClient.spec.ts` для v2.
 
-- [ ] Интерфейс PurchaseDataSource: createSession, resumeSession, getContext, listOccurrences, getSeatMap, getAvailability, getPrices, getChanges, create/get/cancelHold, saveContact, request/verifyEmail, create/getOrder, createQuote, checkout, getTickets. Все IO принимают AbortSignal; mutations — отдельный idempotency key; session-scoped операции несут purchaseSessionId.
-- [ ] Добавить typed v2 client с Zod-валидацией на входе/выходе и совместимым преобразованием цен для SeatView только на границе renderer.
-- [ ] Mock реализует те же DTO/методы и переходы, включая ошибку/задержку, истечение, OTP, промокод, изменившуюся цену и pending payment. Clock и latency инъецируются для воспроизводимости.
-- [ ] Mock-scenario выбор доступен только явно в dev/demo; production без настроенного source показывает конфигурационную ошибку, а не выдуманную успешную покупку.
-- [ ] Contract tests запускаются для mock и HTTP test server на одинаковых сценариях. Не импортировать mock/fixtures в production export новой библиотеки.
+- [x] Интерфейс PurchaseDataSource: createSession, resumeSession, getContext, listOccurrences, getSeatMap, getAvailability, getPrices, getChanges, create/get/cancelHold, saveContact, request/verifyEmail, create/getOrder, createQuote, checkout, getTickets. Все IO принимают AbortSignal; mutations — отдельный idempotency key; session-scoped операции несут purchaseSessionId.
+- [x] Добавить typed v2 client с Zod-валидацией на входе/выходе и совместимым преобразованием цен для SeatView только на границе renderer.
+- [x] Mock реализует те же DTO/методы и переходы, включая ошибку/задержку, истечение, OTP, промокод, изменившуюся цену и pending payment. Clock и latency инъецируются для воспроизводимости.
+- [x] Mock-scenario выбор доступен только явно в dev/demo; production без настроенного source показывает конфигурационную ошибку, а не выдуманную успешную покупку.
+- [x] Contract tests запускаются для mock и HTTP test server на одинаковых сценариях. Не импортировать mock/fixtures в production export новой библиотеки.
 
 ## Chunk 2: переиспользуемый UI и процесс покупки
 
