@@ -9,5 +9,9 @@ export type {
 export * from './lib/seatViewEmbed.js';
 export * from './lib/selectionValidation.js';
 export { useSeatSelection } from './lib/useSeatSelection.js';
+export type {
+  SeatSelectionController,
+  UseSeatSelectionOptions,
+} from './lib/useSeatSelection.js';
 export { applySeatAvailabilityDeltas } from './lib/availabilityDeltas.js';
 export type { SeatAvailabilityDeltaResult } from './lib/availabilityDeltas.js';

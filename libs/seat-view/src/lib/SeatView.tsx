@@ -19,17 +19,17 @@ import {
   type SeatAvailabilityDelta,
   type SeatAvailabilityMap,
 } from './availabilityDeltas.js';
-import {
-  validateSeatPrice,
-  validateSelection,
-} from './selectionValidation.js';
+import { validateSeatPrice } from './selectionValidation.js';
 import {
   selectionIssueMessage,
   useSeatSelection,
-  useSeatSelectionController,
+  useSeatCheckoutController,
 } from './useSeatSelection.js';
 import { SeatMap, seatStatusColors } from './SeatMap.js';
-import { SeatSelectionProvider } from './SeatSelectionProvider.js';
+import {
+  SeatSelectionProvider,
+  useSeatSelectionContext,
+} from './SeatSelectionProvider.js';
 import { SeatDetails, type PlaceDetails } from './ui/SeatDetails.js';
 import { SeatFilters } from './ui/SeatFilters.js';
 import { AccessibleSeatList } from './ui/AccessibleSeatList.js';
@@ -234,11 +234,7 @@ function SeatViewContent(props: SeatViewProps) {
     rendererPreference = 'auto',
     webglEnabled = false,
   } = props;
-  const {
-    selection,
-    ownHoldSelection,
-    onSelectionChange,
-  } = useSeatSelection();
+  const { selection, ownHoldSelection } = useSeatSelectionContext();
   const layout = safeLayout;
   const labels = locale.toLowerCase().startsWith('en')
     ? translations.en
@@ -404,37 +400,42 @@ function SeatViewContent(props: SeatViewProps) {
     ],
   );
   const { seatById, zoneById } = layoutIndex;
-  const selectionController = useSeatSelectionController({
+  const checkoutController = useSeatCheckoutController({
     contextKey,
     occurrenceId,
     selection,
-    ownHoldSelection,
-    availability: currentAvailability,
-    prices,
     locked: loading || buying,
-    messages: {
-      seatUnavailable: labels.seatUnavailable,
-      missingPrice: labels.missingPrice,
-      invalidQuantity: labels.invalidQuantity,
-    },
-    onSelectionChange,
     onBuyClick,
     ...(onError ? { onError } : {}),
+  });
+  const selectionController = useSeatSelection({
+    layout,
+    availability: currentAvailability,
+    prices,
+    locked: loading || buying || checkoutController.pending,
+    contextKey,
+    seatIds: layoutIndex.seatById,
+    zoneIds: layoutIndex.zoneById,
   });
   const {
     safeSelection,
     selectedSeatIds,
-    pending,
-    error: localError,
-    handleSeatClick,
-    handleQuantityChange,
+    actionError,
+    toggleSeat,
+    setGeneralAdmissionQuantity,
     removeSelection,
-    buy,
+    validation,
   } = selectionController;
+  const { pending, error: localError, buy } = checkoutController;
   const selectedZoneForMobile = compact
     ? [...selectedSeatIds].map((id) => seatById.get(id)?.zoneId).find(Boolean)
     : null;
   const focusedZoneId = activeZoneId ?? selectedZoneForMobile ?? null;
+  const selectionActionError = actionError
+    ? actionError === 'unavailable_seat'
+      ? labels.seatUnavailable
+      : selectionIssueMessage(actionError, labels)
+    : null;
   const priceLegend = useMemo(() => {
     const unique = new Map<string, SeatPrice>();
     for (const seat of layout.snapshot.seats) {
@@ -450,26 +451,6 @@ function SeatViewContent(props: SeatViewProps) {
     return [...unique.values()];
   }, [layout.snapshot.seats, activeFloorId, prices.seats, labels.seat]);
   const locked = loading || buying || pending;
-  const validation = useMemo(
-    () =>
-      validateSelection({
-        layout,
-        selection,
-        availability: currentAvailability,
-        prices,
-        ownHoldSelection,
-        seatIds: layoutIndex.seatById,
-        zoneIds: layoutIndex.zoneById,
-      }),
-    [
-      layout,
-      layoutIndex,
-      selection,
-      currentAvailability,
-      prices,
-      ownHoldSelection,
-    ],
-  );
   const selectedCount = validation.count;
   const total = validation.total;
   const selectionValid = validation.valid;
@@ -514,7 +495,9 @@ function SeatViewContent(props: SeatViewProps) {
     >
       {loading && <p role="status">{labels.loading}</p>}
 
-      {(error || localError) && <p role="alert">{error || localError}</p>}
+      {(error || localError || selectionActionError) && (
+        <p role="alert">{error || localError || selectionActionError}</p>
+      )}
 
       <div className="seat-view-layout">
         <SeatMap
@@ -526,7 +509,7 @@ function SeatViewContent(props: SeatViewProps) {
           height={compact ? 300 : 400}
           rendererPreference={rendererPreference}
           webglEnabled={webglEnabled}
-          onSeatClick={handleSeatClick}
+          onSeatClick={toggleSeat}
           onZoneClick={selectZone}
           onFloorChange={selectFloor}
           onHoverSeatChange={setHoveredSeatId}
@@ -632,7 +615,7 @@ function SeatViewContent(props: SeatViewProps) {
                     ownHoldSeatIds.has(id))) &&
                   validateSeatPrice(prices.seats[id]).valid))
             }
-            onSelect={handleSeatClick}
+            onSelect={toggleSeat}
             onInspect={setInspectedSeatId}
           />
 
@@ -696,7 +679,7 @@ function SeatViewContent(props: SeatViewProps) {
                         quantity === 0)
                     }
                     onChange={(event) =>
-                      handleQuantityChange(zone.id, event.target.value)
+                      setGeneralAdmissionQuantity(zone.id, event.target.value)
                     }
                   />
                   <span>

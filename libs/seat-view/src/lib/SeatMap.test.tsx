@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { layoutDocumentSchema } from '@hall-platform/domain';
@@ -6,6 +7,7 @@ import type { HallTarget } from '@hall-platform/renderer-core';
 import { SeatMap } from './SeatMap.js';
 import { SeatSelectionProvider } from './SeatSelectionProvider.js';
 import type { SeatSelectionItem } from './SeatView.js';
+import { useSeatSelection } from './useSeatSelection.js';
 
 vi.mock('@hall-platform/hall-viewer', () => ({
   HallViewport: (props: {
@@ -16,6 +18,7 @@ vi.mock('@hall-platform/hall-viewer', () => ({
     <div
       data-testid="seat-map-canvas"
       data-selected-targets={props.selectedTargets.map((target) => target.id).join(',')}
+      data-selected-target-kinds={props.selectedTargets.map((target) => target.kind).join(',')}
       data-background-count={props.snapshot.backgrounds.length}
     >
       <button
@@ -30,8 +33,21 @@ vi.mock('@hall-platform/hall-viewer', () => ({
 afterEach(cleanup);
 
 const snapshot = layoutDocumentSchema.parse(smallTheater.document).snapshot;
-const seat = snapshot.seats[0];
-if (!seat) throw new Error('Fixture has no seats');
+function requiredFixtureItem<T>(item: T | undefined): T {
+  if (!item) throw new Error('Fixture is incomplete');
+  return item;
+}
+const seat = requiredFixtureItem(snapshot.seats[0]);
+const zone = requiredFixtureItem(snapshot.zones[0]);
+const layout = { hallName: 'Theater', snapshot };
+const availability = {
+  seats: { [seat.id]: 'available' as const },
+  zones: { [zone.id]: { available: 3, maxPerOrder: 2 } },
+};
+const prices = {
+  seats: { [seat.id]: { amount: 100, currency: 'RUB' } },
+  zones: { [zone.id]: { amount: 50, currency: 'RUB' } },
+};
 
 describe('SeatMap', () => {
   it('uses the provider selection and renders without the legacy basket', () => {
@@ -58,7 +74,10 @@ describe('SeatMap', () => {
     );
 
     expect(screen.getByTestId('seat-map-canvas').dataset.selectedTargets).toBe(
-      seat.id,
+      `${seat.id},zone-1`,
+    );
+    expect(screen.getByTestId('seat-map-canvas').dataset.selectedTargetKinds).toBe(
+      'seat,zone',
     );
     expect(screen.getByTestId('seat-map-canvas').dataset.backgroundCount).toBe(
       '0',
@@ -82,5 +101,131 @@ describe('SeatMap', () => {
         />,
       ),
     ).toThrow('Seat selection components must be inside SeatSelectionProvider');
+  });
+
+  it('uses the same reusable seat and GA actions as its map and selection list', () => {
+    function SelectionActions() {
+      const actions = useSeatSelection({
+        layout,
+        availability,
+        prices,
+      });
+      return (
+        <>
+          <span data-testid="toggle-seat-type">{typeof actions.toggleSeat}</span>
+          <output data-testid="selection-action-error">
+            {actions.actionError ?? 'none'}
+          </output>
+          <button type="button" onClick={() => actions.toggleSeat(seat.id)}>
+            Add seat
+          </button>
+          <button
+            type="button"
+            onClick={() => actions.setGeneralAdmissionQuantity(zone.id, '2')}
+          >
+            Set GA quantity
+          </button>
+          <button
+            type="button"
+            onClick={() => actions.setGeneralAdmissionQuantity(zone.id, '4')}
+          >
+            Set invalid GA quantity
+          </button>
+          <button
+            type="button"
+            onClick={() => actions.removeSelection(`seat:${seat.id}`)}
+          >
+            Remove seat
+          </button>
+          <button
+            type="button"
+            onClick={() => actions.removeSelection(`zone:${zone.id}`)}
+          >
+            Remove GA
+          </button>
+        </>
+      );
+    }
+
+    function SharedComposition() {
+      const [selection, setSelection] = useState<SeatSelectionItem[]>([]);
+      return (
+        <SeatSelectionProvider
+          selection={selection}
+          onSelectionChange={setSelection}
+        >
+          <SelectionActions />
+          <SeatMap
+            layout={layout}
+            availability={availability}
+            focusedFloorId={snapshot.floors[0]?.id ?? ''}
+            onSeatClick={() => undefined}
+            onZoneClick={() => undefined}
+            onFloorChange={() => undefined}
+          />
+        </SeatSelectionProvider>
+      );
+    }
+
+    render(<SharedComposition />);
+
+    expect(screen.getByTestId('toggle-seat-type').textContent).toBe('function');
+    fireEvent.click(screen.getByRole('button', { name: 'Add seat' }));
+    expect(screen.getByTestId('seat-map-canvas').dataset.selectedTargets).toBe(
+      seat.id,
+    );
+    expect(screen.getByTestId('seat-map-canvas').dataset.selectedTargetKinds).toBe(
+      'seat',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Set GA quantity' }));
+    expect(screen.getByTestId('seat-map-canvas').dataset.selectedTargets).toBe(
+      `${seat.id},${zone.id}`,
+    );
+    expect(screen.getByTestId('seat-map-canvas').dataset.selectedTargetKinds).toBe(
+      'seat,zone',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Remove seat' }));
+    expect(screen.getByTestId('seat-map-canvas').dataset.selectedTargets).toBe(
+      zone.id,
+    );
+    expect(screen.getByTestId('seat-map-canvas').dataset.selectedTargetKinds).toBe(
+      'zone',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Remove GA' }));
+    expect(screen.getByTestId('seat-map-canvas').dataset.selectedTargets).toBe('');
+    expect(screen.getByTestId('seat-map-canvas').dataset.selectedTargetKinds).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: 'Set invalid GA quantity' }));
+    expect(screen.getByTestId('selection-action-error').textContent).toBe(
+      'quantity_exceeds_availability',
+    );
+    expect(screen.getByTestId('seat-map-canvas').dataset.selectedTargets).toBe('');
+  });
+
+  it('reports an unavailable selection conflict through the public controller', () => {
+    function SelectionConflict() {
+      const controller = useSeatSelection({
+        layout,
+        availability: { seats: { [seat.id]: 'held' } },
+        prices,
+      });
+      return (
+        <output data-testid="selection-conflict">
+          {controller.validation.issues[0]?.code ?? 'none'}
+        </output>
+      );
+    }
+
+    render(
+      <SeatSelectionProvider
+        selection={[{ kind: 'seat', seatId: seat.id }]}
+        onSelectionChange={() => undefined}
+      >
+        <SelectionConflict />
+      </SeatSelectionProvider>,
+    );
+
+    expect(screen.getByTestId('selection-conflict').textContent).toBe(
+      'unavailable_seat',
+    );
   });
 });

@@ -1,34 +1,42 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSeatSelectionContext } from './SeatSelectionProvider.js';
 import {
-  validateSeatPrice,
+  validateSelection,
   type SelectionValidationIssueCode,
+  type SelectionValidationResult,
 } from './selectionValidation.js';
 import type {
+  PublishedHallLayout,
   SeatAvailabilityMap,
   SeatPriceMap,
   SeatSelectionItem,
   SeatViewData,
 } from './SeatView.js';
 
-type SelectionMessages = Readonly<{
-  seatUnavailable: string;
-  missingPrice: string;
-  invalidQuantity: string;
+export type UseSeatSelectionOptions = Readonly<{
+  readonly layout: PublishedHallLayout;
+  readonly availability: SeatAvailabilityMap;
+  readonly prices: SeatPriceMap;
+  readonly locked?: boolean;
+  readonly contextKey?: string;
+  readonly seatIds?: Pick<ReadonlySet<string>, 'has'>;
+  readonly zoneIds?: Pick<ReadonlySet<string>, 'has'>;
 }>;
 
-type UseSeatSelectionOptions = Readonly<{
-  contextKey: string;
-  occurrenceId: string;
+export type SeatSelectionController = Readonly<{
   selection: readonly SeatSelectionItem[];
   ownHoldSelection: readonly SeatSelectionItem[];
-  availability: SeatAvailabilityMap;
-  prices: SeatPriceMap;
-  locked: boolean;
-  messages: SelectionMessages;
-  onSelectionChange: (selection: SeatSelectionItem[]) => void;
-  onBuyClick: (data: SeatViewData) => void | Promise<void>;
-  onError?: (error: Error) => void;
+  safeSelection: readonly SeatSelectionItem[];
+  selectedSeatIds: ReadonlySet<string>;
+  validation: SelectionValidationResult;
+  actionError: SelectionValidationIssueCode | null;
+  clearActionError: () => void;
+  toggleSeat: (seatId: string) => boolean;
+  setGeneralAdmissionQuantity: (
+    zoneId: string,
+    value: string | number,
+  ) => boolean;
+  removeSelection: (key: string) => boolean;
 }>;
 
 function isSelectionItem(item: SeatSelectionItem): boolean {
@@ -42,33 +50,182 @@ function isSelectionItem(item: SeatSelectionItem): boolean {
   );
 }
 
-export function useSeatSelection() {
+/**
+ * Shared, controlled selection actions for the map, accessible list and basket.
+ * Checkout, navigation and renderer state live outside this hook.
+ */
+export function useSeatSelection({
+  layout,
+  availability,
+  prices,
+  locked = false,
+  contextKey = '',
+  seatIds,
+  zoneIds,
+}: UseSeatSelectionOptions): SeatSelectionController {
   const context = useSeatSelectionContext();
+  const [actionError, setActionError] = useState<SelectionValidationIssueCode | null>(null);
+  const clearActionError = useCallback(() => setActionError(null), []);
+  const previousContext = useRef(contextKey);
+  useEffect(() => {
+    if (previousContext.current === contextKey) return;
+    previousContext.current = contextKey;
+    setActionError(null);
+  }, [contextKey]);
+
+  const safeSelection = useMemo(
+    () => context.selection.filter(isSelectionItem),
+    [context.selection],
+  );
+  const ownHoldSelection = useMemo(
+    () => context.ownHoldSelection.filter(isSelectionItem),
+    [context.ownHoldSelection],
+  );
   const selectedSeatIds = useMemo(
     () =>
       new Set(
-        context.selection.filter(isSelectionItem).flatMap((item) =>
+        safeSelection.flatMap((item) =>
           item.kind === 'seat' ? [item.seatId] : [],
         ),
       ),
-    [context.selection],
+    [safeSelection],
   );
-  return { ...context, selectedSeatIds };
+  const validate = useCallback(
+    (selection: readonly SeatSelectionItem[]) =>
+      validateSelection({
+        layout,
+        selection,
+        availability,
+        prices,
+        ownHoldSelection,
+        ...(seatIds ? { seatIds } : {}),
+        ...(zoneIds ? { zoneIds } : {}),
+      }),
+    [layout, availability, prices, ownHoldSelection, seatIds, zoneIds],
+  );
+  const validation = useMemo(
+    () => validate(context.selection),
+    [context.selection, validate],
+  );
+
+  const toggleSeat = useCallback(
+    (seatId: string) => {
+      if (locked) return false;
+      if (selectedSeatIds.has(seatId)) {
+        context.onSelectionChange(
+          safeSelection.filter(
+            (item) => item.kind !== 'seat' || item.seatId !== seatId,
+          ),
+        );
+        setActionError(null);
+        return true;
+      }
+
+      const candidate = [...safeSelection, { kind: 'seat' as const, seatId }];
+      const issue = validate(candidate).issues.find(
+        (entry) => entry.kind === 'seat' && entry.id === seatId,
+      );
+      if (issue) {
+        setActionError(issue.code);
+        return false;
+      }
+
+      context.onSelectionChange(candidate);
+      setActionError(null);
+      return true;
+    },
+    [context, locked, safeSelection, selectedSeatIds, validate],
+  );
+
+  const setGeneralAdmissionQuantity = useCallback(
+    (zoneId: string, value: string | number) => {
+      if (locked) return false;
+      const quantity = typeof value === 'string' ? Number(value) : value;
+      if (!Number.isSafeInteger(quantity) || quantity < 0) {
+        setActionError('invalid_quantity');
+        return false;
+      }
+
+      const withoutZone = safeSelection.filter(
+        (item) => item.kind !== 'generalAdmission' || item.zoneId !== zoneId,
+      );
+      if (quantity === 0) {
+        context.onSelectionChange(withoutZone);
+        setActionError(null);
+        return true;
+      }
+
+      const candidate = [
+        ...withoutZone,
+        { kind: 'generalAdmission' as const, zoneId, quantity },
+      ];
+      const issue = validate(candidate).issues.find(
+        (entry) => entry.kind === 'generalAdmission' && entry.id === zoneId,
+      );
+      if (issue) {
+        setActionError(issue.code);
+        return false;
+      }
+
+      context.onSelectionChange(candidate);
+      setActionError(null);
+      return true;
+    },
+    [context, locked, safeSelection, validate],
+  );
+
+  const removeSelection = useCallback(
+    (key: string) => {
+      if (locked) return false;
+      const nextSelection = safeSelection.filter(
+        (item) =>
+          key !==
+          (item.kind === 'seat'
+            ? `seat:${item.seatId}`
+            : `zone:${item.zoneId}`),
+      );
+      if (nextSelection.length === safeSelection.length) return false;
+      context.onSelectionChange(
+        nextSelection,
+      );
+      setActionError(null);
+      return true;
+    },
+    [context, locked, safeSelection],
+  );
+
+  return {
+    selection: context.selection,
+    ownHoldSelection,
+    safeSelection,
+    selectedSeatIds,
+    validation,
+    actionError,
+    clearActionError,
+    toggleSeat,
+    setGeneralAdmissionQuantity,
+    removeSelection,
+  };
 }
 
-export function useSeatSelectionController({
+type SeatCheckoutOptions = Readonly<{
+  contextKey: string;
+  occurrenceId: string;
+  selection: readonly SeatSelectionItem[];
+  locked: boolean;
+  onBuyClick: (data: SeatViewData) => void | Promise<void>;
+  onError?: (error: Error) => void;
+}>;
+
+/** SeatView-specific submission state, separate from reusable selection actions. */
+export function useSeatCheckoutController({
   contextKey,
   occurrenceId,
   selection,
-  ownHoldSelection,
-  availability,
-  prices,
   locked,
-  messages,
-  onSelectionChange,
   onBuyClick,
   onError,
-}: UseSeatSelectionOptions) {
+}: SeatCheckoutOptions) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const latestContext = useRef(contextKey);
@@ -80,133 +237,6 @@ export function useSeatSelectionController({
     setError(null);
     setPending(false);
   }, [contextKey]);
-
-  const safeSelection = useMemo(
-    () => selection.filter(isSelectionItem),
-    [selection],
-  );
-  const ownHoldSeatIds = useMemo(
-    () =>
-      new Set(
-        ownHoldSelection.flatMap((item) =>
-          item.kind === 'seat' ? [item.seatId] : [],
-        ),
-      ),
-    [ownHoldSelection],
-  );
-  const ownHoldZoneQuantities = useMemo(
-    () =>
-      new Map(
-        ownHoldSelection.flatMap((item) =>
-          item.kind === 'generalAdmission'
-            ? [[item.zoneId, item.quantity] as const]
-            : [],
-        ),
-      ),
-    [ownHoldSelection],
-  );
-  const selectedSeatIds = useMemo(
-    () =>
-      new Set(
-        safeSelection.flatMap((item) =>
-          item.kind === 'seat' ? [item.seatId] : [],
-        ),
-      ),
-    [safeSelection],
-  );
-
-  const handleSeatClick = useCallback(
-    (seatId: string) => {
-      if (locked || pending) return;
-      if (selectedSeatIds.has(seatId)) {
-        onSelectionChange(
-          safeSelection.filter(
-            (item) => item.kind !== 'seat' || item.seatId !== seatId,
-          ),
-        );
-        return;
-      }
-      if (
-        availability.seats[seatId] !== 'available' &&
-        !(
-          availability.seats[seatId] === 'held' && ownHoldSeatIds.has(seatId)
-        )
-      ) {
-        setError(messages.seatUnavailable);
-        return;
-      }
-      if (!validateSeatPrice(prices.seats[seatId]).valid) {
-        setError(messages.missingPrice);
-        return;
-      }
-      setError(null);
-      onSelectionChange([...safeSelection, { kind: 'seat', seatId }]);
-    },
-    [
-      availability.seats,
-      locked,
-      messages.missingPrice,
-      messages.seatUnavailable,
-      onSelectionChange,
-      ownHoldSeatIds,
-      pending,
-      prices.seats,
-      safeSelection,
-      selectedSeatIds,
-    ],
-  );
-
-  const handleQuantityChange = useCallback(
-    (zoneId: string, rawValue: string) => {
-      if (locked || pending) return;
-      const zone = availability.zones?.[zoneId];
-      if (!zone) return;
-      const availablePlusOwnHold =
-        zone.available + (ownHoldZoneQuantities.get(zoneId) ?? 0);
-      const limit = Math.min(
-        availablePlusOwnHold,
-        zone.maxPerOrder ?? availablePlusOwnHold,
-      );
-      const quantity = Number(rawValue);
-      if (!Number.isSafeInteger(quantity) || quantity < 0 || quantity > limit) {
-        setError(messages.invalidQuantity);
-        return;
-      }
-      setError(null);
-      onSelectionChange([
-        ...safeSelection.filter(
-          (item) => item.kind !== 'generalAdmission' || item.zoneId !== zoneId,
-        ),
-        ...(quantity > 0
-          ? [{ kind: 'generalAdmission' as const, zoneId, quantity }]
-          : []),
-      ]);
-    },
-    [
-      availability.zones,
-      locked,
-      messages.invalidQuantity,
-      onSelectionChange,
-      ownHoldZoneQuantities,
-      pending,
-      safeSelection,
-    ],
-  );
-
-  const removeSelection = useCallback(
-    (key: string) => {
-      onSelectionChange(
-        safeSelection.filter(
-          (item) =>
-            key !==
-            (item.kind === 'seat'
-              ? `seat:${item.seatId}`
-              : `zone:${item.zoneId}`),
-        ),
-      );
-    },
-    [onSelectionChange, safeSelection],
-  );
 
   const buy = useCallback(
     async (valid: boolean) => {
@@ -229,17 +259,7 @@ export function useSeatSelectionController({
     [contextKey, locked, occurrenceId, onBuyClick, onError, pending, selection],
   );
 
-  return {
-    safeSelection,
-    selectedSeatIds,
-    pending,
-    error,
-    setError,
-    handleSeatClick,
-    handleQuantityChange,
-    removeSelection,
-    buy,
-  };
+  return { pending, error, buy };
 }
 
 export function selectionIssueMessage(

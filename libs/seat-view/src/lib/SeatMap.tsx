@@ -6,7 +6,7 @@ import {
   type RendererPreference,
 } from '@hall-platform/hall-viewer';
 import type { HallTarget, RendererSeatUpdate } from '@hall-platform/renderer-core';
-import { useSeatSelection } from './useSeatSelection.js';
+import { useSeatSelectionContext } from './SeatSelectionProvider.js';
 import type { PublishedHallLayout, SeatAvailabilityMap } from './SeatView.js';
 
 export const seatStatusColors = {
@@ -69,7 +69,7 @@ export function SeatMap({
   onError,
   children,
 }: SeatMapProps) {
-  const { selectedSeatIds } = useSeatSelection();
+  const { selection } = useSeatSelectionContext();
   const instanceId = useId().replace(/:/g, '');
   const snapshot = useMemo(
     () => withoutBackgrounds(layout.snapshot),
@@ -96,10 +96,23 @@ export function SeatMap({
       })),
     [availability.seats, snapshot.seats],
   );
-  const selectedTargets: HallTarget[] = useMemo(
-    () => [...selectedSeatIds].map((id) => ({ kind: 'seat', id })),
-    [selectedSeatIds],
-  );
+  const selectedTargets: HallTarget[] = useMemo(() => {
+    const targets = new Map<string, HallTarget>();
+    for (const item of selection) {
+      if (!item) continue;
+      if (item.kind === 'seat' && typeof item.seatId === 'string') {
+        targets.set(`seat:${item.seatId}`, { kind: 'seat', id: item.seatId });
+      } else if (
+        item.kind === 'generalAdmission' &&
+        typeof item.zoneId === 'string' &&
+        Number.isSafeInteger(item.quantity) &&
+        item.quantity > 0
+      ) {
+        targets.set(`zone:${item.zoneId}`, { kind: 'zone', id: item.zoneId });
+      }
+    }
+    return [...targets.values()];
+  }, [selection]);
 
   function handleCanvasClick(_point: unknown, target: HallTarget | null) {
     if (target?.kind === 'seat') onSeatClick(target.id);
