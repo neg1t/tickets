@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createEmptyDraft } from '@hall-platform/domain';
 import {
   buyerContactSchema,
+  buyerContactWriteSchema,
   buyerErrorSchema,
   buyerHoldRequestSchema,
   buyerOccurrenceContextSchema,
@@ -11,6 +12,7 @@ import {
   buyerPaymentAttemptSchema,
   buyerPublicLayoutSchema,
   buyerQuoteSchema,
+  buyerQuoteRequestSchema,
   buyerSessionResumeSchema,
   buyerTicketSummarySchema,
 } from './buyer.js';
@@ -87,6 +89,10 @@ describe('v2 buyer contracts', () => {
   });
 
   it('enforces authoritative quote totals and safe minor-unit arithmetic', () => {
+    expect(buyerQuoteRequestSchema.safeParse({ apiVersion: 'v2' }).success).toBe(false);
+    expect(buyerQuoteRequestSchema.parse({ apiVersion: 'v2', orderRevision: 2 })).toEqual({
+      apiVersion: 'v2', orderRevision: 2,
+    });
     expect(buyerQuoteSchema.parse(quote)).toEqual(quote);
     expect(buyerQuoteSchema.safeParse({ ...quote, totalMinor: 19749 }).success).toBe(false);
     expect(buyerQuoteSchema.safeParse({
@@ -105,7 +111,7 @@ describe('v2 buyer contracts', () => {
     expect(buyerPublicLayoutSchema.parse(layout)).toEqual(layout);
 
     const background = {
-      id: 'background-1', floorId: draft.snapshot.floors[0].id, order: 0,
+      id: 'background-1', floorId: draft.snapshot.floors[0]!.id, order: 0,
       position: { x: 0, y: 0 }, scale: 1, rotationRadians: 0, opacity: 1,
       visible: true, locked: false,
     };
@@ -136,6 +142,10 @@ describe('v2 buyer contracts', () => {
     };
     expect(buyerContactSchema.parse(contact)).toEqual(contact);
     expect(buyerContactSchema.safeParse({ ...contact, phone: '' }).success).toBe(false);
+    expect(buyerContactWriteSchema.safeParse({ apiVersion: 'v2', contact }).success).toBe(false);
+    expect(buyerContactWriteSchema.safeParse({
+      apiVersion: 'v2', contact, contactRevision: 0,
+    }).success).toBe(true);
   });
 
   it('resumes converted holds and the existing order without duplicating the purchase', () => {

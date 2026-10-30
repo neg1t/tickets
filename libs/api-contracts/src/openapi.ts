@@ -46,6 +46,8 @@ import {
   buyerQuoteRequestSchema,
   buyerQuoteSchema,
   buyerSessionContactSchema,
+  buyerSessionCreateRequestSchema,
+  buyerSessionCreateResultSchema,
   buyerSessionResumeSchema,
   buyerTicketListSchema,
 } from './buyer.js';
@@ -81,6 +83,8 @@ const buyerMutationErrors = {
     description: 'State changed. Read current buyer context, compare currentRevision, then retry the intended action.',
     ...json('BuyerError'),
   },
+  '410': { description: 'Buyer session, hold, or quote has expired', ...json('BuyerError') },
+  '422': { description: 'Request is well formed but cannot be accepted in the current purchase state', ...json('BuyerError') },
   '429': { description: 'Rate limited', ...json('BuyerError') },
   '503': { description: 'Service temporarily unavailable', ...json('BuyerError') },
 };
@@ -88,10 +92,13 @@ const buyerReadErrors = {
   '401': buyerMutationErrors['401'],
   '403': buyerMutationErrors['403'],
   '404': buyerMutationErrors['404'],
+  '410': buyerMutationErrors['410'],
 };
 const id = { $ref: '#/components/parameters/Id' };
 const key = { $ref: '#/components/parameters/IdempotencyKey' };
 const match = { $ref: '#/components/parameters/IfMatch' };
+const purchaseSession = { $ref: '#/components/parameters/PurchaseSessionId' };
+const buyerSessionSecurity = [{ buyerSessionAuth: [] }];
 const request = (name: string) => ({ required: true, ...json(name) });
 const pricingAssignmentsExamples = {
   emptyAssignments: {
@@ -416,6 +423,7 @@ export const openApiDocument = {
         operationId: 'listBuyerOccurrences',
         summary: 'List buyer occurrence summaries with pagination',
         description: 'Returns summary cards only; event layout geometry is available from one occurrence context at a time.',
+        security: [],
         responses: { ...success('BuyerOccurrenceList'), ...buyerReadErrors },
       },
     },
@@ -423,13 +431,15 @@ export const openApiDocument = {
       get: {
         operationId: 'getBuyerOccurrenceContext',
         summary: 'Read the current buyer context for an occurrence',
-        parameters: [id], responses: { ...success('BuyerOccurrenceContext'), ...buyerReadErrors },
+        security: buyerSessionSecurity,
+        parameters: [purchaseSession, id], responses: { ...success('BuyerOccurrenceContext'), ...buyerReadErrors },
       },
     },
     '/api/v2/buyer/occurrences/{id}/layout': {
       get: {
         operationId: 'getBuyerPublicLayout',
         summary: 'Read the public layout without editor backgrounds or assets',
+        security: [],
         parameters: [id], responses: { ...success('BuyerPublicLayout'), ...buyerReadErrors },
       },
     },
@@ -438,7 +448,8 @@ export const openApiDocument = {
         operationId: 'createBuyerHold',
         summary: 'Create an owned hold from current availability',
         description: 'The server verifies occurrence and layout versions, owns and prices the selection, and returns the authoritative line items and total.',
-        parameters: [id, key], requestBody: request('BuyerHoldRequest'),
+        security: buyerSessionSecurity,
+        parameters: [purchaseSession, id, key], requestBody: request('BuyerHoldRequest'),
         responses: { ...success('BuyerHold', '201'), ...buyerMutationErrors },
       },
     },
@@ -446,39 +457,56 @@ export const openApiDocument = {
       delete: {
         operationId: 'cancelBuyerHold',
         summary: 'Cancel an owned hold and release its inventory',
-        parameters: [id, key], responses: { ...emptySuccess, ...buyerMutationErrors },
+        security: buyerSessionSecurity,
+        parameters: [purchaseSession, id, key], responses: { ...emptySuccess, ...buyerMutationErrors },
       },
     },
-    '/api/v2/buyer/session': {
+    '/api/v2/buyer/sessions': {
+      post: {
+        operationId: 'createBuyerSession',
+        summary: 'Create a buyer purchase session or exchange a host bootstrap credential',
+        description: 'Returns a purchaseSessionId selector and a separate buyer-session credential. Keep the credential in the approved host or first-party session mechanism.',
+        security: [],
+        parameters: [key], requestBody: request('BuyerSessionCreateRequest'),
+        responses: { ...success('BuyerSessionCreateResult', '201'), ...buyerMutationErrors },
+      },
+    },
+    '/api/v2/buyer/sessions/current/resume': {
       get: {
         operationId: 'resumeBuyerSession',
         summary: 'Resume the purchase session and return its current order',
         description: 'Includes a converted hold and its existing order so a reload cannot create a duplicate order.',
+        security: buyerSessionSecurity,
+        parameters: [purchaseSession],
         responses: { ...success('BuyerSessionResume'), ...buyerReadErrors },
       },
     },
-    '/api/v2/buyer/session/contact': {
+    '/api/v2/buyer/sessions/current/contact': {
       put: {
         operationId: 'saveBuyerContact',
         summary: 'Save contact details in the buyer session',
-        parameters: [key], requestBody: request('BuyerContactWrite'),
+        description: 'Requires the contactRevision from the current session. On HTTP 409, resume the session, compare currentRevision, and retry with the refreshed contact revision.',
+        security: buyerSessionSecurity,
+        parameters: [purchaseSession, key], requestBody: request('BuyerContactWrite'),
         responses: { ...success('BuyerSessionContact'), ...buyerMutationErrors },
       },
     },
-    '/api/v2/buyer/session/email-verification/challenges': {
+    '/api/v2/buyer/sessions/current/email-challenges': {
       post: {
         operationId: 'startBuyerEmailVerification',
         summary: 'Send a one-time email verification code',
         description: 'The response contains challenge metadata only and never contains the code.',
-        parameters: [key], requestBody: request('BuyerOtpStartRequest'),
+        security: buyerSessionSecurity,
+        parameters: [purchaseSession, key], requestBody: request('BuyerOtpStartRequest'),
         responses: { ...success('BuyerOtpChallenge', '201'), ...buyerMutationErrors },
       },
     },
-    '/api/v2/buyer/session/email-verification/confirm': {
+    '/api/v2/buyer/email-challenges/{id}/verify': {
       post: {
         operationId: 'confirmBuyerEmailVerification',
         summary: 'Verify a buyer email with a one-time code',
-        parameters: [key], requestBody: request('BuyerOtpVerifyRequest'),
+        security: buyerSessionSecurity,
+        parameters: [purchaseSession, id, key], requestBody: request('BuyerOtpVerifyRequest'),
         responses: { ...success('BuyerSessionContact'), ...buyerMutationErrors },
       },
     },
@@ -487,7 +515,8 @@ export const openApiDocument = {
         operationId: 'createBuyerOrder',
         summary: 'Create or resume the order for the buyer session hold',
         description: 'An order is unique for the current hold. Repeating the request returns the session order rather than creating a duplicate.',
-        parameters: [key], requestBody: request('BuyerOrderRequest'),
+        security: buyerSessionSecurity,
+        parameters: [purchaseSession, key], requestBody: request('BuyerOrderRequest'),
         responses: { ...success('BuyerOrder', '201'), ...buyerMutationErrors },
       },
     },
@@ -495,8 +524,9 @@ export const openApiDocument = {
       post: {
         operationId: 'createBuyerQuote',
         summary: 'Calculate an authoritative quote for an order',
-        description: 'The quote fixes the ticket subtotal, discounts, fees, and total in minor units. Checkout accepts the quote against its revision.',
-        parameters: [id, key], requestBody: request('BuyerQuoteRequest'),
+        description: 'The quote fixes the ticket subtotal, discounts, fees, and total in minor units. Send the expected orderRevision. On HTTP 409, read the current order and quote, compare currentRevision, then retry with refreshed data.',
+        security: buyerSessionSecurity,
+        parameters: [purchaseSession, id, key], requestBody: request('BuyerQuoteRequest'),
         responses: { ...success('BuyerQuote'), ...buyerMutationErrors },
       },
     },
@@ -504,8 +534,9 @@ export const openApiDocument = {
       post: {
         operationId: 'checkoutBuyerOrder',
         summary: 'Accept a current quote and begin server-selected payment',
-        description: 'Order revision increments when a quote is accepted and on every checkout, payment, or order state change. Reads do not mutate revision. On HTTP 409, read the current session/order, refresh against currentRevision, and retry the intended action only after comparing state.',
-        parameters: [id, key], requestBody: request('BuyerCheckoutRequest'),
+        description: 'Order revision increments when a quote is accepted and on every checkout, payment, or order state change. Reads do not mutate revision. On HTTP 409, resume the current session and read the order, refresh against currentRevision, and retry the intended action only after comparing state.',
+        security: buyerSessionSecurity,
+        parameters: [purchaseSession, id, key], requestBody: request('BuyerCheckoutRequest'),
         responses: { ...success('BuyerCheckoutResult'), ...buyerMutationErrors },
       },
     },
@@ -514,14 +545,24 @@ export const openApiDocument = {
         operationId: 'listBuyerTickets',
         summary: 'List tickets owned by the buyer session',
         description: 'Ticket delivery may be asynchronous. Ticket open URLs are owner-only and expire at the timestamp returned with each URL.',
+        security: buyerSessionSecurity,
+        parameters: [purchaseSession],
         responses: { ...success('BuyerTicketList'), ...buyerReadErrors },
       },
     },
   },
   components: {
-    securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
+    securitySchemes: {
+      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT', description: 'Admin/Studio JWT for v1 operations.' },
+      buyerSessionAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'opaque', description: 'Buyer-session credential issued by POST /api/v2/buyer/sessions; distinct from the purchase session ID selector.' },
+    },
     parameters: {
       Id: { name: 'id', in: 'path', required: true, schema: { type: 'string', minLength: 1 } },
+      PurchaseSessionId: {
+        name: 'X-Purchase-Session-Id', in: 'header', required: true,
+        description: 'Selects the current widget purchase session; it is not an authentication credential.',
+        schema: { type: 'string', minLength: 1, maxLength: 200 },
+      },
       IfMatch: {
         name: 'If-Match', in: 'header', required: true,
         description: 'Quoted decimal revision, for example "4".',
@@ -586,6 +627,8 @@ export const openApiDocument = {
       BuyerTicketList: z.toJSONSchema(buyerTicketListSchema),
       BuyerSessionResume: z.toJSONSchema(buyerSessionResumeSchema),
       BuyerSessionContact: z.toJSONSchema(buyerSessionContactSchema),
+      BuyerSessionCreateRequest: z.toJSONSchema(buyerSessionCreateRequestSchema),
+      BuyerSessionCreateResult: z.toJSONSchema(buyerSessionCreateResultSchema),
       BuyerPublicLayout: z.toJSONSchema(buyerPublicLayoutSchema),
       BuyerError: z.toJSONSchema(buyerErrorSchema),
       BuyerCheckoutResult: z.toJSONSchema(buyerCheckoutResultSchema),

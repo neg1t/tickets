@@ -129,7 +129,7 @@ export type BuyerContact = z.infer<typeof buyerContactSchema>;
 export const buyerContactWriteSchema = z.strictObject({
   apiVersion: buyerApiVersionSchema,
   contact: buyerContactSchema,
-  contactRevision: revisionSchema.optional(),
+  contactRevision: revisionSchema,
 });
 
 export const buyerEmailVerificationSchema = z.strictObject({
@@ -157,8 +157,19 @@ export const buyerOtpStartRequestSchema = z.strictObject({
 });
 export const buyerOtpVerifyRequestSchema = z.strictObject({
   apiVersion: buyerApiVersionSchema,
-  challengeId: idSchema,
   code: z.string().regex(/^\d{4,12}$/),
+});
+
+export const buyerSessionCreateRequestSchema = z.strictObject({
+  apiVersion: buyerApiVersionSchema,
+  occurrenceId: idSchema,
+  hostBootstrapCredential: z.string().min(1).optional(),
+});
+export const buyerSessionCreateResultSchema = z.strictObject({
+  apiVersion: buyerApiVersionSchema,
+  purchaseSessionId: idSchema,
+  sessionCredential: z.string().min(1),
+  expiresAt: dateTimeSchema,
 });
 
 export const buyerQuoteSchema = z.strictObject({
@@ -192,6 +203,7 @@ export type BuyerQuote = z.infer<typeof buyerQuoteSchema>;
 
 export const buyerQuoteRequestSchema = z.strictObject({
   apiVersion: buyerApiVersionSchema,
+  orderRevision: revisionSchema,
   promoCode: z.string().trim().min(1).max(100).optional(),
 });
 

@@ -2181,6 +2181,7 @@
         "operationId": "listBuyerOccurrences",
         "summary": "List buyer occurrence summaries with pagination",
         "description": "Returns summary cards only; event layout geometry is available from one occurrence context at a time.",
+        "security": [],
         "responses": {
           "200": {
             "description": "Success",
@@ -2221,6 +2222,16 @@
                 }
               }
             }
+          },
+          "410": {
+            "description": "Buyer session, hold, or quote has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
           }
         }
       }
@@ -2229,7 +2240,15 @@
       "get": {
         "operationId": "getBuyerOccurrenceContext",
         "summary": "Read the current buyer context for an occurrence",
+        "security": [
+          {
+            "buyerSessionAuth": []
+          }
+        ],
         "parameters": [
+          {
+            "$ref": "#/components/parameters/PurchaseSessionId"
+          },
           {
             "$ref": "#/components/parameters/Id"
           }
@@ -2274,6 +2293,16 @@
                 }
               }
             }
+          },
+          "410": {
+            "description": "Buyer session, hold, or quote has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
           }
         }
       }
@@ -2282,6 +2311,7 @@
       "get": {
         "operationId": "getBuyerPublicLayout",
         "summary": "Read the public layout without editor backgrounds or assets",
+        "security": [],
         "parameters": [
           {
             "$ref": "#/components/parameters/Id"
@@ -2327,6 +2357,16 @@
                 }
               }
             }
+          },
+          "410": {
+            "description": "Buyer session, hold, or quote has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
           }
         }
       }
@@ -2336,7 +2376,15 @@
         "operationId": "createBuyerHold",
         "summary": "Create an owned hold from current availability",
         "description": "The server verifies occurrence and layout versions, owns and prices the selection, and returns the authoritative line items and total.",
+        "security": [
+          {
+            "buyerSessionAuth": []
+          }
+        ],
         "parameters": [
+          {
+            "$ref": "#/components/parameters/PurchaseSessionId"
+          },
           {
             "$ref": "#/components/parameters/Id"
           },
@@ -2415,6 +2463,26 @@
               }
             }
           },
+          "410": {
+            "description": "Buyer session, hold, or quote has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request is well formed but cannot be accepted in the current purchase state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -2442,7 +2510,15 @@
       "delete": {
         "operationId": "cancelBuyerHold",
         "summary": "Cancel an owned hold and release its inventory",
+        "security": [
+          {
+            "buyerSessionAuth": []
+          }
+        ],
         "parameters": [
+          {
+            "$ref": "#/components/parameters/PurchaseSessionId"
+          },
           {
             "$ref": "#/components/parameters/Id"
           },
@@ -2504,6 +2580,26 @@
               }
             }
           },
+          "410": {
+            "description": "Buyer session, hold, or quote has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request is well formed but cannot be accepted in the current purchase state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -2527,11 +2623,146 @@
         }
       }
     },
-    "/api/v2/buyer/session": {
+    "/api/v2/buyer/sessions": {
+      "post": {
+        "operationId": "createBuyerSession",
+        "summary": "Create a buyer purchase session or exchange a host bootstrap credential",
+        "description": "Returns a purchaseSessionId selector and a separate buyer-session credential. Keep the credential in the approved host or first-party session mechanism.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuyerSessionCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerSessionCreateResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or buyer input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Buyer session is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operation is not permitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Buyer resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State changed. Read current buyer context, compare currentRevision, then retry the intended action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Buyer session, hold, or quote has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request is well formed but cannot be accepted in the current purchase state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/buyer/sessions/current/resume": {
       "get": {
         "operationId": "resumeBuyerSession",
         "summary": "Resume the purchase session and return its current order",
         "description": "Includes a converted hold and its existing order so a reload cannot create a duplicate order.",
+        "security": [
+          {
+            "buyerSessionAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PurchaseSessionId"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -2572,15 +2803,34 @@
                 }
               }
             }
+          },
+          "410": {
+            "description": "Buyer session, hold, or quote has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
           }
         }
       }
     },
-    "/api/v2/buyer/session/contact": {
+    "/api/v2/buyer/sessions/current/contact": {
       "put": {
         "operationId": "saveBuyerContact",
         "summary": "Save contact details in the buyer session",
+        "description": "Requires the contactRevision from the current session. On HTTP 409, resume the session, compare currentRevision, and retry with the refreshed contact revision.",
+        "security": [
+          {
+            "buyerSessionAuth": []
+          }
+        ],
         "parameters": [
+          {
+            "$ref": "#/components/parameters/PurchaseSessionId"
+          },
           {
             "$ref": "#/components/parameters/IdempotencyKey"
           }
@@ -2656,6 +2906,26 @@
               }
             }
           },
+          "410": {
+            "description": "Buyer session, hold, or quote has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request is well formed but cannot be accepted in the current purchase state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -2679,12 +2949,20 @@
         }
       }
     },
-    "/api/v2/buyer/session/email-verification/challenges": {
+    "/api/v2/buyer/sessions/current/email-challenges": {
       "post": {
         "operationId": "startBuyerEmailVerification",
         "summary": "Send a one-time email verification code",
         "description": "The response contains challenge metadata only and never contains the code.",
+        "security": [
+          {
+            "buyerSessionAuth": []
+          }
+        ],
         "parameters": [
+          {
+            "$ref": "#/components/parameters/PurchaseSessionId"
+          },
           {
             "$ref": "#/components/parameters/IdempotencyKey"
           }
@@ -2760,6 +3038,26 @@
               }
             }
           },
+          "410": {
+            "description": "Buyer session, hold, or quote has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request is well formed but cannot be accepted in the current purchase state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -2783,11 +3081,22 @@
         }
       }
     },
-    "/api/v2/buyer/session/email-verification/confirm": {
+    "/api/v2/buyer/email-challenges/{id}/verify": {
       "post": {
         "operationId": "confirmBuyerEmailVerification",
         "summary": "Verify a buyer email with a one-time code",
+        "security": [
+          {
+            "buyerSessionAuth": []
+          }
+        ],
         "parameters": [
+          {
+            "$ref": "#/components/parameters/PurchaseSessionId"
+          },
+          {
+            "$ref": "#/components/parameters/Id"
+          },
           {
             "$ref": "#/components/parameters/IdempotencyKey"
           }
@@ -2863,6 +3172,26 @@
               }
             }
           },
+          "410": {
+            "description": "Buyer session, hold, or quote has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request is well formed but cannot be accepted in the current purchase state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -2891,7 +3220,15 @@
         "operationId": "createBuyerOrder",
         "summary": "Create or resume the order for the buyer session hold",
         "description": "An order is unique for the current hold. Repeating the request returns the session order rather than creating a duplicate.",
+        "security": [
+          {
+            "buyerSessionAuth": []
+          }
+        ],
         "parameters": [
+          {
+            "$ref": "#/components/parameters/PurchaseSessionId"
+          },
           {
             "$ref": "#/components/parameters/IdempotencyKey"
           }
@@ -2967,6 +3304,26 @@
               }
             }
           },
+          "410": {
+            "description": "Buyer session, hold, or quote has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request is well formed but cannot be accepted in the current purchase state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -2994,8 +3351,16 @@
       "post": {
         "operationId": "createBuyerQuote",
         "summary": "Calculate an authoritative quote for an order",
-        "description": "The quote fixes the ticket subtotal, discounts, fees, and total in minor units. Checkout accepts the quote against its revision.",
+        "description": "The quote fixes the ticket subtotal, discounts, fees, and total in minor units. Send the expected orderRevision. On HTTP 409, read the current order and quote, compare currentRevision, then retry with refreshed data.",
+        "security": [
+          {
+            "buyerSessionAuth": []
+          }
+        ],
         "parameters": [
+          {
+            "$ref": "#/components/parameters/PurchaseSessionId"
+          },
           {
             "$ref": "#/components/parameters/Id"
           },
@@ -3074,6 +3439,26 @@
               }
             }
           },
+          "410": {
+            "description": "Buyer session, hold, or quote has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request is well formed but cannot be accepted in the current purchase state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -3101,8 +3486,16 @@
       "post": {
         "operationId": "checkoutBuyerOrder",
         "summary": "Accept a current quote and begin server-selected payment",
-        "description": "Order revision increments when a quote is accepted and on every checkout, payment, or order state change. Reads do not mutate revision. On HTTP 409, read the current session/order, refresh against currentRevision, and retry the intended action only after comparing state.",
+        "description": "Order revision increments when a quote is accepted and on every checkout, payment, or order state change. Reads do not mutate revision. On HTTP 409, resume the current session and read the order, refresh against currentRevision, and retry the intended action only after comparing state.",
+        "security": [
+          {
+            "buyerSessionAuth": []
+          }
+        ],
         "parameters": [
+          {
+            "$ref": "#/components/parameters/PurchaseSessionId"
+          },
           {
             "$ref": "#/components/parameters/Id"
           },
@@ -3181,6 +3574,26 @@
               }
             }
           },
+          "410": {
+            "description": "Buyer session, hold, or quote has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request is well formed but cannot be accepted in the current purchase state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -3209,6 +3622,16 @@
         "operationId": "listBuyerTickets",
         "summary": "List tickets owned by the buyer session",
         "description": "Ticket delivery may be asynchronous. Ticket open URLs are owner-only and expire at the timestamp returned with each URL.",
+        "security": [
+          {
+            "buyerSessionAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PurchaseSessionId"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -3249,6 +3672,16 @@
                 }
               }
             }
+          },
+          "410": {
+            "description": "Buyer session, hold, or quote has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                }
+              }
+            }
           }
         }
       }
@@ -3259,7 +3692,14 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "bearerFormat": "JWT"
+        "bearerFormat": "JWT",
+        "description": "Admin/Studio JWT for v1 operations."
+      },
+      "buyerSessionAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "opaque",
+        "description": "Buyer-session credential issued by POST /api/v2/buyer/sessions; distinct from the purchase session ID selector."
       }
     },
     "parameters": {
@@ -3270,6 +3710,17 @@
         "schema": {
           "type": "string",
           "minLength": 1
+        }
+      },
+      "PurchaseSessionId": {
+        "name": "X-Purchase-Session-Id",
+        "in": "header",
+        "required": true,
+        "description": "Selects the current widget purchase session; it is not an authentication credential.",
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
         }
       },
       "IfMatch": {
@@ -17454,7 +17905,8 @@
         },
         "required": [
           "apiVersion",
-          "contact"
+          "contact",
+          "contactRevision"
         ],
         "additionalProperties": false
       },
@@ -17573,11 +18025,6 @@
             "type": "string",
             "const": "v2"
           },
-          "challengeId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
-          },
           "code": {
             "type": "string",
             "pattern": "^\\d{4,12}$"
@@ -17585,7 +18032,6 @@
         },
         "required": [
           "apiVersion",
-          "challengeId",
           "code"
         ],
         "additionalProperties": false
@@ -17730,6 +18176,11 @@
             "type": "string",
             "const": "v2"
           },
+          "orderRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
           "promoCode": {
             "type": "string",
             "minLength": 1,
@@ -17737,7 +18188,8 @@
           }
         },
         "required": [
-          "apiVersion"
+          "apiVersion",
+          "orderRevision"
         ],
         "additionalProperties": false
       },
@@ -19032,6 +19484,61 @@
           "contact",
           "contactRevision",
           "emailVerification"
+        ],
+        "additionalProperties": false
+      },
+      "BuyerSessionCreateRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "apiVersion": {
+            "type": "string",
+            "const": "v2"
+          },
+          "occurrenceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "hostBootstrapCredential": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "apiVersion",
+          "occurrenceId"
+        ],
+        "additionalProperties": false
+      },
+      "BuyerSessionCreateResult": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "apiVersion": {
+            "type": "string",
+            "const": "v2"
+          },
+          "purchaseSessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "sessionCredential": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "apiVersion",
+          "purchaseSessionId",
+          "sessionCredential",
+          "expiresAt"
         ],
         "additionalProperties": false
       },

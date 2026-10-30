@@ -16,19 +16,80 @@ describe('OpenAPI contract', () => {
   });
 
   it('documents the separate v2 buyer flow and revision refresh semantics', () => {
+    const schemas = openApiDocument.components.schemas as unknown as Record<string, Record<string, unknown>>;
     expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/occurrences');
     expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/occurrences/{id}/layout');
-    expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/session');
+    expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/sessions/current/resume');
     expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/orders/{id}/checkout');
     expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/tickets');
-    expect(openApiDocument.components.schemas.BuyerOccurrenceList.properties.apiVersion)
+    expect((schemas.BuyerOccurrenceList!.properties as Record<string, unknown>).apiVersion)
       .toMatchObject({ const: 'v2', type: 'string' });
-    expect(openApiDocument.components.schemas.BuyerPublicLayout.properties.snapshot.properties.backgrounds)
+    const publicLayoutProperties = schemas.BuyerPublicLayout!.properties as Record<string, unknown>;
+    const publicSnapshotProperties = (publicLayoutProperties.snapshot as Record<string, unknown>).properties as Record<string, unknown>;
+    expect(publicSnapshotProperties.backgrounds)
       .toMatchObject({ maxItems: 0 });
-    expect(openApiDocument.paths['/api/v2/buyer/orders/{id}/checkout'].post.description)
+    const checkout = (openApiDocument.paths as unknown as Record<string, { post: Record<string, unknown> }>)[
+      '/api/v2/buyer/orders/{id}/checkout']!.post;
+    expect(checkout.description)
       .toContain('Reads do not mutate revision');
-    expect(openApiDocument.paths['/api/v2/buyer/orders/{id}/checkout'].post.responses['409'].description)
+    expect(((checkout.responses as Record<string, { description: string }>)['409']!).description)
       .toContain('currentRevision');
+  });
+
+  it('separates buyer-session paths, credentials, and purchase-session selection from admin JWT', () => {
+    const paths = openApiDocument.paths as unknown as Record<string, {
+      get?: Record<string, unknown>;
+      post?: Record<string, unknown>;
+      put?: Record<string, unknown>;
+      delete?: Record<string, unknown>;
+    }>;
+    const operation = (path: string, method: 'get' | 'post' | 'put' | 'delete') =>
+      paths[path]?.[method] as Record<string, unknown>;
+    expect(paths).toHaveProperty('/api/v2/buyer/sessions');
+    expect(paths).toHaveProperty('/api/v2/buyer/sessions/current/resume');
+    expect(paths).toHaveProperty('/api/v2/buyer/sessions/current/contact');
+    expect(paths).toHaveProperty('/api/v2/buyer/sessions/current/email-challenges');
+    expect(paths).toHaveProperty('/api/v2/buyer/email-challenges/{id}/verify');
+    expect(openApiDocument.components.securitySchemes).toHaveProperty('bearerAuth');
+    expect(openApiDocument.components.securitySchemes).toHaveProperty('buyerSessionAuth');
+    expect(operation('/api/v2/buyer/sessions', 'post').security).toEqual([]);
+    const sessionScoped = [
+      ['/api/v2/buyer/occurrences/{id}', 'get'],
+      ['/api/v2/buyer/occurrences/{id}/holds', 'post'],
+      ['/api/v2/buyer/holds/{id}', 'delete'],
+      ['/api/v2/buyer/sessions/current/resume', 'get'],
+      ['/api/v2/buyer/sessions/current/contact', 'put'],
+      ['/api/v2/buyer/sessions/current/email-challenges', 'post'],
+      ['/api/v2/buyer/email-challenges/{id}/verify', 'post'],
+      ['/api/v2/buyer/orders', 'post'],
+      ['/api/v2/buyer/orders/{id}/quote', 'post'],
+      ['/api/v2/buyer/orders/{id}/checkout', 'post'],
+      ['/api/v2/buyer/tickets', 'get'],
+    ] as const;
+    for (const [path, method] of sessionScoped) {
+      const scopedOperation = operation(path, method);
+      expect(scopedOperation.security, path).toEqual([{ buyerSessionAuth: [] }]);
+      expect(scopedOperation.parameters, path).toContainEqual({ $ref: '#/components/parameters/PurchaseSessionId' });
+    }
+  });
+
+  it('requires buyer mutation revisions and documents expired and unprocessable responses', () => {
+    const paths = openApiDocument.paths as unknown as Record<string, {
+      post?: Record<string, unknown>;
+      put?: Record<string, unknown>;
+    }>;
+    const contact = paths['/api/v2/buyer/sessions/current/contact']!.put as Record<string, unknown>;
+    const quote = paths['/api/v2/buyer/orders/{id}/quote']!.post as Record<string, unknown>;
+    const schemas = openApiDocument.components.schemas as unknown as Record<string, { required?: string[] }>;
+    const contactResponses = contact.responses as Record<string, unknown>;
+    const quoteResponses = quote.responses as Record<string, unknown>;
+    expect(schemas.BuyerContactWrite!.required).toContain('contactRevision');
+    expect(schemas.BuyerQuoteRequest!.required).toContain('orderRevision');
+    expect(contactResponses).toHaveProperty('410');
+    expect(contactResponses).toHaveProperty('422');
+    expect(quoteResponses).toHaveProperty('410');
+    expect(quoteResponses).toHaveProperty('422');
+    expect((quoteResponses['409'] as { description: string }).description).toContain('currentRevision');
   });
 
   it('describes minor-unit money and an idempotency header', () => {
