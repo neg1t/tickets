@@ -5893,7 +5893,7 @@
       "post": {
         "operationId": "checkoutBuyerOrder",
         "summary": "Accept a current quote and begin server-selected payment",
-        "description": "Send both the expected quoteRevision and orderRevision. The backend validates the active hold, contact and verification requirements, accepts the quote, and creates or reuses one payment attempt. Order revision increments when a quote is accepted and on each checkout, payment, or order state change. Reads do not mutate revision. On HTTP 409, resume the session, read the order, compare currentRevision, then retry only after reconciling state. Inventory lease duration during external payment and treatment of a provider callback arriving after expiry remain backend integration decisions.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
+        "description": "Send both the expected quoteRevision and orderRevision. The backend validates the active hold, contact and verification requirements, accepts the quote, and creates or reuses one payment attempt. Order revision increments when a quote is accepted and on each checkout, payment, or order state change. Reads do not mutate revision. On HTTP 409, resume the session, read the order, compare currentRevision, create a fresh quote, and ask the buyer to reconfirm its total before retrying checkout. Inventory lease duration during external payment and treatment of a provider callback arriving after expiry remain backend integration decisions.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [
           {
             "buyerSessionAuth": []
@@ -6069,20 +6069,20 @@
             }
           },
           "409": {
-            "description": "The supplied revision is stale or the Idempotency-Key conflicts with a prior request. Read current state, compare currentRevision, and reconcile before retrying a revision conflict; a key conflict requires a new key for the new logical request.",
+            "description": "The order revision changed after quote creation. Compare currentRevision, read the current order, create a fresh quote, and ask the buyer to confirm its total before retrying checkout. A key conflict requires a new key for a different logical request.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
                 },
                 "examples": {
-                  "revisionConflict": {
-                    "summary": "Buyer state changed",
+                  "checkoutRevisionConflict": {
+                    "summary": "Order revision changed after quote creation",
                     "value": {
                       "apiVersion": "v2",
                       "code": "revision_conflict",
-                      "message": "The buyer state changed. Read current state before retrying.",
-                      "currentRevision": 8
+                      "message": "Current order revision is 9. Refresh the order, create a fresh quote, and ask the buyer to confirm that total before checkout.",
+                      "currentRevision": 9
                     }
                   },
                   "idempotencyConflict": {
@@ -6091,32 +6091,6 @@
                       "apiVersion": "v2",
                       "code": "idempotency_conflict",
                       "message": "This Idempotency-Key was already used with a different request body."
-                    }
-                  },
-                  "priceChanged": {
-                    "summary": "The authoritative price changed",
-                    "value": {
-                      "apiVersion": "v2",
-                      "code": "price_changed",
-                      "message": "Expected pricingRevision 12 is stale; the current pricing revision is 13. Refresh prices and confirm the current amount.",
-                      "currentRevision": 13
-                    }
-                  },
-                  "layoutChanged": {
-                    "summary": "The occurrence now uses another layout version",
-                    "value": {
-                      "apiVersion": "v2",
-                      "code": "layout_version_conflict",
-                      "message": "The layout version changed; refresh the public layout and selection."
-                    }
-                  },
-                  "availabilityConflict": {
-                    "summary": "Inventory changed before the mutation",
-                    "value": {
-                      "apiVersion": "v2",
-                      "code": "availability_conflict",
-                      "message": "The selected inventory is no longer available.",
-                      "currentRevision": 45
                     }
                   }
                 }

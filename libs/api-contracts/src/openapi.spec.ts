@@ -185,6 +185,26 @@ describe('OpenAPI contract', () => {
     expect(priceChanged.message as string).toContain('pricingRevision');
   });
 
+  it('keeps stale pricing conflicts on hold creation and gives checkout revision-specific guidance', () => {
+    const hold = openApiDocument.paths['/api/v2/buyer/occurrences/{id}/holds'].post;
+    const checkout = openApiDocument.paths['/api/v2/buyer/orders/{id}/checkout'].post;
+    const holdResponses = hold.responses as unknown as Record<string, {
+      content: Record<string, { examples: Record<string, unknown> }>;
+    }>;
+    const checkoutResponses = checkout.responses as unknown as Record<string, {
+      content: Record<string, { examples: Record<string, unknown> }>;
+    }>;
+    const holdConflictExamples = holdResponses['409']?.content['application/json']?.examples;
+    const checkoutConflictExamples = checkoutResponses['409']?.content['application/json']?.examples;
+    if (!holdConflictExamples || !checkoutConflictExamples) throw new Error('Expected hold and checkout conflict examples');
+
+    expect(holdConflictExamples).toHaveProperty('priceChanged');
+    expect(checkoutConflictExamples).not.toHaveProperty('priceChanged');
+    expect(checkoutConflictExamples).toHaveProperty('checkoutRevisionConflict');
+    expect(checkout.description).toContain('create a fresh quote');
+    expect(checkout.description).toContain('reconfirm its total');
+  });
+
   it('uses null promoCode to clear a promotion when quoting again', () => {
     const quote = openApiDocument.paths['/api/v2/buyer/orders/{id}/quotes'].post;
     const requestExamples = quote.requestBody.content['application/json'].examples as Record<string, { value: Record<string, unknown> } | undefined>;

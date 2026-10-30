@@ -211,6 +211,7 @@ const buyerErrorsByStatus = {
 } as const;
 const buyerErrorSamples = {
   revisionConflict: { summary: 'Buyer state changed', value: revisionConflictError },
+  checkoutRevisionConflict: { summary: 'Order revision changed after quote creation', value: buyerErrorExample('revision_conflict', 'Current order revision is 9. Refresh the order, create a fresh quote, and ask the buyer to confirm that total before checkout.', { currentRevision: 9 }) },
   idempotencyConflict: { summary: 'Idempotency key reused with another request', value: idempotencyConflictError },
   priceChanged: { summary: 'The authoritative price changed', value: buyerErrorExample('price_changed', 'Expected pricingRevision 12 is stale; the current pricing revision is 13. Refresh prices and confirm the current amount.', { currentRevision: 13 }) },
   layoutChanged: { summary: 'The occurrence now uses another layout version', value: buyerErrorExample('layout_version_conflict', 'The layout version changed; refresh the public layout and selection.') },
@@ -234,6 +235,8 @@ const buyerErrorVariantResponse = (status: '409' | '410' | '422' | '503', sample
   description: status === '409'
     ? samples.includes('holdConverted')
       ? 'Cancellation raced with order conversion. The hold was not cancelled; resume the purchase session to retrieve the order. A stale If-Match revision also returns currentRevision, and a key conflict requires a new key for a different logical request.'
+      : samples.includes('checkoutRevisionConflict')
+        ? 'The order revision changed after quote creation. Compare currentRevision, read the current order, create a fresh quote, and ask the buyer to confirm its total before retrying checkout. A key conflict requires a new key for a different logical request.'
       : samples.includes('revisionConflict')
       ? 'The supplied revision is stale or the Idempotency-Key conflicts with a prior request. Read current state, compare currentRevision, and reconcile before retrying a revision conflict; a key conflict requires a new key for the new logical request.'
       : samples.some((sample) => ['availabilityConflict', 'priceChanged', 'layoutChanged'].includes(sample))
@@ -870,7 +873,7 @@ export const openApiDocument = {
       post: {
         operationId: 'checkoutBuyerOrder',
         summary: 'Accept a current quote and begin server-selected payment',
-        description: buyerOperationDescription('Send both the expected quoteRevision and orderRevision. The backend validates the active hold, contact and verification requirements, accepts the quote, and creates or reuses one payment attempt. Order revision increments when a quote is accepted and on each checkout, payment, or order state change. Reads do not mutate revision. On HTTP 409, resume the session, read the order, compare currentRevision, then retry only after reconciling state. Inventory lease duration during external payment and treatment of a provider callback arriving after expiry remain backend integration decisions.'),
+        description: buyerOperationDescription('Send both the expected quoteRevision and orderRevision. The backend validates the active hold, contact and verification requirements, accepts the quote, and creates or reuses one payment attempt. Order revision increments when a quote is accepted and on each checkout, payment, or order state change. Reads do not mutate revision. On HTTP 409, resume the session, read the order, compare currentRevision, create a fresh quote, and ask the buyer to reconfirm its total before retrying checkout. Inventory lease duration during external payment and treatment of a provider callback arriving after expiry remain backend integration decisions.'),
         security: buyerSessionSecurity,
         parameters: [purchaseSession, id, key],
         requestBody: buyerRequest('BuyerCheckoutRequest', {
@@ -879,7 +882,7 @@ export const openApiDocument = {
         responses: {
           ...buyerSuccessResponse('BuyerCheckoutResult', '200', 'paidDeliveryPending', 'Payment succeeded; tickets are still being issued asynchronously', buyerPaidCheckoutExample),
           ...buyerErrors('400', '401', '403', '404', '409', '410', '422', '429', '503', {
-            '409': ['revisionConflict', 'idempotencyConflict', 'priceChanged', 'layoutChanged', 'availabilityConflict'],
+            '409': ['checkoutRevisionConflict', 'idempotencyConflict'],
             '410': ['sessionExpired', 'holdExpired', 'quoteExpired'], '422': ['verificationRequired', 'paymentFailed'],
           }),
         },
