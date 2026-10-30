@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyDraft } from '@hall-platform/domain';
-import { mapBuyerOccurrence, minorToMajor } from './mapping.js';
+import { mapBuyerOccurrence, mapV2BuyerPricesToSeatView, minorToMajor } from './mapping.js';
 
 describe('API to component mapping', () => {
   it('converts exact minor units using the currency fraction digits', () => {
@@ -34,5 +34,19 @@ describe('API to component mapping', () => {
       ownHold: null,
     });
     expect(mapped.prices.seats['seat-a']).toEqual({ amount: 123.45, currency: 'RUB', category: 'VIP' });
+  });
+
+  it('converts v2 minor-unit prices only at the SeatView mapping boundary', () => {
+    const mapped = mapV2BuyerPricesToSeatView({
+      apiVersion: 'v2', occurrenceId: 'occurrence-a', layoutVersionId: 'layout-v2',
+      pricingRevision: 4, currency: 'RUB',
+      seats: { 'seat-a': { amountMinor: 12345, category: 'VIP' } },
+      zones: { 'zone-a': { amountMinor: 50000 } },
+    });
+
+    expect(mapped).toEqual({
+      seats: { 'seat-a': { amount: 123.45, currency: 'RUB', category: 'VIP' } },
+      zones: { 'zone-a': { amount: 500, currency: 'RUB' } },
+    });
   });
 });

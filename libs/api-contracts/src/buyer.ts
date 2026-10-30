@@ -232,6 +232,7 @@ export const buyerSessionCreateResultSchema = z.strictObject({
   sessionCredential: z.string().min(1),
   expiresAt: dateTimeSchema,
 });
+export type BuyerSessionCreateResult = z.infer<typeof buyerSessionCreateResultSchema>;
 
 export const buyerQuoteSchema = z.strictObject({
   apiVersion: buyerApiVersionSchema,
@@ -298,6 +299,7 @@ export const buyerCheckoutRequestSchema = z.strictObject({
   quoteRevision: revisionSchema,
   orderRevision: revisionSchema,
 });
+export type BuyerCheckoutRequest = z.infer<typeof buyerCheckoutRequestSchema>;
 
 const safeNativePayloadSchema = z.strictObject({
   provider: idSchema,
@@ -348,6 +350,7 @@ export const buyerCheckoutResultSchema = z.strictObject({
   order: buyerOrderSchema,
   paymentAttempt: buyerPaymentAttemptSchema,
 });
+export type BuyerCheckoutResult = z.infer<typeof buyerCheckoutResultSchema>;
 
 export const buyerSessionResumeSchema = z.strictObject({
   apiVersion: buyerApiVersionSchema,
@@ -391,6 +394,7 @@ export const buyerSessionContactSchema = z.strictObject({
   contactRevision: revisionSchema,
   emailVerification: buyerEmailVerificationSchema.nullable(),
 });
+export type BuyerSessionContact = z.infer<typeof buyerSessionContactSchema>;
 
 const buyerPublicSnapshotSchema = layoutSnapshotSchema.safeExtend({
   backgrounds: z.array(z.never()).length(0),

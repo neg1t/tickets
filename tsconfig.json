@@ -56,6 +56,9 @@
     },
     {
       "path": "./libs/pricing-editor"
+    },
+    {
+      "path": "./libs/ticket-purchase"
     }
   ],
   "compilerOptions": {}

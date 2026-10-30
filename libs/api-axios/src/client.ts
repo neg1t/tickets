@@ -39,6 +39,8 @@ import {
   type ApiError,
 } from '@hall-platform/api-contracts';
 
+export type { BuyerApiClientOptions } from './buyerClient.js';
+
 export class HallApiError extends Error {
   constructor(
     public readonly code: string,

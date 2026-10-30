@@ -1,0 +1,7 @@
+{
+  "name": "ticket-purchase",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/ticket-purchase/src",
+  "projectType": "library",
+  "tags": ["scope:shared", "layer:widgets", "type:purchase"]
+}

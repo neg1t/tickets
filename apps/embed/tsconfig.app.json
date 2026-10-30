@@ -34,6 +34,9 @@
   "include": ["src/**/*.js", "src/**/*.jsx", "src/**/*.ts", "src/**/*.tsx"],
   "references": [
     {
+      "path": "../../libs/ticket-purchase/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/seat-view/tsconfig.lib.json"
     },
     {
@@ -44,6 +47,12 @@
     },
     {
       "path": "../../libs/design-tokens/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/api-contracts/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/api-axios/tsconfig.lib.json"
     }
   ]
 }

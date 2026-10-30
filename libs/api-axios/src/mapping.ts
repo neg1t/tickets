@@ -1,8 +1,10 @@
 import {
   apiMoneySchema,
   apiOccurrenceSchema,
+  buyerPricesSchema,
   type ApiMoney,
   type ApiOccurrence,
+  type BuyerPrices,
 } from '@hall-platform/api-contracts';
 
 export function minorToMajor(price: ApiMoney): number {
@@ -49,5 +51,25 @@ export function mapBuyerOccurrence(value: ApiOccurrence) {
       zones: mapPrices(occurrence.prices.zones),
     },
     ownHold: occurrence.ownHold,
+  };
+}
+
+function mapV2Prices(prices: BuyerPrices['seats'] | BuyerPrices['zones'], currency: string) {
+  return Object.fromEntries(Object.entries(prices).map(([id, price]) => [
+    id,
+    {
+      amount: minorToMajor({ amountMinor: price.amountMinor, currency }),
+      currency,
+      ...(price.category ? { category: price.category } : {}),
+    },
+  ]));
+}
+
+/** Convert server minor units only at the boundary consumed by the legacy SeatView renderer. */
+export function mapV2BuyerPricesToSeatView(value: BuyerPrices) {
+  const prices = buyerPricesSchema.parse(value);
+  return {
+    seats: mapV2Prices(prices.seats, prices.currency),
+    zones: mapV2Prices(prices.zones, prices.currency),
   };
 }
