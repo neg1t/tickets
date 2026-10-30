@@ -114,6 +114,8 @@ export function validateSelection(input: {
   readonly selection: readonly SeatSelectionItem[];
   readonly availability: SeatAvailabilityMap;
   readonly prices: SeatPriceMap;
+  /** Inventory the server says is held by this buyer session. */
+  readonly ownHoldSelection?: readonly SeatSelectionItem[];
   readonly seatIds?: Pick<ReadonlySet<string>, 'has'>;
   readonly zoneIds?: Pick<ReadonlySet<string>, 'has'>;
 }): SelectionValidationResult {
@@ -126,6 +128,21 @@ export function validateSelection(input: {
   const zoneIds =
     input.zoneIds ??
     new Set<string>(layout.snapshot.zones.map((zone) => zone.id));
+  const ownHoldSeatIds = new Set(
+    input.ownHoldSelection?.flatMap((item) =>
+      item.kind === 'seat' ? [item.seatId] : [],
+    ) ?? [],
+  );
+  const ownHoldZoneQuantities = new Map<string, number>();
+  for (const item of input.ownHoldSelection ?? []) {
+    if (
+      item.kind === 'generalAdmission' &&
+      Number.isSafeInteger(item.quantity) &&
+      item.quantity > 0
+    ) {
+      ownHoldZoneQuantities.set(item.zoneId, item.quantity);
+    }
+  }
   const seen = new Set<string>();
   let count = 0;
   let minorTotal = 0n;
@@ -150,7 +167,10 @@ export function validateSelection(input: {
     if (kind === 'seat') {
       count += 1;
       if (!seatIds.has(id)) issues.push({ code: 'unknown_seat', kind, id });
-      else if (availability.seats[id] !== 'available') {
+      else if (
+        availability.seats[id] !== 'available' &&
+        !(availability.seats[id] === 'held' && ownHoldSeatIds.has(id))
+      ) {
         issues.push({ code: 'unavailable_seat', kind, id });
       }
     } else {
@@ -162,17 +182,18 @@ export function validateSelection(input: {
       if (!zoneIds.has(id)) issues.push({ code: 'unknown_zone', kind, id });
       else {
         const stock = availability.zones?.[id];
+        const ownHeldQuantity = ownHoldZoneQuantities.get(id) ?? 0;
         if (
           !stock ||
           !Number.isSafeInteger(stock.available) ||
-          stock.available <= 0 ||
+          (stock.available <= 0 && ownHeldQuantity === 0) ||
           (stock.maxPerOrder !== undefined &&
             (!Number.isSafeInteger(stock.maxPerOrder) ||
               stock.maxPerOrder <= 0))
         ) {
           issues.push({ code: 'unavailable_zone', kind, id });
         } else if (Number.isSafeInteger(item.quantity) && item.quantity > 0) {
-          if (item.quantity > stock.available) {
+          if (item.quantity > stock.available + ownHeldQuantity) {
             issues.push({ code: 'quantity_exceeds_availability', kind, id });
           } else if (
             stock.maxPerOrder !== undefined &&

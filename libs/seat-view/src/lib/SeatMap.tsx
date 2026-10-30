@@ -1,0 +1,139 @@
+import { useId, useMemo, type PropsWithChildren } from 'react';
+import { withoutBackgrounds } from '@hall-platform/domain';
+import {
+  HallViewport,
+  type HallViewportProps,
+  type RendererPreference,
+} from '@hall-platform/hall-viewer';
+import type { HallTarget, RendererSeatUpdate } from '@hall-platform/renderer-core';
+import { useSeatSelection } from './useSeatSelection.js';
+import type { PublishedHallLayout, SeatAvailabilityMap } from './SeatView.js';
+
+export const seatStatusColors = {
+  available: '#18784a',
+  held: '#b97819',
+  sold: '#9a4450',
+  blocked: '#67717e',
+  unavailable: '#a5adb6',
+} as const;
+
+const englishViewerLabels: NonNullable<HallViewportProps['labels']> = {
+  hall: 'Hall map',
+  toolbar: 'Map controls',
+  select: 'Select',
+  pan: 'Pan',
+  zoomIn: 'Zoom in',
+  zoomOut: 'Zoom out',
+  fit: 'Fit',
+  reset: '100%',
+  zoomSelection: 'Zoom to selection',
+  zone: 'Section',
+  zoomZone: 'Zoom to section',
+  allZones: 'All sections',
+  floor: 'Floor',
+  scale: 'Zoom',
+  selected: 'Selected',
+  grid: 'Grid',
+};
+
+export type SeatMapProps = PropsWithChildren<{
+  readonly layout: PublishedHallLayout;
+  readonly availability: SeatAvailabilityMap;
+  readonly focusedFloorId: string;
+  readonly focusedZoneId?: string | null;
+  readonly locale?: string;
+  readonly height?: number;
+  readonly rendererPreference?: RendererPreference;
+  readonly webglEnabled?: boolean;
+  readonly onSeatClick: (seatId: string) => void;
+  readonly onZoneClick: (zoneId: string) => void;
+  readonly onFloorChange: (floorId: string) => void;
+  readonly onHoverSeatChange?: (seatId: string | null) => void;
+  readonly onError?: (error: Error) => void;
+}>;
+
+/** Renders only the reusable hall map. Selection comes from its shared provider. */
+export function SeatMap({
+  layout,
+  availability,
+  focusedFloorId,
+  focusedZoneId = null,
+  locale = 'ru-RU',
+  height = 400,
+  rendererPreference = 'auto',
+  webglEnabled = false,
+  onSeatClick,
+  onZoneClick,
+  onFloorChange,
+  onHoverSeatChange,
+  onError,
+  children,
+}: SeatMapProps) {
+  const { selectedSeatIds } = useSeatSelection();
+  const instanceId = useId().replace(/:/g, '');
+  const snapshot = useMemo(
+    () => withoutBackgrounds(layout.snapshot),
+    [layout.snapshot],
+  );
+  const seatAppearance = useMemo(
+    () =>
+      Object.fromEntries(
+        snapshot.seats.map((seat) => [
+          seat.id,
+          {
+            fill: seatStatusColors[availability.seats[seat.id] ?? 'unavailable'],
+          },
+        ]),
+      ),
+    [availability.seats, snapshot.seats],
+  );
+  const seatUpdates = useMemo<readonly RendererSeatUpdate[]>(
+    () =>
+      snapshot.seats.map((seat) => ({
+        id: seat.id,
+        status: availability.seats[seat.id] ?? 'unavailable',
+        label: seat.label,
+      })),
+    [availability.seats, snapshot.seats],
+  );
+  const selectedTargets: HallTarget[] = useMemo(
+    () => [...selectedSeatIds].map((id) => ({ kind: 'seat', id })),
+    [selectedSeatIds],
+  );
+
+  function handleCanvasClick(_point: unknown, target: HallTarget | null) {
+    if (target?.kind === 'seat') onSeatClick(target.id);
+    if (target?.kind === 'zone') onZoneClick(target.id);
+  }
+
+  return (
+    <div className="seat-view-map">
+      <HallViewport
+        snapshot={snapshot}
+        hallName={layout.hallName}
+        {...(layout.zoneBounds ? { zoneBounds: layout.zoneBounds } : {})}
+        viewerMode="pick"
+        selectedTargets={selectedTargets}
+        {...(locale.toLowerCase().startsWith('en')
+          ? { labels: englishViewerLabels }
+          : {})}
+        seatAppearance={seatAppearance}
+        seatUpdates={seatUpdates}
+        renderer={rendererPreference}
+        webglEnabled={webglEnabled}
+        {...(onError ? { onRendererError: onError } : {})}
+        stageId={`seat-stage-${instanceId}`}
+        fitKey={`${snapshot.id}:${focusedFloorId}:${focusedZoneId ?? ''}`}
+        focusedFloorId={focusedFloorId}
+        {...(focusedZoneId ? { focusedZoneId } : {})}
+        height={height}
+        onCanvasClick={handleCanvasClick}
+        onFloorChange={onFloorChange}
+        onHoverTarget={(target) =>
+          onHoverSeatChange?.(target?.kind === 'seat' ? target.id : null)
+        }
+      />
+      {children}
+    </div>
+  );
+}

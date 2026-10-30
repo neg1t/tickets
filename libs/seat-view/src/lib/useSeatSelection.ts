@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSeatSelectionContext } from './SeatSelectionProvider.js';
 import {
   validateSeatPrice,
   type SelectionValidationIssueCode,
@@ -20,6 +21,7 @@ type UseSeatSelectionOptions = Readonly<{
   contextKey: string;
   occurrenceId: string;
   selection: readonly SeatSelectionItem[];
+  ownHoldSelection: readonly SeatSelectionItem[];
   availability: SeatAvailabilityMap;
   prices: SeatPriceMap;
   locked: boolean;
@@ -40,10 +42,25 @@ function isSelectionItem(item: SeatSelectionItem): boolean {
   );
 }
 
-export function useSeatSelection({
+export function useSeatSelection() {
+  const context = useSeatSelectionContext();
+  const selectedSeatIds = useMemo(
+    () =>
+      new Set(
+        context.selection.filter(isSelectionItem).flatMap((item) =>
+          item.kind === 'seat' ? [item.seatId] : [],
+        ),
+      ),
+    [context.selection],
+  );
+  return { ...context, selectedSeatIds };
+}
+
+export function useSeatSelectionController({
   contextKey,
   occurrenceId,
   selection,
+  ownHoldSelection,
   availability,
   prices,
   locked,
@@ -68,6 +85,26 @@ export function useSeatSelection({
     () => selection.filter(isSelectionItem),
     [selection],
   );
+  const ownHoldSeatIds = useMemo(
+    () =>
+      new Set(
+        ownHoldSelection.flatMap((item) =>
+          item.kind === 'seat' ? [item.seatId] : [],
+        ),
+      ),
+    [ownHoldSelection],
+  );
+  const ownHoldZoneQuantities = useMemo(
+    () =>
+      new Map(
+        ownHoldSelection.flatMap((item) =>
+          item.kind === 'generalAdmission'
+            ? [[item.zoneId, item.quantity] as const]
+            : [],
+        ),
+      ),
+    [ownHoldSelection],
+  );
   const selectedSeatIds = useMemo(
     () =>
       new Set(
@@ -89,7 +126,12 @@ export function useSeatSelection({
         );
         return;
       }
-      if (availability.seats[seatId] !== 'available') {
+      if (
+        availability.seats[seatId] !== 'available' &&
+        !(
+          availability.seats[seatId] === 'held' && ownHoldSeatIds.has(seatId)
+        )
+      ) {
         setError(messages.seatUnavailable);
         return;
       }
@@ -106,6 +148,7 @@ export function useSeatSelection({
       messages.missingPrice,
       messages.seatUnavailable,
       onSelectionChange,
+      ownHoldSeatIds,
       pending,
       prices.seats,
       safeSelection,
@@ -118,7 +161,12 @@ export function useSeatSelection({
       if (locked || pending) return;
       const zone = availability.zones?.[zoneId];
       if (!zone) return;
-      const limit = Math.min(zone.available, zone.maxPerOrder ?? zone.available);
+      const availablePlusOwnHold =
+        zone.available + (ownHoldZoneQuantities.get(zoneId) ?? 0);
+      const limit = Math.min(
+        availablePlusOwnHold,
+        zone.maxPerOrder ?? availablePlusOwnHold,
+      );
       const quantity = Number(rawValue);
       if (!Number.isSafeInteger(quantity) || quantity < 0 || quantity > limit) {
         setError(messages.invalidQuantity);
@@ -139,6 +187,7 @@ export function useSeatSelection({
       locked,
       messages.invalidQuantity,
       onSelectionChange,
+      ownHoldZoneQuantities,
       pending,
       safeSelection,
     ],

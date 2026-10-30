@@ -15,6 +15,7 @@ import {
   SeatView,
   type SeatSelectionItem,
   type SeatViewData,
+  type SeatViewProps,
 } from './SeatView.js';
 
 vi.mock('@hall-platform/hall-viewer', () => ({
@@ -344,6 +345,59 @@ describe('SeatView', () => {
       occurrenceId: 'event-1',
       selection: [{ kind: 'generalAdmission', zoneId: zone.id, quantity: 2 }],
     });
+  });
+
+  it('validates server-owned held inventory against the same controlled selection', () => {
+    const ownHoldSelection: SeatSelectionItem[] = [
+      { kind: 'seat', seatId: first.id },
+      { kind: 'generalAdmission', zoneId: zone.id, quantity: 2 },
+    ];
+    const props = {
+      layout,
+      occurrenceId: 'own-hold',
+      availability: {
+        seats: { [first.id]: 'held', [second.id]: 'available' },
+        zones: { [zone.id]: { available: 0, maxPerOrder: 2 } },
+      },
+      prices,
+      selection: ownHoldSelection,
+      ownHoldSelection,
+      onSelectionChange: vi.fn(),
+      onBuyClick: vi.fn(),
+    } as SeatViewProps & { ownHoldSelection: SeatSelectionItem[] };
+
+    render(<SeatView {...props} />);
+
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByText(/× 2/)).toBeTruthy();
+  });
+
+  it('enables a held seat only when the server identifies it as the buyer hold', () => {
+    const onSelectionChange = vi.fn();
+    const props = {
+      layout,
+      occurrenceId: 'owned-seat-selection',
+      availability: {
+        seats: { [first.id]: 'held', [second.id]: 'held' },
+        zones: { [zone.id]: { available: 0, maxPerOrder: 2 } },
+      },
+      prices,
+      selection: [],
+      ownHoldSelection: [{ kind: 'seat', seatId: first.id }],
+      onSelectionChange,
+      onBuyClick: vi.fn(),
+    } as SeatViewProps & { ownHoldSelection: SeatSelectionItem[] };
+
+    render(<SeatView {...props} />);
+
+    const ownSeat = screen.getByRole('button', { name: /Место L1-1/ });
+    const otherSeat = screen.getByRole('button', { name: /Место L1-2/ });
+    expect(ownSeat.hasAttribute('disabled')).toBe(false);
+    expect(otherSeat.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(ownSeat);
+    expect(onSelectionChange).toHaveBeenCalledWith([
+      { kind: 'seat', seatId: first.id },
+    ]);
   });
 
   it('keeps two mounted instances independent', () => {

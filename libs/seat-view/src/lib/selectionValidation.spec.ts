@@ -189,6 +189,27 @@ describe('validateSelection', () => {
     );
   });
 
+  it('accepts held seat and GA inventory only when server own-hold data owns it', () => {
+    const ownHoldSelection: SeatSelectionItem[] = [
+      { kind: 'seat', seatId: seat.id },
+      { kind: 'generalAdmission', zoneId: zone.id, quantity: 2 },
+    ];
+    const heldAvailability: SeatAvailabilityMap = {
+      seats: { [seat.id]: 'held' },
+      zones: { [zone.id]: { available: 0, maxPerOrder: 2 } },
+    };
+
+    const result = validateSelection({
+      layout,
+      selection: ownHoldSelection,
+      availability: heldAvailability,
+      prices,
+      ownHoldSelection,
+    });
+
+    expect(result).toMatchObject({ valid: true, count: 3, issues: [] });
+  });
+
   it('uses memoized identity sets instead of scanning the layout for every selection', () => {
     const forbidArrayScan = <T>(items: readonly T[]): T[] =>
       new Proxy([...items], {

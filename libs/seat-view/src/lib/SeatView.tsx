@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
@@ -10,18 +9,9 @@ import { useUnit } from 'effector-react';
 import {
   withoutBackgrounds,
   type LayoutSnapshot,
-  type SeatStatus,
 } from '@hall-platform/domain';
 import type { SpatialBounds } from '@hall-platform/geometry';
-import {
-  HallViewport,
-  type HallViewportProps,
-  type RendererPreference,
-} from '@hall-platform/hall-viewer';
-import type {
-  HallTarget,
-  RendererSeatUpdate,
-} from '@hall-platform/renderer-core';
+import type { RendererPreference } from '@hall-platform/hall-viewer';
 import { createSeatViewModel } from './seatView.model.js';
 import { buildSeatIndexes } from './seatIndexes.js';
 import {
@@ -33,7 +23,13 @@ import {
   validateSeatPrice,
   validateSelection,
 } from './selectionValidation.js';
-import { selectionIssueMessage, useSeatSelection } from './useSeatSelection.js';
+import {
+  selectionIssueMessage,
+  useSeatSelection,
+  useSeatSelectionController,
+} from './useSeatSelection.js';
+import { SeatMap, seatStatusColors } from './SeatMap.js';
+import { SeatSelectionProvider } from './SeatSelectionProvider.js';
 import { SeatDetails, type PlaceDetails } from './ui/SeatDetails.js';
 import { SeatFilters } from './ui/SeatFilters.js';
 import { AccessibleSeatList } from './ui/AccessibleSeatList.js';
@@ -86,6 +82,8 @@ export type SeatViewProps = {
   readonly availabilityDeltas?: readonly SeatAvailabilityDelta[];
   readonly prices: SeatPriceMap;
   readonly selection: readonly SeatSelectionItem[];
+  /** Authoritative seats/GA currently held by this buyer session. */
+  readonly ownHoldSelection?: readonly SeatSelectionItem[];
   readonly locale?: string;
   readonly loading?: boolean;
   readonly buying?: boolean;
@@ -101,13 +99,6 @@ export type SeatViewProps = {
   readonly webglEnabled?: boolean;
 };
 
-const statusColors: Record<SeatStatus, string> = {
-  available: '#18784a',
-  held: '#b97819',
-  sold: '#9a4450',
-  blocked: '#67717e',
-  unavailable: '#a5adb6',
-};
 const priceFormatters = new Map<string, Intl.NumberFormat>();
 const noAvailabilityDeltas: readonly SeatAvailabilityDelta[] = [];
 
@@ -196,25 +187,6 @@ const translations = {
   },
 } as const;
 
-const englishViewerLabels: NonNullable<HallViewportProps['labels']> = {
-  hall: 'Hall map',
-  toolbar: 'Map controls',
-  select: 'Select',
-  pan: 'Pan',
-  zoomIn: 'Zoom in',
-  zoomOut: 'Zoom out',
-  fit: 'Fit',
-  reset: '100%',
-  zoomSelection: 'Zoom to selection',
-  zone: 'Section',
-  zoomZone: 'Zoom to section',
-  allZones: 'All sections',
-  floor: 'Floor',
-  scale: 'Zoom',
-  selected: 'Selected',
-  grid: 'Grid',
-};
-
 function formatPrice(price: SeatPrice, locale: string): string {
   try {
     const key = `${locale}\u0000${price.currency}`;
@@ -233,7 +205,7 @@ function formatPrice(price: SeatPrice, locale: string): string {
   }
 }
 
-export function SeatView(props: SeatViewProps) {
+function SeatViewContent(props: SeatViewProps) {
   const safeLayout = useMemo(
     () => {
       const { hallName, snapshot, zoneBounds } = props.layout;
@@ -251,19 +223,22 @@ export function SeatView(props: SeatViewProps) {
     availabilityRevision = 0,
     availabilityDeltas = noAvailabilityDeltas,
     prices,
-    selection,
     locale = 'ru-RU',
     loading = false,
     buying = false,
     purchaseDisabled = false,
     error = null,
-    onSelectionChange,
     onBuyClick,
     onError,
     onAvailabilityResync,
     rendererPreference = 'auto',
     webglEnabled = false,
   } = props;
+  const {
+    selection,
+    ownHoldSelection,
+    onSelectionChange,
+  } = useSeatSelection();
   const layout = safeLayout;
   const labels = locale.toLowerCase().startsWith('en')
     ? translations.en
@@ -348,7 +323,6 @@ export function SeatView(props: SeatViewProps) {
     contextKey,
     onAvailabilityResync,
   ]);
-  const instanceId = useId().replace(/:/g, '');
   const layoutIndex = useMemo(() => {
     const snapshot = layout.snapshot;
     const measuredIndex = snapshot.seats.length >= 5_000;
@@ -385,6 +359,15 @@ export function SeatView(props: SeatViewProps) {
   const normalizedSearch = search.trim().toLowerCase();
   const availabilitySeats = currentAvailability.seats;
   const searchTextById = layoutIndex.searchTextById;
+  const ownHoldSeatIds = useMemo(
+    () =>
+      new Set(
+        ownHoldSelection.flatMap((item) =>
+          item.kind === 'seat' ? [item.seatId] : [],
+        ),
+      ),
+    [ownHoldSelection],
+  );
   const baseSeats = useMemo(
     () =>
       activeZoneId
@@ -407,17 +390,25 @@ export function SeatView(props: SeatViewProps) {
         : baseSeats.filter(
             (seat) =>
               (!availabilityFilter ||
-                availabilityFilter[seat.id] === 'available') &&
+                availabilityFilter[seat.id] === 'available' ||
+                ownHoldSeatIds.has(seat.id)) &&
               (searchTextById.get(seat.id)?.includes(normalizedSearch) ??
                 false),
           ),
-    [baseSeats, normalizedSearch, availabilityFilter, searchTextById],
+    [
+      baseSeats,
+      normalizedSearch,
+      availabilityFilter,
+      ownHoldSeatIds,
+      searchTextById,
+    ],
   );
   const { seatById, zoneById } = layoutIndex;
-  const selectionController = useSeatSelection({
+  const selectionController = useSeatSelectionController({
     contextKey,
     occurrenceId,
     selection,
+    ownHoldSelection,
     availability: currentAvailability,
     prices,
     locked: loading || buying,
@@ -444,33 +435,6 @@ export function SeatView(props: SeatViewProps) {
     ? [...selectedSeatIds].map((id) => seatById.get(id)?.zoneId).find(Boolean)
     : null;
   const focusedZoneId = activeZoneId ?? selectedZoneForMobile ?? null;
-  const seatAppearance = useMemo(
-    () =>
-      Object.fromEntries(
-        layout.snapshot.seats.map((seat) => [
-          seat.id,
-          {
-            fill: statusColors[
-              currentAvailability.seats[seat.id] ?? 'unavailable'
-            ],
-          },
-        ]),
-      ),
-    [layout.snapshot.seats, currentAvailability.seats],
-  );
-  const rendererSeatUpdates = useMemo<readonly RendererSeatUpdate[]>(
-    () =>
-      layout.snapshot.seats.map((seat) => ({
-        id: seat.id,
-        status: currentAvailability.seats[seat.id] ?? 'unavailable',
-        label: seat.label,
-      })),
-    [layout.snapshot.seats, currentAvailability.seats],
-  );
-  const selectedTargets: HallTarget[] = [...selectedSeatIds].map((id) => ({
-    kind: 'seat',
-    id,
-  }));
   const priceLegend = useMemo(() => {
     const unique = new Map<string, SeatPrice>();
     for (const seat of layout.snapshot.seats) {
@@ -493,10 +457,18 @@ export function SeatView(props: SeatViewProps) {
         selection,
         availability: currentAvailability,
         prices,
+        ownHoldSelection,
         seatIds: layoutIndex.seatById,
         zoneIds: layoutIndex.zoneById,
       }),
-    [layout, layoutIndex, selection, currentAvailability, prices],
+    [
+      layout,
+      layoutIndex,
+      selection,
+      currentAvailability,
+      prices,
+      ownHoldSelection,
+    ],
   );
   const selectedCount = validation.count;
   const total = validation.total;
@@ -532,11 +504,6 @@ export function SeatView(props: SeatViewProps) {
       ...(price?.category ? { category: price.category } : {}),
     };
   }
-  function handleCanvasClick(_point: unknown, target: HallTarget | null) {
-    if (target?.kind === 'seat') handleSeatClick(target.id);
-    if (target?.kind === 'zone') selectZone(target.id);
-  }
-
   return (
     <section
       className="seat-view"
@@ -550,33 +517,21 @@ export function SeatView(props: SeatViewProps) {
       {(error || localError) && <p role="alert">{error || localError}</p>}
 
       <div className="seat-view-layout">
-        <div className="seat-view-map">
-          <HallViewport
-            snapshot={layout.snapshot}
-            hallName={layout.hallName}
-            {...(layout.zoneBounds ? { zoneBounds: layout.zoneBounds } : {})}
-            viewerMode="pick"
-            selectedTargets={selectedTargets}
-            {...(locale.toLowerCase().startsWith('en')
-              ? { labels: englishViewerLabels }
-              : {})}
-            seatAppearance={seatAppearance}
-            seatUpdates={rendererSeatUpdates}
-            renderer={rendererPreference}
-            webglEnabled={webglEnabled}
-            {...(onError ? { onRendererError: onError } : {})}
-            stageId={`seat-stage-${instanceId}`}
-            fitKey={`${layout.snapshot.id}:${activeFloorId}:${focusedZoneId ?? ''}`}
-            focusedFloorId={activeFloorId}
-            {...(focusedZoneId ? { focusedZoneId } : {})}
-            height={compact ? 300 : 400}
-            onCanvasClick={handleCanvasClick}
-            onFloorChange={selectFloor}
-            onHoverTarget={(target) =>
-              setHoveredSeatId(target?.kind === 'seat' ? target.id : null)
-            }
-          />
-
+        <SeatMap
+          layout={layout}
+          availability={currentAvailability}
+          focusedFloorId={activeFloorId}
+          focusedZoneId={focusedZoneId}
+          locale={locale}
+          height={compact ? 300 : 400}
+          rendererPreference={rendererPreference}
+          webglEnabled={webglEnabled}
+          onSeatClick={handleSeatClick}
+          onZoneClick={selectZone}
+          onFloorChange={selectFloor}
+          onHoverSeatChange={setHoveredSeatId}
+          {...(onError ? { onError } : {})}
+        >
           {tooltipSeat && (
             <SeatDetails
               details={placeDetails(tooltipSeat)}
@@ -595,7 +550,7 @@ export function SeatView(props: SeatViewProps) {
               ['available', 'held', 'sold', 'blocked', 'unavailable'] as const
             ).map((status) => (
               <span key={status}>
-                <i style={{ backgroundColor: statusColors[status] }} />
+                <i style={{ backgroundColor: seatStatusColors[status] }} />
                 {labels.statuses[status]}
               </span>
             ))}
@@ -619,7 +574,7 @@ export function SeatView(props: SeatViewProps) {
               ))}
             </div>
           )}
-        </div>
+        </SeatMap>
 
         <div className="seat-view-panel">
           <SeatFilters
@@ -664,14 +619,17 @@ export function SeatView(props: SeatViewProps) {
                 disabled:
                   locked ||
                   (!selected &&
-                    (details.status !== 'available' ||
+                    ((details.status !== 'available' &&
+                      !(details.status === 'held' && ownHoldSeatIds.has(seat.id))) ||
                       !validateSeatPrice(prices.seats[seat.id]).valid)),
               };
             }}
             isEnabled={(id) =>
               !locked &&
               (selectedSeatIds.has(id) ||
-                (currentAvailability.seats[id] === 'available' &&
+                ((currentAvailability.seats[id] === 'available' ||
+                  (currentAvailability.seats[id] === 'held' &&
+                    ownHoldSeatIds.has(id))) &&
                   validateSeatPrice(prices.seats[id]).valid))
             }
             onSelect={handleSeatClick}
@@ -699,9 +657,18 @@ export function SeatView(props: SeatViewProps) {
             .map((zone) => {
               const stock = currentAvailability.zones?.[zone.id];
               if (!stock) return null;
+              const ownHeldItem = ownHoldSelection.find(
+                (item) =>
+                  item.kind === 'generalAdmission' && item.zoneId === zone.id,
+              );
+              const ownHeldQuantity =
+                ownHeldItem?.kind === 'generalAdmission'
+                  ? ownHeldItem.quantity
+                  : 0;
+              const availablePlusOwnHold = stock.available + ownHeldQuantity;
               const limit = Math.min(
-                stock.available,
-                stock.maxPerOrder ?? stock.available,
+                availablePlusOwnHold,
+                stock.maxPerOrder ?? availablePlusOwnHold,
               );
               const selectedZone = safeSelection.find(
                 (item) =>
@@ -795,5 +762,20 @@ export function SeatView(props: SeatViewProps) {
         </div>
       </div>
     </section>
+  );
+}
+
+/** Backwards-compatible composite with the existing map, controls, and basket. */
+export function SeatView(props: SeatViewProps) {
+  return (
+    <SeatSelectionProvider
+      selection={props.selection}
+      {...(props.ownHoldSelection
+        ? { ownHoldSelection: props.ownHoldSelection }
+        : {})}
+      onSelectionChange={props.onSelectionChange}
+    >
+      <SeatViewContent {...props} />
+    </SeatSelectionProvider>
   );
 }
