@@ -1,5 +1,9 @@
 @import './theme.css';
 
+.ticket-purchase {
+  background: var(--tp-color-surface);
+}
+
 /* The shared UI primitives are styled under the widget root only. */
 .ticket-purchase .hall-ui {
   color: var(--hall-color-ink);
@@ -354,7 +358,7 @@
       'summary'
       'content';
     gap: 24px;
-    padding: 24px 20px 48px;
+    padding: 48px 20px 48px;
   }
 
   .ticket-purchase .tp-layout__sidebar {
@@ -378,7 +382,12 @@
   }
 
   .ticket-purchase .tp-layout__back {
-    margin-bottom: 20px;
+    display: flex;
+    width: fit-content;
+    justify-content: center;
+    margin: 0 auto 20px;
+    font-size: 16px;
+    font-weight: 400;
   }
 
   .ticket-purchase .tp-layout__title {
