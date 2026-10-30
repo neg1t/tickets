@@ -127,6 +127,7 @@ type RecordedRequest = { method: string; url: string; headers: Record<string, st
 type RecordedResponse = { method: string; url: string; status: number };
 
 function documentedStatusForBuyerError(code: string): number {
+  if (code === 'validation_failed') return 400;
   if (code === 'unauthorized') return 401;
   if (code === 'forbidden') return 403;
   if (code === 'not_found') return 404;
@@ -406,10 +407,12 @@ describe('purchase data source contract', () => {
     const httpSource = createHttpPurchaseDataSource({ baseURL: httpServer.baseURL });
     try {
       await expect(httpSource.getPrices('demo-occurrence')).rejects.toMatchObject({ code: 'service_unavailable' });
+      await expect(httpSource.getChanges('demo-occurrence', 999)).rejects.toMatchObject({ code: 'validation_failed' });
       const ownership = await runOwnershipAndIdempotencyContract(httpSource);
       expect(ownership.cancelled.status).toBe('cancelled');
       expect(httpServer.responses.some(({ status }) => status === 503)).toBe(true);
       expect(httpServer.responses.some(({ status }) => status === 409)).toBe(true);
+      expect(httpServer.responses.some(({ status, url }) => status === 400 && url.includes('/availability-changes'))).toBe(true);
     } finally {
       await new Promise<void>((resolve) => httpServer.server.close(() => resolve()));
       httpSource.dispose();
