@@ -5,9 +5,18 @@ export type HttpPurchaseDataSource = PurchaseDataSource & { dispose(): void };
 
 /** Create an HTTP-backed source scoped to one widget instance. */
 export function createHttpPurchaseDataSource(options: BuyerApiClientOptions): HttpPurchaseDataSource {
-  const client = createBuyerApiClient(options);
+  const sessionCredentials = new Map<string, string>();
+  const client = createBuyerApiClient({
+    ...options,
+    getSessionCredential: (purchaseSessionId) =>
+      sessionCredentials.get(purchaseSessionId) ?? options.getSessionCredential?.(purchaseSessionId),
+  });
   return {
-    createSession: (input, idempotencyKey, signal) => client.createSession(input, idempotencyKey, signal),
+    async createSession(input, idempotencyKey, signal) {
+      const session = await client.createSession(input, idempotencyKey, signal);
+      sessionCredentials.set(session.purchaseSessionId, session.sessionCredential);
+      return session;
+    },
     resumeSession: (purchaseSessionId, signal) => client.resumeSession(purchaseSessionId, signal),
     getContext: (purchaseSessionId, occurrenceId, signal) => client.getContext(purchaseSessionId, occurrenceId, signal),
     listOccurrences: (eventId, cursor, signal) => client.listOccurrences(eventId, cursor, signal),
@@ -37,6 +46,9 @@ export function createHttpPurchaseDataSource(options: BuyerApiClientOptions): Ht
         quoteRevision: quote.quoteRevision, orderRevision: quote.orderRevision,
       }, idempotencyKey, signal),
     getTickets: (purchaseSessionId, orderId, signal) => client.getTickets(purchaseSessionId, orderId, signal),
-    dispose: () => client.dispose(),
+    dispose() {
+      sessionCredentials.clear();
+      client.dispose();
+    },
   };
 }
