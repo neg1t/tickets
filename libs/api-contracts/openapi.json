@@ -3827,7 +3827,7 @@
       "post": {
         "operationId": "createBuyerSession",
         "summary": "Create a buyer purchase session or exchange a host bootstrap credential",
-        "description": "Creates a guest buyer session scoped to the occurrenceId in the request or exchanges a one-time host bootstrap credential. Returns a non-secret purchaseSessionId selector separately from the buyer-session credential, plus its expiry. Credential transport and storage must use the approved first-party or host mechanism; this contract does not prescribe a refresh or cookie flow.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
+        "description": "Creates a guest buyer session scoped to the occurrenceId in the request or exchanges a one-time host bootstrap credential. Each widget instance gets its own purchase session and must not share its purchaseSessionId with another widget instance. Returns a non-secret purchaseSessionId selector separately from the buyer-session credential, plus its expiry. Credential transport and storage must use the approved first-party or host mechanism; this contract does not prescribe a refresh or cookie flow.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [],
         "parameters": [
           {
@@ -6474,7 +6474,7 @@
         "name": "X-Purchase-Session-Id",
         "in": "header",
         "required": true,
-        "description": "Selects the current widget purchase session; it is not an authentication credential.",
+        "description": "Selects the current widget purchase session; it is not an authentication credential. Each widget instance has its own selector. Do not share this selector between widget instances.",
         "schema": {
           "type": "string",
           "minLength": 1,

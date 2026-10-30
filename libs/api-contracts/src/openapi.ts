@@ -715,7 +715,7 @@ export const openApiDocument = {
       post: {
         operationId: 'createBuyerSession',
         summary: 'Create a buyer purchase session or exchange a host bootstrap credential',
-        description: buyerOperationDescription('Creates a guest buyer session scoped to the occurrenceId in the request or exchanges a one-time host bootstrap credential. Returns a non-secret purchaseSessionId selector separately from the buyer-session credential, plus its expiry. Credential transport and storage must use the approved first-party or host mechanism; this contract does not prescribe a refresh or cookie flow.'),
+        description: buyerOperationDescription('Creates a guest buyer session scoped to the occurrenceId in the request or exchanges a one-time host bootstrap credential. Each widget instance gets its own purchase session and must not share its purchaseSessionId with another widget instance. Returns a non-secret purchaseSessionId selector separately from the buyer-session credential, plus its expiry. Credential transport and storage must use the approved first-party or host mechanism; this contract does not prescribe a refresh or cookie flow.'),
         security: [],
         parameters: [key],
         requestBody: buyerRequest('BuyerSessionCreateRequest', {
@@ -913,7 +913,7 @@ export const openApiDocument = {
       Id: { name: 'id', in: 'path', required: true, schema: { type: 'string', minLength: 1 } },
       PurchaseSessionId: {
         name: 'X-Purchase-Session-Id', in: 'header', required: true,
-        description: 'Selects the current widget purchase session; it is not an authentication credential.',
+        description: 'Selects the current widget purchase session; it is not an authentication credential. Each widget instance has its own selector. Do not share this selector between widget instances.',
         schema: { type: 'string', minLength: 1, maxLength: 200 },
       },
       IfMatch: {

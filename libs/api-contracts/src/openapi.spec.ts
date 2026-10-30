@@ -130,6 +130,15 @@ describe('OpenAPI contract', () => {
     }
   });
 
+  it('assigns a distinct purchase session to every widget instance', () => {
+    const createSession = openApiDocument.paths['/api/v2/buyer/sessions'].post;
+    const purchaseSessionHeader = openApiDocument.components.parameters.PurchaseSessionId;
+
+    expect(createSession.description).toContain('Each widget instance gets its own purchase session');
+    expect(createSession.description).toContain('must not share its purchaseSessionId with another widget instance');
+    expect(purchaseSessionHeader.description).toContain('Do not share this selector between widget instances');
+  });
+
   it('requires buyer mutation revisions and documents expired and unprocessable responses', () => {
     const paths = openApiDocument.paths as unknown as Record<string, {
       post?: Record<string, unknown>;
