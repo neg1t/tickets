@@ -418,6 +418,7 @@ export function createMockPurchaseDataSource(options: MockPurchaseDataSourceOpti
         const hold = getHoldForSession(session);
         if (!hold || session.holdId !== holdId) throw makeError('not_found', 'Hold not found for this session');
         if (hold.revision !== expectedRevision) throw makeError('revision_conflict', 'Hold changed', hold.revision);
+        if (hold.status === 'cancelled' || hold.status === 'expired') return;
         if (hold.status !== 'active') throw makeError('revision_conflict', 'Only an active hold can be cancelled', hold.revision);
         const cancelled = buyerHoldSchema.parse({ ...hold, revision: hold.revision + 1, status: 'cancelled', serverTime: asIso(now()) });
         holds.set(holdId, cancelled);

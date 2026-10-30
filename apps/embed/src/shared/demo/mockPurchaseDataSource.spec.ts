@@ -65,9 +65,11 @@ async function runBuyerPurchaseContract(source: PurchaseDataSource) {
 async function prepareQuotedOrder(source: PurchaseDataSource, keyPrefix: string) {
   const occurrenceId = 'demo-occurrence';
   const session = await source.createSession({ occurrenceId }, `${keyPrefix}-session`);
+  const availability = await source.getAvailability(occurrenceId);
+  const prices = await source.getPrices(occurrenceId);
   const hold = await source.createHold(session.purchaseSessionId, occurrenceId, {
-    apiVersion: 'v2', layoutVersionId: 'demo-layout-v1', availabilityRevision: 1,
-    pricingRevision: 1, selection: [{ kind: 'generalAdmission', zoneId: 'demo-ga', quantity: 1 }],
+    apiVersion: 'v2', layoutVersionId: 'demo-layout-v1', availabilityRevision: availability.revision,
+    pricingRevision: prices.pricingRevision, selection: [{ kind: 'generalAdmission', zoneId: 'demo-ga', quantity: 1 }],
   }, `${keyPrefix}-hold`);
   const contact = await source.saveContact(session.purchaseSessionId, {
     firstName: 'Ada', lastName: 'Lovelace', phone: '+12025550125', email: 'ada@example.test',
@@ -78,6 +80,27 @@ async function prepareQuotedOrder(source: PurchaseDataSource, keyPrefix: string)
   const quote = await source.createQuote(session.purchaseSessionId, order.id, order.revision, null, `${keyPrefix}-quote`);
   const quotedOrder = await source.getOrder(session.purchaseSessionId, order.id);
   return { session, hold, order, quote, quotedOrder };
+}
+
+async function runTerminalHoldCancellationContract(
+  source: PurchaseDataSource,
+  keyPrefix: string,
+  expireHold?: () => void,
+) {
+  const occurrenceId = 'demo-occurrence';
+  const session = await source.createSession({ occurrenceId }, `${keyPrefix}-session`);
+  const availability = await source.getAvailability(occurrenceId);
+  const prices = await source.getPrices(occurrenceId);
+  const hold = await source.createHold(session.purchaseSessionId, occurrenceId, {
+    apiVersion: 'v2', layoutVersionId: 'demo-layout-v1', availabilityRevision: availability.revision,
+    pricingRevision: prices.pricingRevision, selection: [{ kind: 'generalAdmission', zoneId: 'demo-ga', quantity: 1 }],
+  }, `${keyPrefix}-hold`);
+  if (expireHold) expireHold();
+  else await source.cancelHold(session.purchaseSessionId, hold.id, hold.revision, `${keyPrefix}-initial-cancel`);
+  const terminal = await source.getHold(session.purchaseSessionId, hold.id);
+  const result = await source.cancelHold(session.purchaseSessionId, hold.id, terminal.revision, `${keyPrefix}-terminal-cancel`);
+  const after = await source.getHold(session.purchaseSessionId, hold.id);
+  return { terminal, result, after };
 }
 
 async function runChangedPriceContract(source: PurchaseDataSource) {
@@ -381,6 +404,50 @@ describe('purchase data source contract', () => {
 
     await expect(source.createHold(session.purchaseSessionId, 'demo-occurrence', request, 'hold-idempotent-replay'))
       .rejects.toMatchObject({ code: 'session_expired' });
+  });
+
+  it('treats new cancellation of expired or cancelled holds as a no-op but rejects converted holds', async () => {
+    let mockNow = instant.getTime();
+    const mockSource = makeMock({ now: () => new Date(mockNow), holdDurationMs: 1_000 });
+    const mockCancelled = await runTerminalHoldCancellationContract(mockSource, 'mock-cancelled-hold');
+    expect(mockCancelled.terminal.status).toBe('cancelled');
+    expect(mockCancelled.result).toBeUndefined();
+    expect(mockCancelled.after).toMatchObject({ status: 'cancelled', revision: mockCancelled.terminal.revision });
+    const mockExpired = await runTerminalHoldCancellationContract(mockSource, 'mock-expired-hold', () => { mockNow += 1_001; });
+    expect(mockExpired.terminal.status).toBe('expired');
+    expect(mockExpired.result).toBeUndefined();
+    expect(mockExpired.after).toMatchObject({ status: 'expired', revision: mockExpired.terminal.revision });
+    const mockConvertedOrder = await prepareQuotedOrder(mockSource, 'mock-converted-hold');
+    const mockConverted = await mockSource.getHold(mockConvertedOrder.session.purchaseSessionId, mockConvertedOrder.hold.id);
+    expect(mockConverted.status).toBe('converted');
+    await expect(mockSource.cancelHold(mockConvertedOrder.session.purchaseSessionId, mockConverted.id, mockConverted.revision, 'mock-cancel-converted'))
+      .rejects.toMatchObject({ code: 'revision_conflict' });
+
+    let httpNow = instant.getTime();
+    const httpServerSource = makeMock({ now: () => new Date(httpNow), holdDurationMs: 1_000 });
+    const httpServer = await createMockBackedHttpServer(httpServerSource);
+    const httpSource = createHttpPurchaseDataSource({ baseURL: httpServer.baseURL,
+      getSessionCredential: (sessionId) => `credential-${sessionId}` });
+    try {
+      const httpCancelled = await runTerminalHoldCancellationContract(httpSource, 'http-cancelled-hold');
+      expect(httpCancelled.terminal.status).toBe('cancelled');
+      expect(httpCancelled.result).toBeUndefined();
+      expect(httpCancelled.after).toMatchObject({ status: 'cancelled', revision: httpCancelled.terminal.revision });
+      const httpExpired = await runTerminalHoldCancellationContract(httpSource, 'http-expired-hold', () => { httpNow += 1_001; });
+      expect(httpExpired.terminal.status).toBe('expired');
+      expect(httpExpired.result).toBeUndefined();
+      expect(httpExpired.after).toMatchObject({ status: 'expired', revision: httpExpired.terminal.revision });
+      const httpConvertedOrder = await prepareQuotedOrder(httpSource, 'http-converted-hold');
+      const httpConverted = await httpSource.getHold(httpConvertedOrder.session.purchaseSessionId, httpConvertedOrder.hold.id);
+      expect(httpConverted.status).toBe('converted');
+      await expect(httpSource.cancelHold(httpConvertedOrder.session.purchaseSessionId, httpConverted.id, httpConverted.revision, 'http-cancel-converted'))
+        .rejects.toMatchObject({ code: 'revision_conflict' });
+      const deleteStatuses = httpServer.responses.filter(({ method }) => method === 'DELETE').map(({ status }) => status);
+      expect(deleteStatuses).toEqual([204, 204, 204, 409]);
+    } finally {
+      await new Promise<void>((resolve) => httpServer.server.close(() => resolve()));
+      httpSource.dispose();
+    }
   });
 
   it('returns 410 for expired buyer sessions and quote expiry over mock and HTTP', async () => {
