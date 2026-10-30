@@ -157,6 +157,7 @@ describe('OpenAPI contract', () => {
     expect(requiredFields('BuyerContactWrite')).toContain('contactRevision');
     expect(requiredFields('BuyerQuoteRequest')).toContain('orderRevision');
     expect(requiredFields('BuyerHoldRequest')).toContain('availabilityRevision');
+    expect(requiredFields('BuyerHoldRequest')).toContain('pricingRevision');
     expect(requiredFields('BuyerOrderRequest')).toContain('contactRevision');
     expect(requiredFields('BuyerCheckoutRequest')).toEqual(expect.arrayContaining(['quoteRevision', 'orderRevision']));
     expect(contactResponses).toHaveProperty('410');
@@ -164,6 +165,34 @@ describe('OpenAPI contract', () => {
     expect(quoteResponses).toHaveProperty('410');
     expect(quoteResponses).toHaveProperty('422');
     expect((quoteResponses['409'] as { description: string }).description).toContain('currentRevision');
+  });
+
+  it('checks the expected price revision before atomically creating a buyer hold', () => {
+    const hold = openApiDocument.paths['/api/v2/buyer/occurrences/{id}/holds'].post;
+    type JsonExample = { value: Record<string, unknown> };
+    type Examples = Record<string, JsonExample | undefined>;
+    const requestExamples = hold.requestBody.content['application/json'].examples as Examples;
+    const responses = hold.responses as unknown as Record<string, { content: Record<string, { examples: Examples }> }>;
+    const conflictExamples = responses['409']?.content['application/json']?.examples;
+    const seatedExample = requestExamples.seatedSelection?.value;
+    const priceChanged = conflictExamples?.priceChanged?.value;
+    if (!seatedExample || !priceChanged) throw new Error('Expected seated hold and stale-price examples');
+
+    expect(hold.description).toContain('pricingRevision');
+    expect(hold.description).toContain('price_changed');
+    expect(seatedExample).toMatchObject({ availabilityRevision: 44, pricingRevision: 12 });
+    expect(priceChanged).toMatchObject({ code: 'price_changed', currentRevision: 13 });
+    expect(priceChanged.message as string).toContain('pricingRevision');
+  });
+
+  it('uses null promoCode to clear a promotion when quoting again', () => {
+    const quote = openApiDocument.paths['/api/v2/buyer/orders/{id}/quotes'].post;
+    const requestExamples = quote.requestBody.content['application/json'].examples as Record<string, { value: Record<string, unknown> } | undefined>;
+    const clearPromotion = requestExamples.clearPromotion?.value;
+    if (!clearPromotion) throw new Error('Expected the explicit promotion-clear example');
+
+    expect(quote.description).toContain('null to explicitly clear a promotion');
+    expect(clearPromotion).toMatchObject({ apiVersion: 'v2', orderRevision: 8, promoCode: null });
   });
 
   it('gives every v2 buyer operation examples and backend transaction guidance', () => {

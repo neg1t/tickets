@@ -212,7 +212,7 @@ const buyerErrorsByStatus = {
 const buyerErrorSamples = {
   revisionConflict: { summary: 'Buyer state changed', value: revisionConflictError },
   idempotencyConflict: { summary: 'Idempotency key reused with another request', value: idempotencyConflictError },
-  priceChanged: { summary: 'The authoritative price changed', value: buyerErrorExample('price_changed', 'The server price changed; refresh the occurrence context and confirm the new amount.', { currentRevision: 13 }) },
+  priceChanged: { summary: 'The authoritative price changed', value: buyerErrorExample('price_changed', 'Expected pricingRevision 12 is stale; the current pricing revision is 13. Refresh prices and confirm the current amount.', { currentRevision: 13 }) },
   layoutChanged: { summary: 'The occurrence now uses another layout version', value: buyerErrorExample('layout_version_conflict', 'The layout version changed; refresh the public layout and selection.') },
   availabilityConflict: { summary: 'Inventory changed before the mutation', value: buyerErrorExample('availability_conflict', 'The selected inventory is no longer available.', { currentRevision: 45 }) },
   sessionExpired: { summary: 'Buyer session expired', value: expiredSessionError },
@@ -667,12 +667,12 @@ export const openApiDocument = {
       post: {
         operationId: 'createBuyerHold',
         summary: 'Create an owned hold from current availability',
-        description: buyerOperationDescription('The server verifies occurrence and layout versions, checks the expected availability revision, validates that seat selection and general-admission quantities are available, prices the selection, and returns authoritative line items, total, and expiry. Inventory allocation and the hold state commit atomically.'),
+        description: buyerOperationDescription('The server verifies the expected occurrence layoutVersionId, availabilityRevision, and pricingRevision before reserving inventory. A stale price revision returns HTTP 409 with code price_changed; refresh current prices and confirm the amount before retrying. It validates seat and general-admission availability, returns authoritative line items, total, and expiry, and commits inventory allocation and hold state atomically.'),
         security: buyerSessionSecurity,
         parameters: [purchaseSession, id, key],
         requestBody: buyerRequest('BuyerHoldRequest', {
-          seatedSelection: { summary: 'Reserve a specific seat at the expected layout and availability revisions', value: { apiVersion: 'v2', layoutVersionId: 'layout-v5', availabilityRevision: 44, selection: [{ kind: 'seat', seatId: 'seat-a-12' }] } },
-          generalAdmissionSelection: { summary: 'Reserve two places from a GA zone', value: { apiVersion: 'v2', layoutVersionId: 'layout-v5', availabilityRevision: 44, selection: [{ kind: 'generalAdmission', zoneId: 'zone-floor', quantity: 2 }] } },
+          seatedSelection: { summary: 'Reserve a specific seat at expected layout, availability, and pricing revisions', value: { apiVersion: 'v2', layoutVersionId: 'layout-v5', availabilityRevision: 44, pricingRevision: 12, selection: [{ kind: 'seat', seatId: 'seat-a-12' }] } },
+          generalAdmissionSelection: { summary: 'Reserve two places from a GA zone at expected revisions', value: { apiVersion: 'v2', layoutVersionId: 'layout-v5', availabilityRevision: 44, pricingRevision: 12, selection: [{ kind: 'generalAdmission', zoneId: 'zone-floor', quantity: 2 }] } },
         }),
         responses: {
           ...buyerSuccessResponse('BuyerHold', '201', 'activeHold', 'The server-priced inventory hold and expiry', buyerHoldExample),
@@ -849,12 +849,13 @@ export const openApiDocument = {
       post: {
         operationId: 'createBuyerQuote',
         summary: 'Calculate an authoritative quote for an order',
-        description: buyerOperationDescription('The server calculates ticket subtotal, discount, fees, commission, and total in minor units. Send the expected orderRevision. On HTTP 409, read the current order, compare currentRevision, then retry with refreshed data. An invalid promotion is reported as a semantic 422 response.'),
+        description: buyerOperationDescription('The server calculates ticket subtotal, discount, fees, commission, and total in minor units. Send the expected orderRevision. Supply promoCode as a string to apply a promotion or null to explicitly clear a promotion; omission is not a clearing instruction. On HTTP 409, read the current order, compare currentRevision, then retry with refreshed data. An invalid promotion is reported as a semantic 422 response.'),
         security: buyerSessionSecurity,
         parameters: [purchaseSession, id, key],
         requestBody: buyerRequest('BuyerQuoteRequest', {
-          quote: { summary: 'Quote the current order with no promotion code', value: { apiVersion: 'v2', orderRevision: 8 } },
+          quote: { summary: 'Quote without supplying a promoCode field', value: { apiVersion: 'v2', orderRevision: 8 } },
           quoteWithPromotion: { summary: 'Quote the order with a promotion code', value: { apiVersion: 'v2', orderRevision: 8, promoCode: 'AUTUMN10' } },
+          clearPromotion: { summary: 'Explicitly clear the current promotion code', value: { apiVersion: 'v2', orderRevision: 8, promoCode: null } },
         }),
         responses: {
           ...buyerSuccessResponse('BuyerQuote', '200', 'authoritativeQuote', 'Server-calculated quote in integer minor units', buyerQuoteExample),

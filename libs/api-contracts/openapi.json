@@ -3089,7 +3089,7 @@
       "post": {
         "operationId": "createBuyerHold",
         "summary": "Create an owned hold from current availability",
-        "description": "The server verifies occurrence and layout versions, checks the expected availability revision, validates that seat selection and general-admission quantities are available, prices the selection, and returns authoritative line items, total, and expiry. Inventory allocation and the hold state commit atomically.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
+        "description": "The server verifies the expected occurrence layoutVersionId, availabilityRevision, and pricingRevision before reserving inventory. A stale price revision returns HTTP 409 with code price_changed; refresh current prices and confirm the amount before retrying. It validates seat and general-admission availability, returns authoritative line items, total, and expiry, and commits inventory allocation and hold state atomically.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [
           {
             "buyerSessionAuth": []
@@ -3115,11 +3115,12 @@
               },
               "examples": {
                 "seatedSelection": {
-                  "summary": "Reserve a specific seat at the expected layout and availability revisions",
+                  "summary": "Reserve a specific seat at expected layout, availability, and pricing revisions",
                   "value": {
                     "apiVersion": "v2",
                     "layoutVersionId": "layout-v5",
                     "availabilityRevision": 44,
+                    "pricingRevision": 12,
                     "selection": [
                       {
                         "kind": "seat",
@@ -3129,11 +3130,12 @@
                   }
                 },
                 "generalAdmissionSelection": {
-                  "summary": "Reserve two places from a GA zone",
+                  "summary": "Reserve two places from a GA zone at expected revisions",
                   "value": {
                     "apiVersion": "v2",
                     "layoutVersionId": "layout-v5",
                     "availabilityRevision": 44,
+                    "pricingRevision": 12,
                     "selection": [
                       {
                         "kind": "generalAdmission",
@@ -3293,7 +3295,7 @@
                     "value": {
                       "apiVersion": "v2",
                       "code": "price_changed",
-                      "message": "The server price changed; refresh the occurrence context and confirm the new amount.",
+                      "message": "Expected pricingRevision 12 is stale; the current pricing revision is 13. Refresh prices and confirm the current amount.",
                       "currentRevision": 13
                     }
                   },
@@ -5567,7 +5569,7 @@
       "post": {
         "operationId": "createBuyerQuote",
         "summary": "Calculate an authoritative quote for an order",
-        "description": "The server calculates ticket subtotal, discount, fees, commission, and total in minor units. Send the expected orderRevision. On HTTP 409, read the current order, compare currentRevision, then retry with refreshed data. An invalid promotion is reported as a semantic 422 response.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
+        "description": "The server calculates ticket subtotal, discount, fees, commission, and total in minor units. Send the expected orderRevision. Supply promoCode as a string to apply a promotion or null to explicitly clear a promotion; omission is not a clearing instruction. On HTTP 409, read the current order, compare currentRevision, then retry with refreshed data. An invalid promotion is reported as a semantic 422 response.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [
           {
             "buyerSessionAuth": []
@@ -5593,7 +5595,7 @@
               },
               "examples": {
                 "quote": {
-                  "summary": "Quote the current order with no promotion code",
+                  "summary": "Quote without supplying a promoCode field",
                   "value": {
                     "apiVersion": "v2",
                     "orderRevision": 8
@@ -5605,6 +5607,14 @@
                     "apiVersion": "v2",
                     "orderRevision": 8,
                     "promoCode": "AUTUMN10"
+                  }
+                },
+                "clearPromotion": {
+                  "summary": "Explicitly clear the current promotion code",
+                  "value": {
+                    "apiVersion": "v2",
+                    "orderRevision": 8,
+                    "promoCode": null
                   }
                 }
               }
@@ -6088,7 +6098,7 @@
                     "value": {
                       "apiVersion": "v2",
                       "code": "price_changed",
-                      "message": "The server price changed; refresh the occurrence context and confirm the new amount.",
+                      "message": "Expected pricingRevision 12 is stale; the current pricing revision is 13. Refresh prices and confirm the current amount.",
                       "currentRevision": 13
                     }
                   },
@@ -20830,6 +20840,11 @@
             "minimum": 0,
             "maximum": 9007199254740991
           },
+          "pricingRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
           "selection": {
             "minItems": 1,
             "type": "array",
@@ -20887,6 +20902,7 @@
           "apiVersion",
           "layoutVersionId",
           "availabilityRevision",
+          "pricingRevision",
           "selection"
         ],
         "additionalProperties": false
@@ -21247,9 +21263,16 @@
             "maximum": 9007199254740991
           },
           "promoCode": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 100
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

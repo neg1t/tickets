@@ -106,10 +106,14 @@ describe('v2 buyer contracts', () => {
 
   it('accepts seat and GA selection and rejects an occurrence or layout mismatch', () => {
     const request = {
-      apiVersion: 'v2', layoutVersionId: 'layout-1', availabilityRevision: 7,
+      apiVersion: 'v2', layoutVersionId: 'layout-1', availabilityRevision: 7, pricingRevision: 4,
       selection: hold.selection,
     };
     expect(buyerHoldRequestSchema.parse(request)).toEqual(request);
+    expect(buyerHoldRequestSchema.safeParse({
+      apiVersion: 'v2', layoutVersionId: 'layout-1', availabilityRevision: 7,
+      selection: hold.selection,
+    }).success).toBe(false);
     expect(buyerHoldRequestSchema.safeParse({
       ...request, selection: [{ kind: 'generalAdmission', zoneId: 'zone-ga', quantity: 0 }],
     }).success).toBe(false);
@@ -133,6 +137,9 @@ describe('v2 buyer contracts', () => {
     expect(buyerQuoteRequestSchema.safeParse({ apiVersion: 'v2' }).success).toBe(false);
     expect(buyerQuoteRequestSchema.parse({ apiVersion: 'v2', orderRevision: 2 })).toEqual({
       apiVersion: 'v2', orderRevision: 2,
+    });
+    expect(buyerQuoteRequestSchema.parse({ apiVersion: 'v2', orderRevision: 2, promoCode: null })).toEqual({
+      apiVersion: 'v2', orderRevision: 2, promoCode: null,
     });
     expect(buyerQuoteSchema.parse(quote)).toEqual(quote);
     expect(buyerQuoteSchema.safeParse({ ...quote, totalMinor: 19749 }).success).toBe(false);

@@ -165,6 +165,7 @@ export const buyerHoldRequestSchema = z.strictObject({
   apiVersion: buyerApiVersionSchema,
   layoutVersionId: idSchema,
   availabilityRevision: revisionSchema,
+  pricingRevision: revisionSchema,
   selection: z.array(buyerSelectionSchema).min(1),
 }).superRefine(({ selection }, context) => {
   const seen = new Set<string>();
@@ -264,7 +265,7 @@ export type BuyerQuote = z.infer<typeof buyerQuoteSchema>;
 export const buyerQuoteRequestSchema = z.strictObject({
   apiVersion: buyerApiVersionSchema,
   orderRevision: revisionSchema,
-  promoCode: z.string().trim().min(1).max(100).optional(),
+  promoCode: z.string().trim().min(1).max(100).nullable().optional(),
 });
 
 export const buyerOrderSchema = z.strictObject({
