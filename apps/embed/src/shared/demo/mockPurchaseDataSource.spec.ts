@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { createServer, type Server } from 'node:http';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { BuyerApiError } from '@hall-platform/api-axios';
 import type { BuyerHoldRequest } from '@hall-platform/api-contracts';
 import type { PurchaseDataSource } from '@hall-platform/ticket-purchase';
@@ -118,8 +118,10 @@ async function runOwnershipAndIdempotencyContract(source: PurchaseDataSource) {
     ...request, selection: [{ kind: 'generalAdmission', zoneId: 'demo-ga', quantity: 2 }],
   }, 'same-hold-key')).rejects.toMatchObject({ code: 'idempotency_conflict' });
   await expect(source.getHold(second.purchaseSessionId, hold.id)).rejects.toMatchObject({ code: 'not_found' });
-  const cancelled = await source.cancelHold(first.purchaseSessionId, hold.id, hold.revision, 'cancel-key');
-  const cancelReplay = await source.cancelHold(first.purchaseSessionId, hold.id, hold.revision, 'cancel-key');
+  await source.cancelHold(first.purchaseSessionId, hold.id, hold.revision, 'cancel-key');
+  const cancelled = await source.getHold(first.purchaseSessionId, hold.id);
+  await source.cancelHold(first.purchaseSessionId, hold.id, hold.revision, 'cancel-key');
+  const cancelReplay = await source.getHold(first.purchaseSessionId, hold.id);
   return { hold, replay, cancelled, cancelReplay, sessionIds: [first.purchaseSessionId, second.purchaseSessionId] };
 }
 
@@ -193,6 +195,7 @@ async function createMockBackedHttpServer(source: PurchaseDataSource) {
       } else if (record.method === 'DELETE' && /\/holds\/[^/]+$/.test(route.pathname)) {
         const holdId = decodeURIComponent(route.pathname.split('/').at(-1) ?? '');
         const expectedRevision = Number(String(record.headers['if-match'] ?? '').replaceAll('"', ''));
+        status = 204;
         result = await source.cancelHold(sessionId, holdId, expectedRevision, key);
       } else if (record.method === 'PUT' && route.pathname.endsWith('/contact')) {
         result = await source.saveContact(sessionId, payload?.contact as never, Number(payload?.contactRevision), key);
@@ -231,7 +234,7 @@ async function createMockBackedHttpServer(source: PurchaseDataSource) {
         ...(apiError.currentRevision === undefined ? {} : { currentRevision: apiError.currentRevision }) };
       response.writeHead(status, { 'content-type': 'application/json' });
     }
-    response.end(JSON.stringify(result));
+    response.end(status === 204 ? undefined : JSON.stringify(result));
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -335,6 +338,51 @@ describe('purchase data source contract', () => {
     expect((await source.getHold(session.purchaseSessionId, hold.id)).status).toBe('expired');
   });
 
+  it('releases expired seats before the availability snapshot and allows another session to reserve them', async () => {
+    let now = instant.getTime();
+    const source = makeMock({ now: () => new Date(now), holdDurationMs: 1_000 });
+    const firstSession = await source.createSession({ occurrenceId: 'demo-occurrence' }, 'seat-owner-session');
+    const initialAvailability = await source.getAvailability('demo-occurrence');
+    const prices = await source.getPrices('demo-occurrence');
+    const firstHold = await source.createHold(firstSession.purchaseSessionId, 'demo-occurrence', {
+      apiVersion: 'v2', layoutVersionId: 'demo-layout-v1', availabilityRevision: initialAvailability.revision,
+      pricingRevision: prices.pricingRevision, selection: [{ kind: 'seat', seatId: 'demo-seat-a' }],
+    }, 'seat-owner-hold');
+
+    now += 1_001;
+    const refreshedAvailability = await source.getAvailability('demo-occurrence');
+
+    expect((await source.getHold(firstSession.purchaseSessionId, firstHold.id)).status).toBe('expired');
+    expect(refreshedAvailability.seats['demo-seat-a']).toBe('available');
+    expect(refreshedAvailability.revision).toBeGreaterThan(initialAvailability.revision);
+
+    const secondSession = await source.createSession({ occurrenceId: 'demo-occurrence' }, 'next-seat-session');
+    const nextHold = await source.createHold(secondSession.purchaseSessionId, 'demo-occurrence', {
+      apiVersion: 'v2', layoutVersionId: 'demo-layout-v1', availabilityRevision: refreshedAvailability.revision,
+      pricingRevision: prices.pricingRevision, selection: [{ kind: 'seat', seatId: 'demo-seat-a' }],
+    }, 'next-seat-hold');
+
+    expect(nextHold.ownerSessionId).toBe(secondSession.purchaseSessionId);
+  });
+
+  it('does not replay a mutation result after its purchase session expires', async () => {
+    let now = instant.getTime();
+    const source = makeMock({ now: () => new Date(now), sessionDurationMs: 1_000 });
+    const session = await source.createSession({ occurrenceId: 'demo-occurrence' }, 'expiring-hold-session');
+    const availability = await source.getAvailability('demo-occurrence');
+    const prices = await source.getPrices('demo-occurrence');
+    const request = {
+      apiVersion: 'v2' as const, layoutVersionId: 'demo-layout-v1',
+      availabilityRevision: availability.revision, pricingRevision: prices.pricingRevision,
+      selection: [{ kind: 'generalAdmission' as const, zoneId: 'demo-ga', quantity: 1 }],
+    };
+    await source.createHold(session.purchaseSessionId, 'demo-occurrence', request, 'hold-idempotent-replay');
+    now += 1_001;
+
+    await expect(source.createHold(session.purchaseSessionId, 'demo-occurrence', request, 'hold-idempotent-replay'))
+      .rejects.toMatchObject({ code: 'session_expired' });
+  });
+
   it('returns 410 for expired buyer sessions and quote expiry over mock and HTTP', async () => {
     let mockNow = instant.getTime();
     const mockSource = makeMock({ now: () => new Date(mockNow), sessionDurationMs: 60_000 });
@@ -433,6 +481,7 @@ describe('purchase data source contract', () => {
         expect(result.cancelReplay.revision).toBe(result.cancelled.revision);
         expect(result.sessionIds[0]).not.toBe(result.sessionIds[1]);
       }
+      expect(httpServer.responses.some(({ method, status, url }) => method === 'DELETE' && status === 204 && url.includes('/holds/'))).toBe(true);
     } finally {
       await new Promise<void>((resolve) => httpServer.server.close(() => resolve()));
       httpSource.dispose();
@@ -454,8 +503,29 @@ describe('purchase data source contract', () => {
     controller.abort();
 
     await expect(source.getPrices('demo-occurrence', controller.signal)).rejects.toMatchObject({ code: 'cancelled' });
-    expect(waitedFor).toBe('getPrices');
+    expect(waitedFor).toBeUndefined();
     await expect(source.getPrices('demo-occurrence')).rejects.toMatchObject({ code: 'service_unavailable' });
+    expect(waitedFor).toBe('getPrices');
     expect((await source.getPrices('demo-occurrence')).pricingRevision).toBe(1);
+  });
+
+  it('rejects an already-aborted request before scheduling configured latency', async () => {
+    const source = makeMock({ latencyMs: 10_000 });
+    const controller = new AbortController();
+    controller.abort();
+    vi.useFakeTimers();
+    const pending = source.getPrices('demo-occurrence', controller.signal).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    try {
+      expect(vi.getTimerCount()).toBe(0);
+      await expect(pending).resolves.toMatchObject({ code: 'cancelled' });
+    } finally {
+      await vi.runOnlyPendingTimersAsync();
+      await pending;
+      vi.useRealTimers();
+    }
   });
 });

@@ -142,6 +142,7 @@ export function createMockPurchaseDataSource(options: MockPurchaseDataSourceOpti
   const publicLayout = makePublicLayout();
 
   async function wait(operation: MockPurchaseDataOperation, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw makeError('cancelled', 'Request cancelled');
     if (options.wait) await options.wait(operation, signal);
     else if ((options.latencyMs ?? 0) > 0) {
       await new Promise<void>((resolve, reject) => {
@@ -190,21 +191,18 @@ export function createMockPurchaseDataSource(options: MockPurchaseDataSourceOpti
     if (!idempotencyKey.trim()) throw makeError('validation_failed', 'Idempotency-Key is required');
     const key = `${purchaseSessionId}:${operation}:${idempotencyKey}`;
     const fingerprint = JSON.stringify(payload);
+    requireSession(purchaseSessionId);
     const prior = idempotentResults.get(key);
     if (prior) {
       if (prior.fingerprint !== fingerprint) throw makeError('idempotency_conflict', 'Key was already used with a different request');
       return copy(prior.result as T);
     }
-    requireSession(purchaseSessionId);
     const result = action();
     idempotentResults.set(key, { fingerprint, result: copy(result) });
     return copy(result);
   }
 
-  function getHoldForSession(session: SessionState): BuyerHold | null {
-    if (!session.holdId) return null;
-    const hold = holds.get(session.holdId);
-    if (!hold) return null;
+  function expireHoldIfNeeded(hold: BuyerHold): BuyerHold {
     if (hold.status === 'active' && Date.parse(hold.expiresAt) <= now().getTime()) {
       const expired = buyerHoldSchema.parse({ ...hold, revision: hold.revision + 1, status: 'expired', serverTime: asIso(now()) });
       holds.set(hold.id, expired);
@@ -215,7 +213,18 @@ export function createMockPurchaseDataSource(options: MockPurchaseDataSourceOpti
     return hold;
   }
 
+  function expireActiveHolds(): void {
+    for (const hold of holds.values()) expireHoldIfNeeded(hold);
+  }
+
+  function getHoldForSession(session: SessionState): BuyerHold | null {
+    if (!session.holdId) return null;
+    const hold = holds.get(session.holdId);
+    return hold ? expireHoldIfNeeded(hold) : null;
+  }
+
   function buildAvailability(): BuyerAvailability {
+    expireActiveHolds();
     const seatHold = [...holds.values()].some((hold) => hold.occurrenceId === OCCURRENCE_ID &&
       (hold.status === 'active' || hold.status === 'converted') && hold.selection.some((item) => item.kind === 'seat' && item.seatId === SEAT_ID));
     const seatSold = [...orders.values()].some((order) => order.status === 'confirmed' && order.selection.some((item) => item.kind === 'seat' && item.seatId === SEAT_ID));
@@ -357,6 +366,7 @@ export function createMockPurchaseDataSource(options: MockPurchaseDataSourceOpti
     },
     createHold(purchaseSessionId: string, occurrenceId: string, request: BuyerHoldRequest, idempotencyKey: string, signal?: AbortSignal): Promise<BuyerHold> {
       return mutate('createHold', purchaseSessionId, idempotencyKey, { occurrenceId, request }, signal, () => {
+        expireActiveHolds();
         const session = requireSession(purchaseSessionId);
         if (session.occurrenceId !== occurrenceId || occurrenceId !== OCCURRENCE_ID) throw makeError('not_found', 'Occurrence not found in this session');
         if (stalePriceBeforeFirstHold) {
@@ -402,7 +412,7 @@ export function createMockPurchaseDataSource(options: MockPurchaseDataSourceOpti
         return hold;
       });
     },
-    cancelHold(purchaseSessionId: string, holdId: string, expectedRevision: number, idempotencyKey: string, signal?: AbortSignal): Promise<BuyerHold> {
+    cancelHold(purchaseSessionId: string, holdId: string, expectedRevision: number, idempotencyKey: string, signal?: AbortSignal): Promise<void> {
       return mutate('cancelHold', purchaseSessionId, idempotencyKey, { holdId, expectedRevision }, signal, () => {
         const session = requireSession(purchaseSessionId);
         const hold = getHoldForSession(session);
@@ -414,7 +424,6 @@ export function createMockPurchaseDataSource(options: MockPurchaseDataSourceOpti
         hold.selection.forEach((item) => { if (item.kind === 'generalAdmission') gaAvailable += item.quantity; });
         availabilityRevision += 1;
         session.holdId = cancelled.id;
-        return cancelled;
       });
     },
     saveContact(purchaseSessionId: string, contact: BuyerContact, contactRevision: number, idempotencyKey: string, signal?: AbortSignal): Promise<PurchaseSessionContact> {

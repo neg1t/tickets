@@ -140,18 +140,12 @@ describe('v2 buyer API client', () => {
   });
 
   it('sends an If-Match hold revision and a unique idempotency key when cancelling a hold', async () => {
-    respond = () => ({ status: 200, body: {
-      apiVersion: 'v2', id: 'hold-a', ownerSessionId: 'session-a', occurrenceId: 'occurrence-a',
-      layoutVersionId: 'layout-v1', revision: 2, expiresAt: '2026-10-30T12:15:00Z',
-      serverTime: '2026-10-30T12:01:00Z', selection: [{ kind: 'seat', seatId: 'seat-a' }],
-      lineItems: [{ label: 'A-1', quantity: 1, unitPriceMinor: 12500, totalMinor: 12500 }],
-      totalMinor: 12500, currency: 'RUB', availabilityRevision: 8, status: 'cancelled',
-    } });
+    respond = () => ({ status: 204, body: null });
     const client = createBuyerApiClient({ baseURL, getSessionCredential: () => 'buyer-token' });
 
     const result = await client.cancelHold('session-a', 'hold-a', 1, 'cancel-hold-1');
 
-    expect(result.status).toBe('cancelled');
+    expect(result).toBeUndefined();
     expect(requests[0]).toMatchObject({
       method: 'DELETE', url: '/api/v2/buyer/holds/hold-a',
       headers: { authorization: 'Bearer buyer-token', 'x-purchase-session-id': 'session-a',

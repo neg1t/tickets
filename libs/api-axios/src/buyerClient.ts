@@ -162,6 +162,17 @@ export function createBuyerApiClient(options: BuyerApiClientOptions) {
     throw new BuyerApiError('network_error', 'Request failed after retries');
   }
 
+  async function requestNoContent(config: AxiosRequestConfig): Promise<void> {
+    if (disposed) throw new BuyerApiError('disposed', 'Buyer API client has been disposed');
+    try {
+      const response = await http.request<unknown>(config);
+      if (response.status !== 204 || (response.data !== undefined && response.data !== null && response.data !== ''))
+        throw new BuyerApiError('invalid_response', 'Expected a 204 response without a body');
+    } catch (error) {
+      throw makeBuyerApiError(error);
+    }
+  }
+
   return {
     async createSession(
       value: { occurrenceId: string; hostBootstrapCredential?: string },
@@ -235,12 +246,12 @@ export function createBuyerApiClient(options: BuyerApiClientOptions) {
         ...sessionConfig({ purchaseSessionId, ...(signal ? { signal } : {}) }),
       }, buyerHoldSchema);
     },
-    async cancelHold(purchaseSessionId: string, holdId: string, expectedRevision: number, idempotencyKey: string, signal?: AbortSignal): Promise<BuyerHold> {
+    async cancelHold(purchaseSessionId: string, holdId: string, expectedRevision: number, idempotencyKey: string, signal?: AbortSignal): Promise<void> {
       const key = parseIdempotencyKey(idempotencyKey);
       const revision = parseInput(buyerHoldSchema.shape.revision, expectedRevision);
-      return request({ method: 'DELETE', url: `/api/v2/buyer/holds/${idSegment(holdId)}`,
+      return requestNoContent({ method: 'DELETE', url: `/api/v2/buyer/holds/${idSegment(holdId)}`,
         ...sessionMutationConfig({ purchaseSessionId, ...(signal ? { signal } : {}) }, key, revision),
-      }, buyerHoldSchema);
+      });
     },
     async saveContact(purchaseSessionId: string, contact: BuyerContact, contactRevision: number, idempotencyKey: string, signal?: AbortSignal) {
       const key = parseIdempotencyKey(idempotencyKey);

@@ -39,7 +39,7 @@ export interface PurchaseDataSource {
   getChanges(occurrenceId: string, sinceRevision: number, signal?: AbortSignal): Promise<BuyerAvailabilityChanges>;
   createHold(purchaseSessionId: string, occurrenceId: string, request: BuyerHoldRequest, idempotencyKey: string, signal?: AbortSignal): Promise<BuyerHold>;
   getHold(purchaseSessionId: string, holdId: string, signal?: AbortSignal): Promise<BuyerHold>;
-  cancelHold(purchaseSessionId: string, holdId: string, expectedRevision: number, idempotencyKey: string, signal?: AbortSignal): Promise<BuyerHold>;
+  cancelHold(purchaseSessionId: string, holdId: string, expectedRevision: number, idempotencyKey: string, signal?: AbortSignal): Promise<void>;
   saveContact(purchaseSessionId: string, contact: BuyerContact, contactRevision: number, idempotencyKey: string, signal?: AbortSignal): Promise<PurchaseSessionContact>;
   requestEmail(purchaseSessionId: string, email: string, idempotencyKey: string, signal?: AbortSignal): Promise<PurchaseEmailChallenge>;
   verifyEmail(purchaseSessionId: string, challengeId: string, code: string, idempotencyKey: string, signal?: AbortSignal): Promise<PurchaseSessionContact>;
