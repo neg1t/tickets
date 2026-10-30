@@ -62,12 +62,28 @@
 }
 
 .studio-demo-preview {
+  position: relative;
   display: grid;
   gap: 12px;
   padding: 15px;
   border: 1px solid #d8e0e7;
   border-radius: 12px;
   background: #fff;
+}
+
+.studio-demo-layout-editor-shell > .hall-editor {
+  height: min(75dvh, 760px);
+  min-height: 480px;
+}
+
+.studio-demo-layout-editor-shell[data-open='false'] {
+  position: absolute;
+  inset-inline-start: -10000px;
+  width: min(100%, 1440px);
+  height: min(75dvh, 760px);
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .studio-demo-preview-heading {

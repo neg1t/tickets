@@ -46,6 +46,7 @@ import {
   openDemoEventFx,
   openDemoPricingFx,
   saveDemoPricingFx,
+  saveDemoOccurrenceLayoutFx,
   requestOpenHall,
   requestCreatePerformanceHall,
   requestImportDraft,
@@ -122,6 +123,7 @@ export function DashboardPage() {
     publishPending,
     performanceHallPending,
     pricingPending,
+    layoutPending,
   ] = useUnit([
     $draft,
     $mode,
@@ -146,6 +148,7 @@ export function DashboardPage() {
     publishDraftFx.pending,
     createPerformanceHallFx.pending,
     saveDemoPricingFx.pending,
+    saveDemoOccurrenceLayoutFx.pending,
   ]);
   const [
     initialize,
@@ -155,6 +158,7 @@ export function DashboardPage() {
     openDemoEvent,
     openDemoPricing,
     saveDemoPricing,
+    saveDemoOccurrenceLayout,
     holdDemo,
     confirmDemo,
     cancelDemo,
@@ -166,6 +170,7 @@ export function DashboardPage() {
     openDemoEventFx,
     openDemoPricingFx,
     saveDemoPricingFx,
+    saveDemoOccurrenceLayoutFx,
     holdDemoFx,
     confirmDemoFx,
     cancelDemoFx,
@@ -510,7 +515,7 @@ export function DashboardPage() {
       <DemoPricingPage
         key={`${demoPricingSession?.occurrence.id ?? 'loading'}:${demoPricingSession?.occurrence.layout.snapshot.layoutVersionId ?? 'layout'}:${demoPricingSession?.baseline.revision ?? 'revision'}`}
         session={demoPricingSession}
-        saving={pricingPending}
+        saving={pricingPending || layoutPending}
         error={demoPricingError}
         onBack={openDemoEvents}
         onBuyer={() => {
@@ -518,6 +523,7 @@ export function DashboardPage() {
             void openDemoEvent(demoPricingSession.occurrence.id).catch(() => undefined);
         }}
         onSave={(input) => saveDemoPricing(input)}
+        onSaveLayout={(input) => saveDemoOccurrenceLayout(input)}
       />
     );
   }

@@ -3,9 +3,10 @@ export const demoBookingDatabaseName = 'hall-platform-demo-booking';
 export type DemoBookingStoreName =
   | 'occurrences'
   | 'pricingAssignments'
-  | 'pricingRecovery';
+  | 'pricingRecovery'
+  | 'occurrenceEditorMaterials';
 
-const databaseVersion = 2;
+const databaseVersion = 3;
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -18,6 +19,8 @@ function openDatabase(): Promise<IDBDatabase> {
         database.createObjectStore('pricingAssignments', { keyPath: 'occurrenceId' });
       if (!database.objectStoreNames.contains('pricingRecovery'))
         database.createObjectStore('pricingRecovery', { keyPath: 'occurrenceId' });
+      if (!database.objectStoreNames.contains('occurrenceEditorMaterials'))
+        database.createObjectStore('occurrenceEditorMaterials', { keyPath: 'occurrenceId' });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);

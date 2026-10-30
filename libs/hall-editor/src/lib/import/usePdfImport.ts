@@ -14,6 +14,7 @@ import {
   assertImportFile,
   MAX_PDF_IMPORT_PAGES,
 } from './importLimits.js';
+import { fitBackgroundToPageSize } from '../background/backgroundScale.js';
 
 type PdfImportContext = Readonly<{
   draft: HallLayoutDraft;
@@ -135,9 +136,23 @@ export function usePdfImport(options: PdfImportOptions) {
         const firstPage = pages[0];
         if (!firstPage) throw new Error(tr('PDF не содержит страниц'));
         const scale = Math.min(1, 20 / firstPage.width);
+        const currentAsset = currentBackground
+          ? currentDraft.assets[currentBackground.source.assetId]
+          : undefined;
+        const currentPage =
+          currentBackground?.source.kind === 'pdf' && currentAsset?.kind === 'pdf'
+            ? currentAsset.pages[currentBackground.source.pageNumber - 1]
+            : undefined;
+        const replacementFit =
+          currentBackground && currentPage
+            ? fitBackgroundToPageSize(currentBackground, currentPage, firstPage)
+            : undefined;
         const nextBackground = currentBackground
           ? backgroundSchema.parse({
               ...currentBackground,
+              ...(replacementFit
+                ? { scale: replacementFit.scale, referenceScale: replacementFit.scale, position: replacementFit.position }
+                : { referenceScale: currentBackground.scale }),
               source: { kind: 'pdf', assetId, pageNumber: 1 },
             })
           : backgroundSchema.parse({
@@ -151,6 +166,7 @@ export function usePdfImport(options: PdfImportOptions) {
                 y: (-firstPage.height * scale) / 2,
               },
               scale,
+              referenceScale: scale,
               rotationRadians: 0,
               opacity: 0.7,
               visible: true,

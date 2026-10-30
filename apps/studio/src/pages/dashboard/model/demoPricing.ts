@@ -1,4 +1,5 @@
 import {
+  hallLayoutDraftSchema,
   pricingAssignmentDocumentSchema,
   type PricingAssignmentDocument,
   type PricingCatalog,
@@ -25,6 +26,7 @@ export const demoPricingRecoveryRecordSchema = z.strictObject({
   baseRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   catalogRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   document: pricingAssignmentDocumentSchema,
+  layoutDraft: hallLayoutDraftSchema.optional(),
   updatedAt: z.number().finite(),
 });
 

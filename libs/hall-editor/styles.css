@@ -392,6 +392,27 @@
 .hall-editor-properties select {
   width: 100%;
 }
+.hall-editor-background-scale {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.hall-editor-background-scale legend {
+  margin-bottom: 4px;
+}
+.hall-editor-background-scale input[type='range'] {
+  width: 100%;
+}
+.hall-editor-background-scale-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hall-editor-background-scale-actions input {
+  min-width: 0;
+  flex: 1;
+}
 .hall-editor-file-field input[type='file'] {
   width: 100%;
   font-size: 11px;

@@ -70,6 +70,13 @@ import {
 import { useLayoutDiagnostics } from './validation/useLayoutDiagnostics.js';
 import { transformRow, transformTable } from './commands/transformSelection.js';
 import { editHandle } from './commands/handleOperations.js';
+import {
+  backgroundScaleFromPercent,
+  backgroundScaleForDistance,
+  backgroundScalePercent,
+  scaleBackgroundAroundCenter,
+} from './background/backgroundScale.js';
+import { BackgroundScaleControl } from './ui/BackgroundScaleControl.js';
 
 const noObjectTreeKeys: ReadonlySet<string> = new Set();
 
@@ -207,6 +214,12 @@ export function HallEditor(props: HallEditorProps) {
   const [calibrationHover, setCalibrationHover] = useState<Vector2 | null>(
     null,
   );
+  const [backgroundFitTarget, setBackgroundFitTarget] = useState<number | null>(null);
+  const [backgroundFitFirst, setBackgroundFitFirst] = useState<Vector2 | null>(null);
+  const [backgroundScalePreview, setBackgroundScalePreview] = useState<{
+    backgroundId: string;
+    percent: number | null;
+  }>({ backgroundId: '', percent: null });
   const [previewState, setPreviewState] = useState<{
     key: string;
     seats: readonly Vector2[];
@@ -313,6 +326,46 @@ export function HallEditor(props: HallEditorProps) {
   );
   const background =
     draft.snapshot.backgrounds.find((item) => item.id === backgroundId) ?? null;
+  const previewPercent = backgroundScalePreview.backgroundId === background?.id
+    ? backgroundScalePreview.percent
+    : null;
+  const viewerDraft = useMemo(() => {
+    if (!background || previewPercent === null || readonly || background.locked)
+      return draft;
+    try {
+      const referenceScale = background.referenceScale ?? background.scale;
+      const scale = backgroundScaleFromPercent(referenceScale, previewPercent);
+      const asset = draft.assets[background.source.assetId];
+      const pageNumber = background.source.kind === 'pdf' ? background.source.pageNumber : 0;
+      const pageSize = asset?.pages[pageNumber - 1];
+      return {
+        ...draft,
+        snapshot: {
+          ...draft.snapshot,
+          backgrounds: draft.snapshot.backgrounds.map((item) => item.id !== background.id
+            ? item
+            : {
+                ...item,
+                referenceScale,
+                scale,
+                ...(pageSize
+                  ? {
+                      position: worldPointSchema.parse(scaleBackgroundAroundCenter(
+                        background.position,
+                        background.scale,
+                        scale,
+                        pageSize,
+                        background.rotationRadians,
+                      )),
+                    }
+                  : {}),
+              }),
+        },
+      };
+    } catch {
+      return draft;
+    }
+  }, [background, draft, previewPercent, readonly]);
 
   useEffect(() => {
     if (controlledValueRef.current !== value) {
@@ -328,7 +381,11 @@ export function HallEditor(props: HallEditorProps) {
   }
 
   function selectTool(next: EditorTool) {
-    if (next !== tool) clearCalibration();
+    if (next !== tool) {
+      clearCalibration();
+      setBackgroundFitTarget(null);
+      setBackgroundFitFirst(null);
+    }
     model.toolChanged(next);
     if (next !== 'select') setPolygonEditMode('move');
     setMobilePanel(null);
@@ -416,7 +473,33 @@ export function HallEditor(props: HallEditorProps) {
   }
 
   function handleCanvasClick(point: Vector2) {
-    if (readonly || tool === 'select' || tool === 'pan') return;
+    if (readonly) return;
+    if (backgroundFitTarget !== null && background) {
+      if (!backgroundFitFirst) {
+        setBackgroundFitFirst(point);
+        return;
+      }
+      const measuredDistance = Math.hypot(point.x - backgroundFitFirst.x, point.y - backgroundFitFirst.y);
+      try {
+        const nextScale = backgroundScaleForDistance(background.scale, measuredDistance, backgroundFitTarget);
+        const asset = draft.assets[background.source.assetId];
+        const pageNumber = background.source.kind === 'pdf' ? background.source.pageNumber : 0;
+        const pageSize = asset?.pages[pageNumber - 1];
+        updateBackground({
+          ...background,
+          referenceScale: background.referenceScale ?? background.scale,
+          scale: nextScale,
+          ...(pageSize ? { position: worldPointSchema.parse(scaleBackgroundAroundCenter(background.position, background.scale, nextScale, pageSize, background.rotationRadians)) } : {}),
+        });
+        setBackgroundFitTarget(null);
+        setBackgroundFitFirst(null);
+        model.toolChanged('select');
+      } catch (error) {
+        report(error);
+      }
+      return;
+    }
+    if (tool === 'select' || tool === 'pan') return;
     try {
       if (tool === 'calibrate') {
         if (!calibrationFirst) {
@@ -602,6 +685,8 @@ export function HallEditor(props: HallEditorProps) {
       : event.key.toLowerCase();
     if (event.key === 'Escape') {
       setMobilePanel(null);
+      setBackgroundFitTarget(null);
+      setBackgroundFitFirst(null);
       if (tool !== 'select') selectTool('select');
       clearCalibration();
       return;
@@ -1113,7 +1198,7 @@ export function HallEditor(props: HallEditorProps) {
                 grid: tr('Сетка · шаг 1'),
               }}
               height={canvasHeight}
-              draft={draft}
+              draft={viewerDraft}
               renderer={rendererPreference}
               webglEnabled={webglEnabled}
               viewerMode="edit"
@@ -1807,17 +1892,90 @@ export function HallEditor(props: HallEditorProps) {
                         }
                       />
 
-                      <PropertyField
-                        label={tr('Масштаб подложки')}
-                        value={background.scale}
+                      <BackgroundScaleControl
+                        value={backgroundScalePercent(
+                          background.scale,
+                          background.referenceScale ?? background.scale,
+                        )}
                         disabled={readonly || background.locked}
-                        onCommit={(scale) =>
+                        {...(locale ? { locale } : {})}
+                        onPreview={(percent) => setBackgroundScalePreview({
+                          backgroundId: background.id,
+                          percent,
+                        })}
+                        onCommit={(percent) => {
+                          const referenceScale =
+                            background.referenceScale ?? background.scale;
+                          const scale = backgroundScaleFromPercent(
+                            referenceScale,
+                            percent,
+                          );
+                          const asset = draft.assets[background.source.assetId];
+                          const pageNumber =
+                            background.source.kind === 'pdf'
+                              ? background.source.pageNumber
+                              : 0;
+                          const pageSize = asset?.pages[pageNumber - 1];
                           updateBackground({
                             ...background,
-                            scale: Number(scale),
-                          })
-                        }
+                            referenceScale,
+                            scale,
+                            ...(pageSize
+                              ? {
+                                  position: worldPointSchema.parse(
+                                    scaleBackgroundAroundCenter(
+                                      background.position,
+                                      background.scale,
+                                      scale,
+                                      pageSize,
+                                      background.rotationRadians,
+                                    ),
+                                  ),
+                                }
+                              : {}),
+                          });
+                        }}
                       />
+
+                      <PropertyField
+                        label={tr('Размер подложки на схеме (ед.)')}
+                        value={backgroundFitTarget}
+                        disabled={readonly || background.locked}
+                        min={0.001}
+                        onCommit={(distance) => {
+                          setBackgroundFitTarget(Number(distance));
+                          setBackgroundFitFirst(null);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        disabled={readonly || background.locked || backgroundFitTarget === null}
+                        onClick={() => {
+                          if (backgroundFitTarget !== null) {
+                            setBackgroundFitFirst(null);
+                            model.toolChanged('calibrate');
+                          }
+                        }}
+                      >
+                        {tr('Подогнать по двум точкам')}
+                      </button>
+                      {backgroundFitTarget !== null && (
+                        <p role="status">
+                          {backgroundFitFirst
+                            ? tr('Выберите вторую точку на подложке.')
+                            : tr('Выберите первую точку на подложке.')}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setBackgroundFitTarget(null);
+                              setBackgroundFitFirst(null);
+                              model.toolChanged('select');
+                            }}
+                          >
+                            {tr('Отмена')}
+                          </button>
+                        </p>
+                      )}
 
                       <PropertyField
                         label={tr('Поворот подложки (°)')}

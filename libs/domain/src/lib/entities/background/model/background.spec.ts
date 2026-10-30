@@ -25,6 +25,17 @@ describe('backgroundSchema', () => {
     ).toEqual(background);
   });
 
+  it('accepts an optional scale reference for legacy draft compatibility', () => {
+    const legacy = backgroundSchema.parse({
+      ...baseBackground,
+      source: { kind: 'pdf', assetId: 'asset-plan', pageNumber: 1 },
+    });
+    expect(legacy.referenceScale).toBeUndefined();
+    expect(
+      backgroundSchema.parse({ ...legacy, referenceScale: 0.005 }).referenceScale,
+    ).toBe(0.005);
+  });
+
   it.each(['image/png', 'image/jpeg', 'image/webp'])(
     'parses an image with MIME type %s',
     (mimeType) => {

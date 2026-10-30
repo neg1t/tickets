@@ -8,6 +8,7 @@ import {
   tableIdSchema,
   zoneIdSchema,
   parseHallLayoutDraft,
+  withoutEditorBackgrounds,
   type HallLayoutDraft,
 } from '@hall-platform/domain';
 import { decodePdfDataUrl, inspectPdfBytes } from '@hall-platform/pdf';
@@ -192,19 +193,20 @@ export function createPublishedVersion(
   draft: HallLayoutDraft,
   latestVersionNumber: number,
 ): PublishedHallVersion {
+  const publicDraft = withoutEditorBackgrounds(draft);
   const versionId = layoutVersionIdSchema.parse(newId('version'));
   return {
     versionId,
-    hallId: draft.snapshot.id,
+    hallId: publicDraft.snapshot.id,
     versionNumber: latestVersionNumber + 1,
     publishedAt: new Date().toISOString(),
     layout: parseHallLayoutDraft({
-      ...draft,
+      ...publicDraft,
       snapshot: {
-        ...draft.snapshot,
+        ...publicDraft.snapshot,
         id: newId('snapshot'),
         layoutVersionId: versionId,
-        floors: draft.snapshot.floors.map((floor) => ({
+        floors: publicDraft.snapshot.floors.map((floor) => ({
           ...floor,
           layoutVersionId: versionId,
         })),
@@ -672,10 +674,7 @@ export function createLocalHallRepository(
                   transaction.objectStore('assets').put(entry);
                 transaction.objectStore('versions').add({
                   ...published,
-                  layout: {
-                    ...encoded.draft,
-                    snapshot: published.layout.snapshot,
-                  },
+                  layout: published.layout,
                 });
                 transaction
                   .objectStore('publishedVersionMetadata')

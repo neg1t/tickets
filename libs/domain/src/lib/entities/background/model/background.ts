@@ -27,6 +27,8 @@ export const backgroundSchema = z.object({
   // Rotation is in radians.
   position: worldPointSchema,
   scale: z.number().positive().finite(),
+  // The scale that represents 100% in the editor. Optional for legacy drafts.
+  referenceScale: z.number().positive().finite().optional(),
   rotationRadians: z.number().finite(),
   opacity: z.number().min(0).max(1).finite(),
   visible: z.boolean(),

@@ -13,6 +13,7 @@ export * from './lib/shared/ids/index.js';
 export * from './lib/shared/lib/index.js';
 export * from './lib/model/layoutSnapshot.js';
 export * from './lib/model/hallLayoutDraft.js';
+export * from './lib/model/layoutProjection.js';
 export * from './lib/model/migrations.js';
 export * from './lib/pricing/pricingCatalog.js';
 export * from './lib/pricing/pricingAssignments.js';

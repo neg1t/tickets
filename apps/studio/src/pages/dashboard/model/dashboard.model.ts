@@ -45,6 +45,7 @@ import {
 } from './demoBookingRepository.js';
 import {
   loadDemoPricingSession,
+  saveDemoOccurrenceLayout,
   saveDemoPricingSession,
   type DemoPricingSession,
 } from './demoPricingPageModel.js';
@@ -450,14 +451,17 @@ export const seedDemoOccurrencesFx = createEffect(async () => {
         continue;
       throw error;
     }
-    if (version)
+    if (version) {
+      const localHall = await repository.read(fixture.snapshot.id);
       await demoBookingRepository.ensure(
         createDemoOccurrence(
           `demo:${version.versionId}`,
           version.layout,
           fixture.snapshot.id,
+          localHall?.draft,
         ),
       );
+    }
   }
   return demoBookingRepository.list();
 });
@@ -465,11 +469,13 @@ export const openBuyerFx = createEffect(
   async (summary: PublishedVersionMetadata) => {
     const version = await repository.getPublished(summary.versionId);
     if (!version) throw new Error('Опубликованная версия не найдена');
+    const localHall = await repository.read(version.hallId);
     return demoBookingRepository.ensure(
       createDemoOccurrence(
         `demo:${version.versionId}`,
         version.layout,
         version.hallId,
+        localHall?.draft,
       ),
     );
   },
@@ -485,6 +491,10 @@ export const openDemoPricingFx = createEffect((id: string) =>
 export const saveDemoPricingFx = createEffect(
   (input: { session: DemoPricingSession; document: PricingAssignmentDocument }) =>
     saveDemoPricingSession(input),
+);
+export const saveDemoOccurrenceLayoutFx = createEffect(
+  (input: { session: DemoPricingSession; layout: HallLayoutDraft; document: PricingAssignmentDocument }) =>
+    saveDemoOccurrenceLayout(input),
 );
 export const refreshDemoOccurrenceFx = createEffect(async (id: string) =>
   demoBookingRepository.get(id),
@@ -1062,6 +1072,18 @@ export const $demoPricingSession = createStore<DemoPricingSession | null>(null)
       restoredRecovery: false,
     };
   })
+  .on(saveDemoOccurrenceLayoutFx.doneData, (session, result) => {
+    if (!session || session.occurrence.id !== result.occurrence.id) return session;
+    const layoutDraftBase = result.occurrence.editorLayout ?? createDraftFromSnapshot(result.occurrence.layout.hallName, result.occurrence.layout.snapshot);
+    return {
+      ...session,
+      occurrence: result.occurrence,
+      layoutDraft: { ...layoutDraftBase, zoneBounds: result.occurrence.layout.zoneBounds ?? {} },
+      document: result.document,
+      baseline: result.document,
+      restoredRecovery: false,
+    };
+  })
   .reset(
     catalogOpened,
     editorOpened,
@@ -1074,6 +1096,7 @@ export const $demoPricingSession = createStore<DemoPricingSession | null>(null)
 export const $demoPricingError = createStore<string | null>(null)
   .on(openDemoPricingFx.failData, (_, error) => error.message)
   .on(saveDemoPricingFx.failData, (_, error) => error.message)
+  .on(saveDemoOccurrenceLayoutFx.failData, (_, error) => error.message)
   .reset(openDemoPricingFx.doneData, saveDemoPricingFx.doneData, demoEventsOpened);
 
 export const $buyerOccurrence = createStore<DemoOccurrence | null>(null)

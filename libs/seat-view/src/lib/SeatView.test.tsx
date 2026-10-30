@@ -9,7 +9,7 @@ import {
   within,
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { layoutDocumentSchema, seatIdSchema } from '@hall-platform/domain';
+import { backgroundSchema, layoutDocumentSchema, seatIdSchema } from '@hall-platform/domain';
 import smallTheater from '@hall-platform/fixtures/small-theater.json' with { type: 'json' };
 import {
   SeatView,
@@ -20,6 +20,7 @@ import {
 vi.mock('@hall-platform/hall-viewer', () => ({
   HallViewport: (props: {
     stageId: string;
+    snapshot: { backgrounds: readonly unknown[] };
     viewerMode?: 'edit' | 'view' | 'pick';
     activeTool?: string;
     labels?: { zoomIn?: string };
@@ -27,6 +28,7 @@ vi.mock('@hall-platform/hall-viewer', () => ({
     <div
       data-testid="hall-viewer"
       data-stage-id={props.stageId}
+      data-background-count={props.snapshot.backgrounds.length}
       data-viewer-mode={props.viewerMode}
       data-active-tool={props.activeTool}
       data-zoom-in-label={props.labels?.zoomIn}
@@ -93,6 +95,36 @@ function ClonedControlledView(props: { readonly name: string }) {
 }
 
 describe('SeatView', () => {
+  it('strips legacy backgrounds at the public SeatView boundary', () => {
+    const floorId = snapshot.floors[0]?.id;
+    if (!floorId) throw new Error('Fixture has no floor');
+    const background = backgroundSchema.parse({
+      id: 'background-legacy',
+      floorId,
+      order: 0,
+      position: { x: 0, y: 0 },
+      scale: 1,
+      rotationRadians: 0,
+      opacity: 1,
+      visible: true,
+      locked: false,
+      source: { kind: 'image', assetId: 'private-image', mimeType: 'image/png' },
+    });
+    render(
+      <SeatView
+        layout={{ ...layout, snapshot: { ...layout.snapshot, backgrounds: [background] } }}
+        occurrenceId="legacy-background"
+        availability={availability}
+        prices={prices}
+        selection={[]}
+        onSelectionChange={() => undefined}
+        onBuyClick={() => undefined}
+      />,
+    );
+
+    expect(screen.getByTestId('hall-viewer').getAttribute('data-background-count')).toBe('0');
+  });
+
   it('uses the pick interaction mode without entering editor tools', () => {
     render(<ControlledView name="pick-mode" />);
     const viewer = screen.getByTestId('hall-viewer');

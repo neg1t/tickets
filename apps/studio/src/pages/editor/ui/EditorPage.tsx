@@ -4,6 +4,7 @@ import {
   type HallLayoutDraft,
 } from '@hall-platform/hall-editor';
 import { seatIdSchema } from '@hall-platform/domain';
+import { withoutEditorBackgrounds } from '@hall-platform/domain';
 import type { PublishedVersionMetadata } from '@hall-platform/local-storage';
 import { Menu } from '@hall-platform/ui';
 import type { RecoveryAutosaveStatus } from '../../dashboard/model/recoveryAutosave.js';
@@ -173,7 +174,9 @@ export function EditorPage(props: EditorPageProps) {
             {published && (
               <p>Опубликовано: {published.snapshot.seats.length} мест</p>
             )}
-            <PdfHallViewer draft={published || props.draft} />
+            <PdfHallViewer
+              draft={withoutEditorBackgrounds(published || props.draft)}
+            />
           </div>
         )}
       </section>

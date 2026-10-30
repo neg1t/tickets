@@ -7,7 +7,11 @@ import {
   type CSSProperties,
 } from 'react';
 import { useUnit } from 'effector-react';
-import type { LayoutSnapshot, SeatStatus } from '@hall-platform/domain';
+import {
+  withoutBackgrounds,
+  type LayoutSnapshot,
+  type SeatStatus,
+} from '@hall-platform/domain';
 import type { SpatialBounds } from '@hall-platform/geometry';
 import {
   HallViewport,
@@ -230,8 +234,18 @@ function formatPrice(price: SeatPrice, locale: string): string {
 }
 
 export function SeatView(props: SeatViewProps) {
+  const safeLayout = useMemo(
+    () => {
+      const { hallName, snapshot, zoneBounds } = props.layout;
+      return {
+        hallName,
+        snapshot: withoutBackgrounds(snapshot),
+        ...(zoneBounds ? { zoneBounds } : {}),
+      };
+    },
+    [props.layout],
+  );
   const {
-    layout,
     occurrenceId,
     availability,
     availabilityRevision = 0,
@@ -250,6 +264,7 @@ export function SeatView(props: SeatViewProps) {
     rendererPreference = 'auto',
     webglEnabled = false,
   } = props;
+  const layout = safeLayout;
   const labels = locale.toLowerCase().startsWith('en')
     ? translations.en
     : translations.ru;

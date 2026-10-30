@@ -3,8 +3,10 @@ import smallTheater from '@hall-platform/fixtures/small-theater.json';
 import banquetHall from '@hall-platform/fixtures/banquet-hall.json';
 import {
   backgroundSchema,
+  createEmptyDraft,
   layoutDocumentSchema,
   layoutSnapshotSchema,
+  parseHallLayoutDraft,
   worldPointSchema,
 } from '@hall-platform/domain';
 import {
@@ -47,6 +49,61 @@ describe('demo booking', () => {
     expect('assets' in occurrence.layout).toBe(false);
     expect(occurrence.layout.snapshot.backgrounds).toEqual([]);
     expect(JSON.stringify(occurrence)).not.toContain('SECRET');
+  });
+
+  it('copies matching hall editor materials into an occurrence with its published version identity', () => {
+    const emptyDraft = createEmptyDraft('Local Hall');
+    const floorId = emptyDraft.snapshot.floors[0]?.id;
+    if (!floorId) throw new Error('Empty draft has no floor');
+    const background = backgroundSchema.parse({
+      id: 'background-source',
+      floorId,
+      order: 0,
+      position: worldPointSchema.parse({ x: 5, y: 10 }),
+      scale: 0.005,
+      referenceScale: 0.005,
+      rotationRadians: 0.2,
+      opacity: 0.8,
+      visible: true,
+      locked: false,
+      source: { kind: 'pdf', assetId: 'asset-source', pageNumber: 1 },
+    });
+    const sourceDraft = parseHallLayoutDraft({
+      ...emptyDraft,
+      snapshot: { ...emptyDraft.snapshot, backgrounds: [background] },
+      assets: {
+        'asset-source': {
+          kind: 'pdf',
+          name: 'source-plan.pdf',
+          dataUrl: 'data:application/pdf;base64,JVBERi0=',
+          pages: [{ width: 300, height: 200 }],
+        },
+      },
+    });
+    const publishedVersionId = 'version-published-copy';
+    const publishedSnapshot = layoutSnapshotSchema.parse({
+      ...sourceDraft.snapshot,
+      id: 'snapshot-published-copy',
+      layoutVersionId: publishedVersionId,
+      backgrounds: [],
+      floors: sourceDraft.snapshot.floors.map((floor) => ({
+        ...floor,
+        layoutVersionId: publishedVersionId,
+      })),
+    });
+
+    const occurrence = createDemoOccurrence(
+      'demo:published-copy',
+      { hallName: 'Local Hall', snapshot: publishedSnapshot },
+      sourceDraft.snapshot.id,
+      sourceDraft,
+    );
+
+    expect(occurrence.editorLayout?.snapshot.layoutVersionId).toBe(publishedVersionId);
+    expect(occurrence.editorLayout?.snapshot.backgrounds).toEqual([background]);
+    expect(occurrence.editorLayout?.assets['asset-source']?.name).toBe('source-plan.pdf');
+    expect(occurrence.layout.snapshot.backgrounds).toEqual([]);
+    expect(sourceDraft.snapshot.backgrounds).toEqual([background]);
   });
 
   it('holds a seat, rejects a competing hold, then confirms it as sold', () => {
@@ -215,7 +272,9 @@ describe('demo booking', () => {
       },
     };
     expect(() => getDemoTotal(mixed, pair)).toThrow('валют');
-    expect(() => getDemoTotal(occurrence, [pair[0]!, pair[0]!])).toThrow(
+    const firstPairItem = pair[0];
+    if (!firstPairItem) throw new Error('Expected a priced seat');
+    expect(() => getDemoTotal(occurrence, [firstPairItem, firstPairItem])).toThrow(
       'Повтор',
     );
     const zoneId = snapshot.zones[0]?.id ?? '';

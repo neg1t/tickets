@@ -1,11 +1,21 @@
 import type { SeatSelectionItem } from '@hall-platform/seat-view';
 import {
   layoutSnapshotSchema,
+  createDraftFromSnapshot,
   pricingAssignmentDocumentSchema,
   seatStatusSchema,
+  type Background,
   type PricingAssignmentDocument,
   type PricingCatalog,
 } from '@hall-platform/domain';
+import type { HallLayoutDraft } from '@hall-platform/hall-editor';
+import { parseHallLayoutDraft } from '@hall-platform/hall-editor';
+import {
+  decodeStoredDraft,
+  encodeStoredDraft,
+  HallStorageError,
+  type StoredDraft,
+} from '@hall-platform/local-storage';
 import {
   cancelDemoHold,
   confirmDemoHold,
@@ -23,10 +33,126 @@ import {
 import {
   demoBookingTransaction,
 } from '../../../shared/storage/demoBookingDatabase.js';
+import { reconcileOccurrenceLayout } from './reconcileOccurrenceInventory.js';
 
 const ownerKey = 'hall-platform-demo-booking-owner';
 const changeKey = 'hall-platform-demo-booking-change';
 let fallbackOwnerId: string | null = null;
+
+type OccurrenceEditorMaterialsRecord = Readonly<{
+  schemaVersion: 1;
+  occurrenceId: string;
+  ownerScope: 'occurrence';
+  sourceHallId: string;
+  baseLayoutVersionId: string;
+  layoutVersionId: string;
+  revision: number;
+  updatedAt: number;
+  backgrounds: readonly Background[];
+  assets: StoredDraft['assets'];
+  calibration: HallLayoutDraft['calibration'];
+  blobs: Readonly<Record<string, Blob>>;
+}>;
+
+type OccurrenceStorageBundle = Readonly<{
+  occurrence: unknown;
+  materials: unknown;
+}>;
+
+async function encodeOccurrenceEditorMaterials(
+  occurrence: DemoOccurrence,
+  draft: HallLayoutDraft,
+): Promise<OccurrenceEditorMaterialsRecord> {
+  if (draft.snapshot.layoutVersionId !== occurrence.layout.snapshot.layoutVersionId)
+    throw new HallStorageError('conflict', 'Материалы редактора относятся к другой версии схемы мероприятия');
+  const encoded = await encodeStoredDraft(draft);
+  return {
+    schemaVersion: 1,
+    occurrenceId: occurrence.id,
+    ownerScope: 'occurrence',
+    sourceHallId: occurrence.hallId,
+    baseLayoutVersionId: occurrence.sourceLayoutVersionId ?? occurrence.layout.snapshot.layoutVersionId,
+    layoutVersionId: occurrence.layout.snapshot.layoutVersionId,
+    revision: occurrence.revision,
+    updatedAt: Date.now(),
+    backgrounds: encoded.draft.snapshot.backgrounds,
+    assets: encoded.draft.assets,
+    calibration: encoded.draft.calibration,
+    blobs: Object.fromEntries(encoded.blobs.map(({ key, blob }) => [key, blob])),
+  };
+}
+
+function parseOccurrenceEditorMaterials(
+  value: unknown,
+): OccurrenceEditorMaterialsRecord | null {
+  if (value === undefined) return null;
+  if (
+    !isRecord(value) ||
+    value.schemaVersion !== 1 ||
+    value.ownerScope !== 'occurrence' ||
+    typeof value.occurrenceId !== 'string' ||
+    typeof value.sourceHallId !== 'string' ||
+    typeof value.baseLayoutVersionId !== 'string' ||
+    typeof value.layoutVersionId !== 'string' ||
+    !Number.isSafeInteger(value.revision) ||
+    (value.revision as number) < 0 ||
+    !Number.isFinite(value.updatedAt) ||
+    !Array.isArray(value.backgrounds) ||
+    !isRecord(value.assets) ||
+    !isRecord(value.blobs) ||
+    !Object.values(value.blobs).every((blob) => typeof Blob !== 'undefined' && blob instanceof Blob)
+  ) {
+    throw new HallStorageError('corrupt', 'Локальные материалы схемы мероприятия повреждены');
+  }
+  return value as unknown as OccurrenceEditorMaterialsRecord;
+}
+
+async function decodeOccurrenceEditorMaterials(
+  occurrence: DemoOccurrence,
+  rawMaterials: unknown,
+): Promise<HallLayoutDraft | null> {
+  const materials = parseOccurrenceEditorMaterials(rawMaterials);
+  if (!materials) return null;
+  if (
+    materials.occurrenceId !== occurrence.id ||
+    materials.sourceHallId !== occurrence.hallId ||
+    materials.baseLayoutVersionId !== (occurrence.sourceLayoutVersionId ?? materials.baseLayoutVersionId) ||
+    materials.layoutVersionId !== occurrence.layout.snapshot.layoutVersionId
+  ) return null;
+  const draftBase = createDraftFromSnapshot(occurrence.layout.hallName, {
+    ...occurrence.layout.snapshot,
+    backgrounds: [...materials.backgrounds],
+  });
+  const storedDraft: StoredDraft = {
+    ...draftBase,
+    assets: materials.assets,
+    calibration: materials.calibration,
+  };
+  return decodeStoredDraft(storedDraft, async (key) => materials.blobs[key]);
+}
+
+function withoutInlineEditorLayout(occurrence: DemoOccurrence): Omit<DemoOccurrence, 'editorLayout'> {
+  const { editorLayout: _editorLayout, ...stored } = occurrence;
+  return stored;
+}
+
+async function hydrateOccurrenceBundle(
+  raw: unknown,
+  rawMaterials: unknown,
+): Promise<DemoOccurrence | null> {
+  const occurrence = parseDemoOccurrence(raw);
+  if (!occurrence) return null;
+  const editorLayout = await decodeOccurrenceEditorMaterials(occurrence, rawMaterials);
+  if (editorLayout) return { ...occurrence, editorLayout };
+  if (rawMaterials !== undefined) {
+    const { editorLayout: _staleEditorLayout, ...withoutStaleMaterials } = occurrence;
+    return withoutStaleMaterials;
+  }
+  if (occurrence.editorLayout?.snapshot.layoutVersionId === occurrence.layout.snapshot.layoutVersionId)
+    return occurrence;
+  const { editorLayout: _staleEditorLayout, ...withoutStaleMaterials } = occurrence;
+  return withoutStaleMaterials;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -58,12 +184,15 @@ export function parseDemoOccurrence(value: unknown): DemoOccurrence | null {
     !Number.isSafeInteger(value.revision) ||
     (value.revision as number) < 0 ||
     typeof value.hallId !== 'string' ||
+    (value.sourceLayoutVersionId !== undefined &&
+      (typeof value.sourceLayoutVersionId !== 'string' || !value.sourceLayoutVersionId)) ||
     typeof value.title !== 'string' ||
     typeof value.startsAt !== 'string' ||
     Number.isNaN(Date.parse(value.startsAt)) ||
     !isRecord(value.layout) ||
     typeof value.layout.hallName !== 'string' ||
     !layoutSnapshotSchema.safeParse(value.layout.snapshot).success ||
+    (value.editorLayout !== undefined && !parseHallLayoutDraftSafe(value.editorLayout)) ||
     !isRecord(value.initialSeats) ||
     !Object.values(value.initialSeats).every(
       (status) => seatStatusSchema.safeParse(status).success,
@@ -139,12 +268,25 @@ export function parseDemoOccurrence(value: unknown): DemoOccurrence | null {
   return {
     ...value,
     schemaVersion: 2,
+    sourceLayoutVersionId:
+      typeof value.sourceLayoutVersionId === 'string'
+        ? value.sourceLayoutVersionId
+        : (value.layout as { snapshot: { layoutVersionId: string } }).snapshot.layoutVersionId,
     holds,
     orders,
     ...((value.legacyQuoteNotice === true || legacyActiveHold)
       ? { legacyQuoteNotice: true }
       : {}),
   } as DemoOccurrence;
+}
+
+function parseHallLayoutDraftSafe(value: unknown): boolean {
+  try {
+    parseHallLayoutDraft(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function getDemoOwnerId(): string {
@@ -223,47 +365,143 @@ async function transactionResult<T>(
   );
 }
 
-export const demoBookingRepository = {
-  list: () =>
-    transactionResult<DemoOccurrence[]>('readwrite', (store, resolveValue) => {
-      const request = store.getAll();
-      request.onsuccess = () => {
-        const occurrences = request.result
-          .map(parseDemoOccurrence)
-          .filter((item): item is DemoOccurrence => item !== null);
-        for (const occurrence of occurrences) {
-          const stored = request.result.find(
-            (candidate: unknown) => isRecord(candidate) && candidate.id === occurrence.id,
-          );
-          if (isRecord(stored) && stored.schemaVersion !== 2)
-            store.put(occurrence);
-        }
-        resolveValue(occurrences);
+async function readOccurrenceBundle(id: string): Promise<OccurrenceStorageBundle> {
+  return demoBookingTransaction<OccurrenceStorageBundle>(
+    ['occurrences', 'occurrenceEditorMaterials'],
+    'readonly',
+    (transaction, resolveValue) => {
+      const occurrenceRequest = transaction.objectStore('occurrences').get(id);
+      const materialsRequest = transaction.objectStore('occurrenceEditorMaterials').get(id);
+      let occurrenceReady = false;
+      let materialsReady = false;
+      let occurrence: unknown;
+      let materials: unknown;
+      const resolveWhenReady = () => {
+        if (occurrenceReady && materialsReady) resolveValue({ occurrence, materials });
       };
-    }),
-  get: (id: string) =>
-    transactionResult<DemoOccurrence | null>(
+      occurrenceRequest.onsuccess = () => {
+        occurrence = occurrenceRequest.result;
+        occurrenceReady = true;
+        resolveWhenReady();
+      };
+      materialsRequest.onsuccess = () => {
+        materials = materialsRequest.result;
+        materialsReady = true;
+        resolveWhenReady();
+      };
+    },
+  );
+}
+
+async function readAllOccurrenceBundles(): Promise<OccurrenceStorageBundle[]> {
+  return demoBookingTransaction<OccurrenceStorageBundle[]>(
+    ['occurrences', 'occurrenceEditorMaterials'],
+    'readonly',
+    (transaction, resolveValue) => {
+      const occurrenceRequest = transaction.objectStore('occurrences').getAll();
+      const materialsRequest = transaction.objectStore('occurrenceEditorMaterials').getAll();
+      let occurrenceReady = false;
+      let materialsReady = false;
+      let occurrences: unknown[] = [];
+      let materials: unknown[] = [];
+      const resolveWhenReady = () => {
+        if (!occurrenceReady || !materialsReady) return;
+        const byId = new Map(
+          materials.filter(isRecord).map((record) => [record.occurrenceId, record] as const),
+        );
+        resolveValue(occurrences.map((record) => ({
+          occurrence: record,
+          materials: isRecord(record) ? byId.get(record.id) : undefined,
+        })));
+      };
+      occurrenceRequest.onsuccess = () => {
+        occurrences = occurrenceRequest.result as unknown[];
+        occurrenceReady = true;
+        resolveWhenReady();
+      };
+      materialsRequest.onsuccess = () => {
+        materials = materialsRequest.result as unknown[];
+        materialsReady = true;
+        resolveWhenReady();
+      };
+    },
+  );
+}
+
+export const demoBookingRepository = {
+  list: async () => {
+    const bundles = await readAllOccurrenceBundles();
+    const occurrences = await Promise.all(
+      bundles.map(({ occurrence, materials }) => hydrateOccurrenceBundle(occurrence, materials)),
+    );
+    return occurrences.filter((item): item is DemoOccurrence => item !== null);
+  },
+  get: async (id: string) => {
+    const bundle = await readOccurrenceBundle(id);
+    return hydrateOccurrenceBundle(bundle.occurrence, bundle.materials);
+  },
+  ensure: async (occurrence: DemoOccurrence) => {
+    const existing = await demoBookingRepository.get(occurrence.id);
+    if (existing) {
+      if (existing.editorLayout) {
+        const bundle = await readOccurrenceBundle(existing.id);
+        if (bundle.materials === undefined) {
+          const record = await encodeOccurrenceEditorMaterials(existing, existing.editorLayout);
+          await demoBookingTransaction<void>(
+            ['occurrences', 'occurrenceEditorMaterials'],
+            'readwrite',
+            (transaction, resolveValue) => {
+              const occurrenceStore = transaction.objectStore('occurrences');
+              const materialsStore = transaction.objectStore('occurrenceEditorMaterials');
+              const occurrenceRequest = occurrenceStore.get(existing.id);
+              const materialsRequest = materialsStore.get(existing.id);
+              let ready = 0;
+              const migrateWhenReady = () => {
+                if (++ready !== 2) return;
+                const current = parseDemoOccurrence(occurrenceRequest.result);
+                if (
+                  current?.revision === existing.revision &&
+                  materialsRequest.result === undefined &&
+                  current.editorLayout?.snapshot.layoutVersionId === record.layoutVersionId
+                ) {
+                  occurrenceStore.put(withoutInlineEditorLayout(current));
+                  materialsStore.put(record);
+                }
+                resolveValue();
+              };
+              occurrenceRequest.onsuccess = migrateWhenReady;
+              materialsRequest.onsuccess = migrateWhenReady;
+            },
+          );
+        }
+      }
+      return (await demoBookingRepository.get(occurrence.id)) ?? existing;
+    }
+
+    const materials = occurrence.editorLayout
+      ? await encodeOccurrenceEditorMaterials(occurrence, occurrence.editorLayout)
+      : null;
+    const created = await demoBookingTransaction<boolean>(
+      ['occurrences', 'occurrenceEditorMaterials'],
       'readwrite',
-      (store, resolveValue) => {
-        const request = store.get(id);
+      (transaction, resolveValue) => {
+        const store = transaction.objectStore('occurrences');
+        const materialsStore = transaction.objectStore('occurrenceEditorMaterials');
+        const request = store.get(occurrence.id);
         request.onsuccess = () => {
-          const occurrence = parseDemoOccurrence(request.result);
-          if (occurrence && isRecord(request.result) && request.result.schemaVersion !== 2)
-            store.put(occurrence);
-          resolveValue(occurrence);
+          if (request.result !== undefined) {
+            resolveValue(false);
+            return;
+          }
+          store.put(withoutInlineEditorLayout(occurrence));
+          if (materials) materialsStore.put(materials);
+          resolveValue(true);
         };
       },
-    ),
-  ensure: (occurrence: DemoOccurrence) =>
-    transactionResult<DemoOccurrence>('readwrite', (store, resolveValue) => {
-      const request = store.get(occurrence.id);
-      request.onsuccess = () => {
-        const result = parseDemoOccurrence(request.result) ?? occurrence;
-        if (!isRecord(request.result) || request.result.schemaVersion !== 2)
-          store.put(result);
-        resolveValue(result);
-      };
-    }),
+    );
+    if (!created) return (await demoBookingRepository.get(occurrence.id)) ?? occurrence;
+    return occurrence;
+  },
   update: async (
     id: string,
     mutate: (current: DemoOccurrence) => DemoOccurrence,
@@ -327,32 +565,40 @@ export const demoBookingRepository = {
         };
       },
     ),
-  getPricingRecovery: async (occurrenceId: string) =>
-    demoBookingTransaction<DemoPricingRecoveryRecord | null>(
+  getPricingRecovery: async (occurrenceId: string) => {
+    const raw = await demoBookingTransaction<unknown | null>(
       ['pricingRecovery'],
       'readonly',
       (transaction, resolveValue) => {
         const request = transaction.objectStore('pricingRecovery').get(occurrenceId);
-        request.onsuccess = () => {
-          if (request.result === undefined) {
-            resolveValue(null);
-            return;
-          }
-          const parsed = demoPricingRecoveryRecordSchema.safeParse(request.result);
-          if (
-            !parsed.success ||
-            parsed.data.occurrenceId !== occurrenceId ||
-            parsed.data.document.occurrenceId !== occurrenceId ||
-            parsed.data.document.layoutVersionId !== parsed.data.layoutVersionId ||
-            parsed.data.document.catalogRevision !== parsed.data.catalogRevision
-          ) {
-            resolveValue(null);
-            return;
-          }
-          resolveValue(parsed.data);
-        };
+        request.onsuccess = () => resolveValue(request.result ?? null);
       },
-    ),
+    );
+    if (raw === null || !isRecord(raw)) return null;
+    const { layoutDraft: rawLayoutDraft, layoutBlobs, ...baseRecord } = raw;
+    const parsed = demoPricingRecoveryRecordSchema.safeParse(baseRecord);
+    if (
+      !parsed.success ||
+      parsed.data.occurrenceId !== occurrenceId ||
+      parsed.data.document.occurrenceId !== occurrenceId ||
+      parsed.data.document.layoutVersionId !== parsed.data.layoutVersionId ||
+      parsed.data.document.catalogRevision !== parsed.data.catalogRevision
+    ) return null;
+    let layoutDraft: HallLayoutDraft | undefined;
+    if (rawLayoutDraft !== undefined) {
+      const blobs = layoutBlobs === undefined ? {} : layoutBlobs;
+      if (!isRecord(blobs) || !Object.values(blobs).every((blob) => typeof Blob !== 'undefined' && blob instanceof Blob))
+        throw new HallStorageError('corrupt', 'Файлы локального восстановления схемы повреждены');
+      layoutDraft = await decodeStoredDraft(
+        rawLayoutDraft as StoredDraft,
+        async (key) => (blobs as Record<string, Blob>)[key],
+      );
+    }
+    return demoPricingRecoveryRecordSchema.parse({
+      ...parsed.data,
+      ...(layoutDraft ? { layoutDraft } : {}),
+    });
+  },
   savePricingRecovery: async (record: DemoPricingRecoveryRecord) => {
     const parsed = demoPricingRecoveryRecordSchema.parse(record);
     if (
@@ -361,8 +607,18 @@ export const demoBookingRepository = {
       parsed.document.catalogRevision !== parsed.catalogRevision ||
       parsed.document.revision !== parsed.baseRevision
     ) throw new Error('Контекст черновика цен не совпадает с восстановлением');
+    const { layoutDraft, ...baseRecord } = parsed;
+    let persisted: Record<string, unknown> = baseRecord;
+    if (layoutDraft) {
+      const encoded = await encodeStoredDraft(layoutDraft);
+      persisted = {
+        ...baseRecord,
+        layoutDraft: encoded.draft,
+        layoutBlobs: Object.fromEntries(encoded.blobs.map(({ key, blob }) => [key, blob])),
+      };
+    }
     await demoBookingTransaction<void>(['pricingRecovery'], 'readwrite', (transaction, resolveValue) => {
-      transaction.objectStore('pricingRecovery').put(parsed);
+      transaction.objectStore('pricingRecovery').put(persisted);
       resolveValue();
     });
   },
@@ -461,14 +717,110 @@ export const demoBookingRepository = {
     announceChange(input.occurrenceId);
     return result;
   },
+  saveOccurrenceLayout: async (input: {
+    occurrenceId: string;
+    expectedOccurrenceRevision: number;
+    expectedAssignmentRevision: number;
+    expectedLayoutVersionId: string;
+    catalog: PricingCatalog;
+    layout: HallLayoutDraft;
+    document: PricingAssignmentDocument;
+  }) => {
+    const baselineOccurrence = await demoBookingRepository.get(input.occurrenceId);
+    if (
+      !baselineOccurrence ||
+      baselineOccurrence.revision !== input.expectedOccurrenceRevision ||
+      baselineOccurrence.layout.snapshot.layoutVersionId !== input.expectedLayoutVersionId
+    )
+      throw new Error('Данные мероприятия изменились в другой вкладке');
+    const reconciled = reconcileOccurrenceLayout(baselineOccurrence, input.layout);
+    if (reconciled.conflicts.length)
+      throw new Error(reconciled.conflicts.map(({ message }) => message).join(' '));
+    const localMaterials = reconciled.occurrence.editorLayout
+      ? await encodeOccurrenceEditorMaterials(reconciled.occurrence, reconciled.occurrence.editorLayout)
+      : null;
+    const result = await demoBookingTransaction<{
+      occurrence: DemoOccurrence;
+      document: PricingAssignmentDocument;
+    }>(['occurrences', 'pricingAssignments', 'pricingRecovery', 'occurrenceEditorMaterials'], 'readwrite', (transaction, resolveValue, rejectValue) => {
+      const occurrenceStore = transaction.objectStore('occurrences');
+      const assignmentsStore = transaction.objectStore('pricingAssignments');
+      const recoveryStore = transaction.objectStore('pricingRecovery');
+      const materialsStore = transaction.objectStore('occurrenceEditorMaterials');
+      const occurrenceRequest = occurrenceStore.get(input.occurrenceId);
+      const assignmentsRequest = assignmentsStore.get(input.occurrenceId);
+      let storedOccurrence: DemoOccurrence | null = null;
+      let storedDocument: PricingAssignmentDocument | null = null;
+      let occurrenceReady = false;
+      let assignmentsReady = false;
+      const saveWhenReady = () => {
+        if (!occurrenceReady || !assignmentsReady) return;
+        if (
+          !storedOccurrence ||
+          storedOccurrence.revision !== input.expectedOccurrenceRevision ||
+          storedOccurrence.layout.snapshot.layoutVersionId !== input.expectedLayoutVersionId
+        ) {
+          rejectValue(new Error('Данные мероприятия изменились в другой вкладке'));
+          return;
+        }
+        if ((storedDocument?.revision ?? 0) !== input.expectedAssignmentRevision) {
+          rejectValue(new Error('Назначения цен изменились в другой вкладке'));
+          return;
+        }
+        const nextDocument = pricingAssignmentDocumentSchema.parse({
+          ...input.document,
+          layoutVersionId: reconciled.occurrence.layout.snapshot.layoutVersionId,
+          revision: input.expectedAssignmentRevision + 1,
+          assignments: {
+            seatSegments: Object.fromEntries(Object.entries(input.document.assignments.seatSegments).filter(([id]) => reconciled.occurrence.layout.snapshot.seats.some((seat) => seat.id === id))),
+            gaZoneSegments: Object.fromEntries(Object.entries(input.document.assignments.gaZoneSegments).filter(([id]) => reconciled.occurrence.layout.snapshot.zones.some((zone) => zone.id === id && zone.kind === 'ga'))),
+          },
+        });
+        let prices;
+        try {
+          prices = buildDemoPricingPrices({ occurrence: reconciled.occurrence, catalog: input.catalog, document: nextDocument });
+        } catch (error) {
+          rejectValue(error instanceof Error ? error : new Error(String(error)));
+          return;
+        }
+        const updatedOccurrence = { ...reconciled.occurrence, prices };
+        occurrenceStore.put(withoutInlineEditorLayout(updatedOccurrence));
+        assignmentsStore.put({ schemaVersion: 1, occurrenceId: input.occurrenceId, document: nextDocument });
+        if (localMaterials) materialsStore.put(localMaterials);
+        else materialsStore.delete(input.occurrenceId);
+        recoveryStore.delete(input.occurrenceId);
+        resolveValue({ occurrence: updatedOccurrence, document: nextDocument });
+      };
+      occurrenceRequest.onsuccess = () => {
+        storedOccurrence = parseDemoOccurrence(occurrenceRequest.result);
+        occurrenceReady = true;
+        saveWhenReady();
+      };
+      assignmentsRequest.onsuccess = () => {
+        if (assignmentsRequest.result !== undefined) {
+          const parsed = demoPricingAssignmentRecordSchema.safeParse(assignmentsRequest.result);
+          if (!parsed.success || parsed.data.occurrenceId !== input.occurrenceId) {
+            rejectValue(new Error('Сохранённые назначения цен повреждены'));
+            return;
+          }
+          storedDocument = parsed.data.document;
+        }
+        assignmentsReady = true;
+        saveWhenReady();
+      };
+    });
+    announceChange(input.occurrenceId);
+    return result;
+  },
   clear: async () => {
     await demoBookingTransaction<void>(
-      ['occurrences', 'pricingAssignments', 'pricingRecovery'],
+      ['occurrences', 'pricingAssignments', 'pricingRecovery', 'occurrenceEditorMaterials'],
       'readwrite',
       (transaction, resolveValue) => {
         transaction.objectStore('occurrences').clear();
         transaction.objectStore('pricingAssignments').clear();
         transaction.objectStore('pricingRecovery').clear();
+        transaction.objectStore('occurrenceEditorMaterials').clear();
         resolveValue();
       },
     );

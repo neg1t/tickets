@@ -1,4 +1,4 @@
-import { createEmptyDraft } from '@hall-platform/domain';
+import { createEmptyDraft, layoutSnapshotSchema } from '@hall-platform/domain';
 import { describe, expect, it } from 'vitest';
 import {
   createPublishedVersion,
@@ -35,6 +35,44 @@ describe('local hall drafts and publications', () => {
       publication.versionId,
     );
     expect(publication.layout.snapshot.floors).not.toBe(draft.snapshot.floors);
+  });
+
+  it('keeps editor backgrounds out of published versions while retaining the draft source', () => {
+    const empty = createEmptyDraft('Театр');
+    const floorId = empty.snapshot.floors[0]?.id;
+    if (!floorId) throw new Error('Empty draft has no floor');
+    const draft = {
+      ...empty,
+      snapshot: layoutSnapshotSchema.parse({
+        ...empty.snapshot,
+        backgrounds: [{
+          id: 'background-plan',
+          floorId,
+          order: 0,
+          position: { x: 0, y: 0 },
+          scale: 0.005,
+          referenceScale: 0.005,
+          rotationRadians: 0,
+          opacity: 1,
+          visible: true,
+          locked: false,
+          source: { kind: 'pdf', assetId: 'asset-plan', pageNumber: 1 },
+        }],
+      }),
+      assets: {
+        'asset-plan': {
+          kind: 'pdf' as const,
+          name: 'plan.pdf',
+          dataUrl: 'data:application/pdf;base64,JVBERi0=',
+          pages: [{ width: 300, height: 200 }],
+        },
+      },
+    };
+    const publication = createPublishedVersion(draft, 0);
+    expect(draft.snapshot.backgrounds).toHaveLength(1);
+    expect(draft.assets['asset-plan']).toBeDefined();
+    expect(publication.layout.snapshot.backgrounds).toEqual([]);
+    expect(publication.layout.assets).toEqual({});
   });
 
   it('validates a portable package before import', () => {

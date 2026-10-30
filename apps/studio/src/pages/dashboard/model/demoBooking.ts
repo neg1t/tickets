@@ -5,8 +5,10 @@ import type {
   PublishedHallLayout,
 } from '@hall-platform/seat-view';
 import { validateSeatPrice, validateSelection } from '@hall-platform/seat-view';
-import type { SeatStatus } from '@hall-platform/domain';
-import { pricingMoneySchema } from '@hall-platform/domain';
+import type { LayoutSnapshot, SeatStatus } from '@hall-platform/domain';
+import { pricingMoneySchema, withoutBackgrounds } from '@hall-platform/domain';
+import type { HallLayoutDraft } from '@hall-platform/hall-editor';
+import { parseHallLayoutDraft } from '@hall-platform/hall-editor';
 import { z } from 'zod';
 
 export const demoPriceQuoteLineSchema = z.strictObject({
@@ -75,9 +77,13 @@ export type DemoOccurrence = {
   id: string;
   revision: number;
   hallId: string;
+  /** Hall version from which this occurrence was initially created. */
+  sourceLayoutVersionId?: string;
   title: string;
   startsAt: string;
   layout: PublishedHallLayout;
+  /** Local editor-only layout copy, never passed to the buyer view. */
+  editorLayout?: HallLayoutDraft;
   initialSeats: Record<string, SeatStatus>;
   zoneCapacity: Record<string, number>;
   prices: SeatPriceMap;
@@ -98,22 +104,50 @@ export function preferLatestDemoOccurrence(
     : current;
 }
 
+function matchesPublishedStructure(
+  source: LayoutSnapshot,
+  published: LayoutSnapshot,
+): boolean {
+  const comparable = (snapshot: LayoutSnapshot) => ({
+    ...snapshot,
+    id: '',
+    layoutVersionId: '',
+    backgrounds: [],
+    floors: snapshot.floors.map((floor) => ({
+      ...floor,
+      layoutVersionId: '',
+    })),
+  });
+  return JSON.stringify(comparable(source)) === JSON.stringify(comparable(published));
+}
+
 export function createDemoOccurrence(
   id: string,
   layout: PublishedHallLayout,
   hallId = layout.snapshot.id,
+  localDraft?: HallLayoutDraft,
 ): DemoOccurrence {
   const { snapshot } = layout;
   const buyerLayout: PublishedHallLayout = {
     hallName: layout.hallName,
     ...(layout.zoneBounds ? { zoneBounds: layout.zoneBounds } : {}),
-    snapshot: {
-      ...snapshot,
-      backgrounds: snapshot.backgrounds.filter(
-        (background) => background.source.kind !== 'pdf',
-      ),
-    },
+    snapshot: withoutBackgrounds(snapshot),
   };
+  const editorLayout = localDraft &&
+      localDraft.snapshot.id === hallId &&
+      matchesPublishedStructure(localDraft.snapshot, snapshot)
+    ? parseHallLayoutDraft({
+        ...localDraft,
+        hallName: layout.hallName,
+        snapshot: {
+          ...snapshot,
+          backgrounds: localDraft.snapshot.backgrounds.filter((background) =>
+            snapshot.floors.some((floor) => floor.id === background.floorId),
+          ),
+        },
+        zoneBounds: layout.zoneBounds ?? {},
+      })
+    : undefined;
   const statuses = [
     'available',
     'held',
@@ -126,9 +160,11 @@ export function createDemoOccurrence(
     id,
     revision: 0,
     hallId,
+    sourceLayoutVersionId: snapshot.layoutVersionId,
     title: `${layout.hallName} — демо-мероприятие`,
     startsAt: new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString(),
     layout: buyerLayout,
+    ...(editorLayout ? { editorLayout } : {}),
     initialSeats: Object.fromEntries(
       snapshot.seats.map((seat, index) => [
         seat.id,
