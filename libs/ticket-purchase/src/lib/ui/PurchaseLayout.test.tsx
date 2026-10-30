@@ -17,7 +17,10 @@ const occurrence: BuyerOccurrenceSummary = {
   startsAt: '2026-09-04T20:00:00+04:00',
   timeZone: 'Asia/Yerevan',
   venue: { name: 'Дом камерной музыки имени Комитаса', city: 'Ереван' },
-  poster: { url: 'https://example.test/poster.jpg', alt: 'Афиша Billie Eilish' },
+  poster: {
+    url: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2272%22 height=%2254%22%3E%3C/svg%3E',
+    alt: 'Афиша Billie Eilish',
+  },
   salesStatus: 'open',
   currency: 'AMD',
   capabilities: { seats: true, generalAdmission: true },
@@ -48,7 +51,7 @@ describe('purchase shell', () => {
     expect(screen.getByRole('listitem', { name: /оплата/i }).getAttribute('aria-current')).toBe('step');
   });
 
-  it('keeps step-specific selectors in the heading area before the responsive summary', () => {
+  it('keeps one dynamic poster summary in the stepper sidebar after the mobile header', () => {
     const { container } = render(
       <TicketPurchaseProvider dataSource={dataSource}>
         <PurchaseLayout
@@ -61,8 +64,15 @@ describe('purchase shell', () => {
     );
 
     const controls = container.querySelector('[data-testid="step-controls"]');
-    const summary = container.querySelector('.tp-layout__summary');
-    if (!controls || !summary) throw new Error('Expected both step controls and event summary');
+    const sidebar = container.querySelector('.tp-layout__sidebar');
+    const summary = sidebar?.querySelector('.tp-event-summary');
+    const poster = summary?.querySelector('.tp-event-summary__poster');
+    if (!controls || !sidebar || !summary || !poster) {
+      throw new Error('Expected step controls, sidebar, event summary, and dynamic poster');
+    }
+    expect(sidebar.querySelector('.tp-stepper')).toBeTruthy();
+    expect(container.querySelectorAll('.tp-event-summary')).toHaveLength(1);
+    expect(poster.getAttribute('src')).toBe(occurrence.poster?.url);
     expect(
       Boolean(controls.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING),
     ).toBe(true);

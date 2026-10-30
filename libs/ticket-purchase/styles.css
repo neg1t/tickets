@@ -156,7 +156,7 @@
   grid-template-columns: minmax(260px, 316px) minmax(0, 1fr);
   grid-template-areas:
     'sidebar header'
-    'summary content';
+    'sidebar content';
   align-items: start;
   gap: 20px;
   width: min(1200px, 100%);
@@ -165,13 +165,15 @@
 }
 
 .ticket-purchase .tp-layout__sidebar,
-.ticket-purchase .tp-layout__summary,
 .ticket-purchase .tp-layout__content {
   min-width: 0;
 }
 
 .ticket-purchase .tp-layout__sidebar {
   grid-area: sidebar;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
   padding: 24px;
   border: 1px solid var(--tp-color-border);
   border-radius: 24px;
@@ -179,7 +181,7 @@
 }
 
 .ticket-purchase .tp-layout__sidebar-title {
-  margin: 0 0 32px;
+  margin: 0 0 8px;
   font-size: 16px;
   font-weight: 600;
 }
@@ -224,10 +226,6 @@
 
 .ticket-purchase .tp-layout__header-content {
   margin-top: 24px;
-}
-
-.ticket-purchase .tp-layout__summary {
-  grid-area: summary;
 }
 
 .ticket-purchase .tp-layout__content {
@@ -293,11 +291,11 @@
   display: flex;
   flex-direction: column;
   gap: 20px;
-  padding: 24px;
+  padding: 0;
   overflow: hidden;
-  border: 1px solid var(--tp-color-border);
-  border-radius: 24px;
-  background: var(--tp-color-surface);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .ticket-purchase .tp-event-summary__poster {
@@ -362,10 +360,14 @@
   }
 
   .ticket-purchase .tp-layout__sidebar {
-    display: none;
+    grid-area: summary;
     padding: 0;
     border: 0;
     background: transparent;
+  }
+
+  .ticket-purchase .tp-layout__sidebar--empty {
+    display: none;
   }
 
   .ticket-purchase .tp-layout__sidebar-title {
@@ -428,7 +430,7 @@
     flex-direction: row;
     align-items: flex-start;
     gap: 20px;
-    padding: 16px;
+    padding: 24px;
     border: 0;
     border-radius: 12px;
     background: var(--tp-color-background);
@@ -451,12 +453,5 @@
     width: auto;
     gap: 8px;
     font-size: 12px;
-  }
-}
-
-@media (max-width: 380px) {
-  .ticket-purchase .tp-event-summary {
-    gap: 12px;
-    padding: 12px;
   }
 }

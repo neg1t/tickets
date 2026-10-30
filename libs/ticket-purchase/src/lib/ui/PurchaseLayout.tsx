@@ -49,10 +49,6 @@ export function PurchaseLayout({
       style={themeStyle(purchase.theme)}
     >
       <div className="tp-layout">
-        <aside className="tp-layout__sidebar" aria-label={messages.checkoutTitle}>
-          <h1 className="tp-layout__sidebar-title">{messages.checkoutTitle}</h1>
-          <PurchaseStepper activeStep={purchase.step} locale={purchase.locale} />
-        </aside>
         <header className="tp-layout__header">
           <Button
             className="tp-layout__back"
@@ -68,8 +64,13 @@ export function PurchaseLayout({
             <div className="tp-layout__header-content">{headerContent}</div>
           )}
         </header>
-        {occurrence && (
-          <div className="tp-layout__summary">
+        <aside
+          className={`tp-layout__sidebar${occurrence ? '' : ' tp-layout__sidebar--empty'}`}
+          aria-label={messages.checkoutTitle}
+        >
+          <h1 className="tp-layout__sidebar-title">{messages.checkoutTitle}</h1>
+          <PurchaseStepper activeStep={purchase.step} locale={purchase.locale} />
+          {occurrence && (
             <EventSummary
               occurrence={occurrence}
               locale={purchase.locale}
@@ -77,8 +78,8 @@ export function PurchaseLayout({
                 ? { onDetails: purchase.hostActions.onDetails }
                 : {})}
             />
-          </div>
-        )}
+          )}
+        </aside>
         <main className="tp-layout__content" aria-busy={loading}>
           {loading ? (
             <p className="tp-layout__loading" role="status" aria-live="polite">
