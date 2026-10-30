@@ -27,6 +27,28 @@ import {
   apiPricingAssignmentsWriteSchema,
   apiPricingCatalogSchema,
 } from './pricing.js';
+import {
+  buyerCheckoutRequestSchema,
+  buyerCheckoutResultSchema,
+  buyerContactWriteSchema,
+  buyerErrorSchema,
+  buyerHoldRequestSchema,
+  buyerHoldSchema,
+  buyerOccurrenceContextSchema,
+  buyerOccurrenceListSchema,
+  buyerOrderRequestSchema,
+  buyerOrderSchema,
+  buyerOtpChallengeSchema,
+  buyerOtpStartRequestSchema,
+  buyerOtpVerifyRequestSchema,
+  buyerPaymentAttemptSchema,
+  buyerPublicLayoutSchema,
+  buyerQuoteRequestSchema,
+  buyerQuoteSchema,
+  buyerSessionContactSchema,
+  buyerSessionResumeSchema,
+  buyerTicketListSchema,
+} from './buyer.js';
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
 const json = (name: string) => ({
@@ -49,6 +71,23 @@ const readErrors = {
   '401': mutationErrors['401'],
   '403': mutationErrors['403'],
   '404': { description: 'Resource not found', ...json('Error') },
+};
+const buyerMutationErrors = {
+  '400': { description: 'Invalid request or buyer input', ...json('BuyerError') },
+  '401': { description: 'Buyer session is unavailable', ...json('BuyerError') },
+  '403': { description: 'Operation is not permitted', ...json('BuyerError') },
+  '404': { description: 'Buyer resource not found', ...json('BuyerError') },
+  '409': {
+    description: 'State changed. Read current buyer context, compare currentRevision, then retry the intended action.',
+    ...json('BuyerError'),
+  },
+  '429': { description: 'Rate limited', ...json('BuyerError') },
+  '503': { description: 'Service temporarily unavailable', ...json('BuyerError') },
+};
+const buyerReadErrors = {
+  '401': buyerMutationErrors['401'],
+  '403': buyerMutationErrors['403'],
+  '404': buyerMutationErrors['404'],
 };
 const id = { $ref: '#/components/parameters/Id' };
 const key = { $ref: '#/components/parameters/IdempotencyKey' };
@@ -372,6 +411,112 @@ export const openApiDocument = {
         responses: { ...success('Order'), ...mutationErrors },
       },
     },
+    '/api/v2/buyer/occurrences': {
+      get: {
+        operationId: 'listBuyerOccurrences',
+        summary: 'List buyer occurrence summaries with pagination',
+        description: 'Returns summary cards only; event layout geometry is available from one occurrence context at a time.',
+        responses: { ...success('BuyerOccurrenceList'), ...buyerReadErrors },
+      },
+    },
+    '/api/v2/buyer/occurrences/{id}': {
+      get: {
+        operationId: 'getBuyerOccurrenceContext',
+        summary: 'Read the current buyer context for an occurrence',
+        parameters: [id], responses: { ...success('BuyerOccurrenceContext'), ...buyerReadErrors },
+      },
+    },
+    '/api/v2/buyer/occurrences/{id}/layout': {
+      get: {
+        operationId: 'getBuyerPublicLayout',
+        summary: 'Read the public layout without editor backgrounds or assets',
+        parameters: [id], responses: { ...success('BuyerPublicLayout'), ...buyerReadErrors },
+      },
+    },
+    '/api/v2/buyer/occurrences/{id}/holds': {
+      post: {
+        operationId: 'createBuyerHold',
+        summary: 'Create an owned hold from current availability',
+        description: 'The server verifies occurrence and layout versions, owns and prices the selection, and returns the authoritative line items and total.',
+        parameters: [id, key], requestBody: request('BuyerHoldRequest'),
+        responses: { ...success('BuyerHold', '201'), ...buyerMutationErrors },
+      },
+    },
+    '/api/v2/buyer/holds/{id}': {
+      delete: {
+        operationId: 'cancelBuyerHold',
+        summary: 'Cancel an owned hold and release its inventory',
+        parameters: [id, key], responses: { ...emptySuccess, ...buyerMutationErrors },
+      },
+    },
+    '/api/v2/buyer/session': {
+      get: {
+        operationId: 'resumeBuyerSession',
+        summary: 'Resume the purchase session and return its current order',
+        description: 'Includes a converted hold and its existing order so a reload cannot create a duplicate order.',
+        responses: { ...success('BuyerSessionResume'), ...buyerReadErrors },
+      },
+    },
+    '/api/v2/buyer/session/contact': {
+      put: {
+        operationId: 'saveBuyerContact',
+        summary: 'Save contact details in the buyer session',
+        parameters: [key], requestBody: request('BuyerContactWrite'),
+        responses: { ...success('BuyerSessionContact'), ...buyerMutationErrors },
+      },
+    },
+    '/api/v2/buyer/session/email-verification/challenges': {
+      post: {
+        operationId: 'startBuyerEmailVerification',
+        summary: 'Send a one-time email verification code',
+        description: 'The response contains challenge metadata only and never contains the code.',
+        parameters: [key], requestBody: request('BuyerOtpStartRequest'),
+        responses: { ...success('BuyerOtpChallenge', '201'), ...buyerMutationErrors },
+      },
+    },
+    '/api/v2/buyer/session/email-verification/confirm': {
+      post: {
+        operationId: 'confirmBuyerEmailVerification',
+        summary: 'Verify a buyer email with a one-time code',
+        parameters: [key], requestBody: request('BuyerOtpVerifyRequest'),
+        responses: { ...success('BuyerSessionContact'), ...buyerMutationErrors },
+      },
+    },
+    '/api/v2/buyer/orders': {
+      post: {
+        operationId: 'createBuyerOrder',
+        summary: 'Create or resume the order for the buyer session hold',
+        description: 'An order is unique for the current hold. Repeating the request returns the session order rather than creating a duplicate.',
+        parameters: [key], requestBody: request('BuyerOrderRequest'),
+        responses: { ...success('BuyerOrder', '201'), ...buyerMutationErrors },
+      },
+    },
+    '/api/v2/buyer/orders/{id}/quote': {
+      post: {
+        operationId: 'createBuyerQuote',
+        summary: 'Calculate an authoritative quote for an order',
+        description: 'The quote fixes the ticket subtotal, discounts, fees, and total in minor units. Checkout accepts the quote against its revision.',
+        parameters: [id, key], requestBody: request('BuyerQuoteRequest'),
+        responses: { ...success('BuyerQuote'), ...buyerMutationErrors },
+      },
+    },
+    '/api/v2/buyer/orders/{id}/checkout': {
+      post: {
+        operationId: 'checkoutBuyerOrder',
+        summary: 'Accept a current quote and begin server-selected payment',
+        description: 'Order revision increments when a quote is accepted and on every checkout, payment, or order state change. Reads do not mutate revision. On HTTP 409, read the current session/order, refresh against currentRevision, and retry the intended action only after comparing state.',
+        parameters: [id, key], requestBody: request('BuyerCheckoutRequest'),
+        responses: { ...success('BuyerCheckoutResult'), ...buyerMutationErrors },
+      },
+    },
+    '/api/v2/buyer/tickets': {
+      get: {
+        operationId: 'listBuyerTickets',
+        summary: 'List tickets owned by the buyer session',
+        description: 'Ticket delivery may be asynchronous. Ticket open URLs are owner-only and expire at the timestamp returned with each URL.',
+        responses: { ...success('BuyerTicketList'), ...buyerReadErrors },
+      },
+    },
   },
   components: {
     securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
@@ -418,6 +563,32 @@ export const openApiDocument = {
       AssetUploadRequest: z.toJSONSchema(apiAssetUploadRequestSchema),
       AssetUploadIntent: z.toJSONSchema(apiAssetUploadIntentSchema),
       Asset: z.toJSONSchema(apiAssetSchema),
+      BuyerSelection: z.toJSONSchema(buyerHoldRequestSchema.shape.selection.element),
+      BuyerOccurrenceSummary: z.toJSONSchema(buyerOccurrenceListSchema.shape.items.element),
+      BuyerOccurrenceList: z.toJSONSchema(buyerOccurrenceListSchema),
+      BuyerLineItem: z.toJSONSchema(buyerHoldSchema.shape.lineItems.element),
+      BuyerHold: z.toJSONSchema(buyerHoldSchema),
+      BuyerOccurrenceContext: z.toJSONSchema(buyerOccurrenceContextSchema),
+      BuyerHoldRequest: z.toJSONSchema(buyerHoldRequestSchema),
+      BuyerContact: z.toJSONSchema(buyerContactWriteSchema.shape.contact),
+      BuyerContactWrite: z.toJSONSchema(buyerContactWriteSchema),
+      BuyerEmailVerification: z.toJSONSchema(buyerSessionContactSchema.shape.emailVerification),
+      BuyerOtpChallenge: z.toJSONSchema(buyerOtpChallengeSchema),
+      BuyerOtpStartRequest: z.toJSONSchema(buyerOtpStartRequestSchema),
+      BuyerOtpVerifyRequest: z.toJSONSchema(buyerOtpVerifyRequestSchema),
+      BuyerQuote: z.toJSONSchema(buyerQuoteSchema),
+      BuyerQuoteRequest: z.toJSONSchema(buyerQuoteRequestSchema),
+      BuyerOrder: z.toJSONSchema(buyerOrderSchema),
+      BuyerOrderRequest: z.toJSONSchema(buyerOrderRequestSchema),
+      BuyerCheckoutRequest: z.toJSONSchema(buyerCheckoutRequestSchema),
+      BuyerPaymentAttempt: z.toJSONSchema(buyerPaymentAttemptSchema),
+      BuyerTicketSummary: z.toJSONSchema(buyerTicketListSchema.shape.items.element),
+      BuyerTicketList: z.toJSONSchema(buyerTicketListSchema),
+      BuyerSessionResume: z.toJSONSchema(buyerSessionResumeSchema),
+      BuyerSessionContact: z.toJSONSchema(buyerSessionContactSchema),
+      BuyerPublicLayout: z.toJSONSchema(buyerPublicLayoutSchema),
+      BuyerError: z.toJSONSchema(buyerErrorSchema),
+      BuyerCheckoutResult: z.toJSONSchema(buyerCheckoutResultSchema),
     },
   },
 } as const;

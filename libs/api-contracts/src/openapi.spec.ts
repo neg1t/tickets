@@ -15,6 +15,22 @@ describe('OpenAPI contract', () => {
     expect(openApiDocument.paths['/api/v1/layouts/{id}/draft'].put.responses).toHaveProperty('409');
   });
 
+  it('documents the separate v2 buyer flow and revision refresh semantics', () => {
+    expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/occurrences');
+    expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/occurrences/{id}/layout');
+    expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/session');
+    expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/orders/{id}/checkout');
+    expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/tickets');
+    expect(openApiDocument.components.schemas.BuyerOccurrenceList.properties.apiVersion)
+      .toMatchObject({ const: 'v2', type: 'string' });
+    expect(openApiDocument.components.schemas.BuyerPublicLayout.properties.snapshot.properties.backgrounds)
+      .toMatchObject({ maxItems: 0 });
+    expect(openApiDocument.paths['/api/v2/buyer/orders/{id}/checkout'].post.description)
+      .toContain('Reads do not mutate revision');
+    expect(openApiDocument.paths['/api/v2/buyer/orders/{id}/checkout'].post.responses['409'].description)
+      .toContain('currentRevision');
+  });
+
   it('describes minor-unit money and an idempotency header', () => {
     expect(openApiDocument.components.schemas.Money).toMatchObject({
       properties: { amountMinor: { type: 'integer', minimum: 0 }, currency: { type: 'string' } },
