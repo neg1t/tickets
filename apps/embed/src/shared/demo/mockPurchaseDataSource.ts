@@ -47,9 +47,14 @@ export type MockPurchaseDataSourceOptions = {
   readonly latencyMs?: number;
   readonly wait?: (operation: MockPurchaseDataOperation, signal?: AbortSignal) => Promise<void>;
   readonly holdDurationMs?: number;
+  readonly sessionDurationMs?: number;
   readonly otpCode?: string;
   readonly pendingPayment?: boolean;
+  /** `none` means the backend advances payment without a redirect or native host action. */
+  readonly paymentMode?: 'redirect' | 'native' | 'none';
   readonly stalePriceBeforeFirstHold?: boolean;
+  readonly zonePriceAfterStaleMinor?: number;
+  readonly seatPriceAfterStaleMinor?: number;
   readonly idFactory?: (kind: string) => string;
   readonly failures?: readonly {
     readonly operation: MockPurchaseDataOperation;
@@ -116,8 +121,10 @@ function makePublicLayout(): BuyerPublicLayout {
 export function createMockPurchaseDataSource(options: MockPurchaseDataSourceOptions = {}): PurchaseDataSource {
   const now = options.now ?? (() => new Date());
   const holdDurationMs = options.holdDurationMs ?? 15 * 60 * 1_000;
+  const sessionDurationMs = options.sessionDurationMs ?? 24 * 60 * 60 * 1_000;
   const otpCode = options.otpCode ?? '246810';
   const pendingPayment = options.pendingPayment ?? true;
+  const paymentMode = options.paymentMode ?? (pendingPayment ? 'redirect' : 'none');
   const idFactory = options.idFactory ?? ((kind: string) => `${kind}-${crypto.randomUUID()}`);
   const sessions = new Map<string, SessionState>();
   const holds = new Map<string, BuyerHold>();
@@ -129,6 +136,8 @@ export function createMockPurchaseDataSource(options: MockPurchaseDataSourceOpti
   let pricingRevision = 1;
   let availabilityRevision = 1;
   let gaAvailable = 200;
+  let zonePriceMinor = 4_500;
+  let seatPriceMinor = 12_500;
   let stalePriceBeforeFirstHold = options.stalePriceBeforeFirstHold ?? false;
   const publicLayout = makePublicLayout();
 
@@ -224,17 +233,17 @@ export function createMockPurchaseDataSource(options: MockPurchaseDataSourceOpti
   function lineItemsFor(selection: BuyerHoldRequest['selection']) {
     return selection.map((item) => {
       const quantity = item.kind === 'seat' ? 1 : item.quantity;
-      const unitPriceMinor = item.kind === 'seat' ? 12_500 : 4_500;
+      const unitPriceMinor = item.kind === 'seat' ? seatPriceMinor : zonePriceMinor;
       const label = item.kind === 'seat' ? 'A-1' : 'Партер';
       return { label, quantity, unitPriceMinor, totalMinor: quantity * unitPriceMinor };
     });
   }
 
   function requireOrder(purchaseSessionId: string, orderId: string): BuyerOrder {
+    const session = requireSession(purchaseSessionId);
     const order = orders.get(orderId);
     const ownerSessionId = order ? holds.get(order.holdId)?.ownerSessionId : undefined;
-    const session = sessions.get(purchaseSessionId);
-    if (!order || !session || ownerSessionId !== purchaseSessionId || order.occurrenceId !== session.occurrenceId)
+    if (!order || ownerSessionId !== purchaseSessionId || order.occurrenceId !== session.occurrenceId)
       throw makeError('not_found', 'Order not found for purchase session');
     return order;
   }
@@ -258,7 +267,7 @@ export function createMockPurchaseDataSource(options: MockPurchaseDataSourceOpti
         const id = idFactory('session');
         const result = buyerSessionCreateResultSchema.parse({
           apiVersion: API_VERSION, purchaseSessionId: id,
-          sessionCredential: `demo-credential-${id}`, expiresAt: asIso(new Date(now().getTime() + 24 * 60 * 60 * 1_000)),
+          sessionCredential: `demo-credential-${id}`, expiresAt: asIso(new Date(now().getTime() + sessionDurationMs)),
         });
         sessions.set(id, {
           id, credential: result.sessionCredential, occurrenceId: input.occurrenceId,
@@ -295,7 +304,7 @@ export function createMockPurchaseDataSource(options: MockPurchaseDataSourceOpti
           },
           layoutVersionId: LAYOUT_VERSION_ID, availabilityRevision, pricingRevision,
           serverTime: asIso(now()), ownHold: getHoldForSession(session),
-          capabilities: { promoCode: true, emailVerification: true, paymentMode: 'none' },
+          capabilities: { promoCode: true, emailVerification: true, paymentMode },
         });
       });
     },
@@ -329,8 +338,8 @@ export function createMockPurchaseDataSource(options: MockPurchaseDataSourceOpti
         return buyerPricesSchema.parse({
           apiVersion: API_VERSION, occurrenceId, layoutVersionId: LAYOUT_VERSION_ID,
           pricingRevision, currency: CURRENCY,
-          seats: { [SEAT_ID]: { amountMinor: 12_500, category: 'Партер' } },
-          zones: { [ZONE_ID]: { amountMinor: 4_500 } },
+          seats: { [SEAT_ID]: { amountMinor: seatPriceMinor, category: 'Партер' } },
+          zones: { [ZONE_ID]: { amountMinor: zonePriceMinor } },
         });
       });
     },
@@ -353,6 +362,8 @@ export function createMockPurchaseDataSource(options: MockPurchaseDataSourceOpti
         if (stalePriceBeforeFirstHold) {
           stalePriceBeforeFirstHold = false;
           pricingRevision += 1;
+          zonePriceMinor = options.zonePriceAfterStaleMinor ?? zonePriceMinor + 500;
+          seatPriceMinor = options.seatPriceAfterStaleMinor ?? seatPriceMinor + 500;
           throw makeError('price_changed', 'Prices changed. Refresh and confirm the total.', pricingRevision);
         }
         if (request.layoutVersionId !== LAYOUT_VERSION_ID) throw makeError('layout_version_conflict', 'The seat map changed');
@@ -524,9 +535,15 @@ export function createMockPurchaseDataSource(options: MockPurchaseDataSourceOpti
           ...order, revision: order.revision + 1, status: paid ? 'confirmed' : 'payment_pending',
           paymentStatus: paid ? 'paid' : 'pending', ticketDeliveryStatus: 'pending',
         });
+        const paymentId = idFactory('payment');
+        const action = paid || paymentMode === 'none'
+          ? { kind: 'none' as const }
+          : paymentMode === 'native'
+            ? { kind: 'native' as const, payload: { provider: 'demo-provider', values: { orderId } } }
+            : { kind: 'redirect' as const, url: `https://payments.example.test/attempt/${paymentId}` };
         const paymentAttempt = {
-          apiVersion: API_VERSION, id: idFactory('payment'), orderId,
-          status: paid ? 'succeeded' : 'processing', action: { kind: 'none' },
+          apiVersion: API_VERSION, id: paymentId, orderId,
+          status: paid ? 'succeeded' : 'processing', action,
         } as const;
         orders.set(orderId, finalOrder);
         session.paymentAttempt = paymentAttempt;
