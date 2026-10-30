@@ -3,7 +3,7 @@
   "info": {
     "title": "Hall Platform API",
     "version": "1.0.0",
-    "description": "Proposed backend contract. The backend is the authority for availability, minor-unit prices, hold ownership and expiry, idempotency, tenant access, and immutable published versions. A local demo is not a backend implementation."
+    "description": "Proposed backend contract for agreement; it is not a claim that a backend exists. The backend owns durable persistence for immutable published layout versions and occurrence mappings, pricing assignments and revisions, inventory and capacity, buyer sessions and contact verification, holds and expiry, order-line snapshots, quote breakdowns, payment attempts, tickets, and idempotency results. Server transactions must prevent a seat from being sold twice, keep general-admission capacity nonnegative, reject confirmation of expired holds, make provider callbacks idempotent, and reuse payment attempts on checkout retry. Public projections are built server-side; draft editor assets remain in admin storage. Physical tables and indexes are intentionally unspecified. Session restoration mechanism, payment inventory lease, and handling of late provider callbacks after expiry remain open integration decisions."
   },
   "servers": [
     {
@@ -2176,59 +2176,135 @@
         }
       }
     },
-    "/api/v2/buyer/occurrences": {
+    "/api/v2/buyer/events/{eventId}/occurrences": {
       "get": {
         "operationId": "listBuyerOccurrences",
-        "summary": "List buyer occurrence summaries with pagination",
-        "description": "Returns summary cards only; event layout geometry is available from one occurrence context at a time.",
+        "summary": "List occurrences for an event",
+        "description": "Returns lightweight public occurrence summaries for event date/time selection. Use the optional cursor to continue; this public endpoint does not require a buyer session.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [],
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "One page of public event occurrences",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerOccurrenceList"
+                },
+                "examples": {
+                  "occurrences": {
+                    "summary": "One page of public event occurrences",
+                    "value": {
+                      "apiVersion": "v2",
+                      "items": [
+                        {
+                          "occurrenceId": "concert-2026-10-28-evening",
+                          "eventId": "concert-2026-10-28",
+                          "title": "Autumn Chamber Orchestra",
+                          "startsAt": "2026-10-28T19:00:00+03:00",
+                          "timeZone": "Europe/Moscow",
+                          "venue": {
+                            "name": "North Hall",
+                            "city": "Krasnoyarsk",
+                            "address": "1 Theatre Square"
+                          },
+                          "poster": {
+                            "url": "https://example.test/posters/autumn-orchestra.jpg",
+                            "alt": "Autumn Chamber Orchestra"
+                          },
+                          "salesStatus": "open",
+                          "currency": "RUB",
+                          "capabilities": {
+                            "seats": true,
+                            "generalAdmission": true
+                          }
+                        }
+                      ],
+                      "pagination": {
+                        "nextCursor": "occurrence-page-2",
+                        "hasMore": true
+                      }
+                    }
+                  }
                 }
               }
             }
           },
-          "401": {
-            "description": "Buyer session is unavailable",
+          "429": {
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
           },
-          "403": {
-            "description": "Operation is not permitted",
+          "503": {
+            "description": "Temporary service failure for this read request. Retry the read request after Retry-After.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailableRead": {
+                    "summary": "Temporary read failure",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The read could not be completed. Retry the read request after the stated delay.",
+                      "retryAfterMs": 5000
+                    }
+                  }
                 }
               }
-            }
-          },
-          "404": {
-            "description": "Buyer resource not found",
-            "content": {
-              "application/json": {
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
                 "schema": {
-                  "$ref": "#/components/schemas/BuyerError"
-                }
-              }
-            }
-          },
-          "410": {
-            "description": "Buyer session, hold, or quote has expired",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BuyerError"
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
@@ -2236,10 +2312,11 @@
         }
       }
     },
-    "/api/v2/buyer/occurrences/{id}": {
+    "/api/v2/buyer/occurrences/{id}/context": {
       "get": {
         "operationId": "getBuyerOccurrenceContext",
         "summary": "Read the current buyer context for an occurrence",
+        "description": "Returns public occurrence metadata together with this purchase session’s own active hold and current capability flags. The server verifies the session selector and owner before returning private session state.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [
           {
             "buyerSessionAuth": []
@@ -2255,51 +2332,191 @@
         ],
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "Occurrence context with no active hold",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerOccurrenceContext"
+                },
+                "examples": {
+                  "occurrenceContext": {
+                    "summary": "Occurrence context with no active hold",
+                    "value": {
+                      "apiVersion": "v2",
+                      "summary": {
+                        "occurrenceId": "concert-2026-10-28-evening",
+                        "eventId": "concert-2026-10-28",
+                        "title": "Autumn Chamber Orchestra",
+                        "startsAt": "2026-10-28T19:00:00+03:00",
+                        "timeZone": "Europe/Moscow",
+                        "venue": {
+                          "name": "North Hall",
+                          "city": "Krasnoyarsk",
+                          "address": "1 Theatre Square"
+                        },
+                        "poster": {
+                          "url": "https://example.test/posters/autumn-orchestra.jpg",
+                          "alt": "Autumn Chamber Orchestra"
+                        },
+                        "salesStatus": "open",
+                        "currency": "RUB",
+                        "capabilities": {
+                          "seats": true,
+                          "generalAdmission": true
+                        }
+                      },
+                      "layoutVersionId": "layout-v5",
+                      "availabilityRevision": 44,
+                      "pricingRevision": 12,
+                      "serverTime": "2026-10-28T16:00:00Z",
+                      "ownHold": null,
+                      "capabilities": {
+                        "promoCode": true,
+                        "emailVerification": true,
+                        "paymentMode": "redirect"
+                      }
+                    }
+                  }
                 }
               }
             }
           },
           "401": {
-            "description": "Buyer session is unavailable",
+            "description": "The buyer-session credential is missing, invalid, or expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "unauthorized": {
+                    "summary": "Buyer session required",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "unauthorized",
+                      "message": "A valid buyer-session credential is required."
+                    }
+                  }
                 }
               }
             }
           },
           "403": {
-            "description": "Operation is not permitted",
+            "description": "The authenticated buyer is not permitted to access this resource or tenant.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "forbidden": {
+                    "summary": "Resource is not owned by this session",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "forbidden",
+                      "message": "This resource is not owned by the selected purchase session."
+                    }
+                  }
                 }
               }
             }
           },
           "404": {
-            "description": "Buyer resource not found",
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
                 }
               }
             }
           },
           "410": {
-            "description": "Buyer session, hold, or quote has expired",
+            "description": "The selected buyer session, hold, quote, or verification challenge has expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "sessionExpired": {
+                    "summary": "Buyer session expired",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "session_expired",
+                      "message": "Buyer session has expired. Start an approved session recovery flow."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary service failure for this read request. Retry the read request after Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailableRead": {
+                    "summary": "Temporary read failure",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The read could not be completed. Retry the read request after the stated delay.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
@@ -2307,10 +2524,11 @@
         }
       }
     },
-    "/api/v2/buyer/occurrences/{id}/layout": {
+    "/api/v2/buyer/occurrences/{id}/seat-map": {
       "get": {
         "operationId": "getBuyerPublicLayout",
         "summary": "Read the public layout without editor backgrounds or assets",
+        "description": "Returns immutable public geometry for the occurrence layout version. The public projection contains no editor backgrounds, PDF assets, images, or local blobs.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [],
         "parameters": [
           {
@@ -2319,51 +2537,547 @@
         ],
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "Public projection of the selected layout version",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerPublicLayout"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Buyer session is unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BuyerError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Operation is not permitted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "publicLayout": {
+                    "summary": "Public projection of the selected layout version",
+                    "value": {
+                      "apiVersion": "v2",
+                      "hallName": "North Hall",
+                      "snapshot": {
+                        "id": "snapshot-v5",
+                        "layoutVersionId": "layout-v5",
+                        "floors": [],
+                        "zones": [],
+                        "rows": [],
+                        "seats": [],
+                        "tables": [],
+                        "backgrounds": [],
+                        "decorations": []
+                      }
+                    }
+                  }
                 }
               }
             }
           },
           "404": {
-            "description": "Buyer resource not found",
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
                 }
               }
             }
           },
-          "410": {
-            "description": "Buyer session, hold, or quote has expired",
+          "429": {
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary service failure for this read request. Retry the read request after Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailableRead": {
+                    "summary": "Temporary read failure",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The read could not be completed. Retry the read request after the stated delay.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/buyer/occurrences/{id}/availability": {
+      "get": {
+        "operationId": "getBuyerAvailability",
+        "summary": "Read current occurrence inventory",
+        "description": "Returns an authoritative availability snapshot stamped with occurrence, immutable layout version, monotonically increasing availability revision, and server time. This public read does not reveal buyer-owned hold data.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current seats and general-admission capacity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerAvailability"
+                },
+                "examples": {
+                  "availabilitySnapshot": {
+                    "summary": "Current seats and general-admission capacity",
+                    "value": {
+                      "apiVersion": "v2",
+                      "occurrenceId": "concert-2026-10-28-evening",
+                      "layoutVersionId": "layout-v5",
+                      "revision": 44,
+                      "serverTime": "2026-10-28T16:00:00Z",
+                      "seats": {
+                        "seat-a-12": "available",
+                        "seat-a-13": "held"
+                      },
+                      "zones": {
+                        "zone-floor": {
+                          "available": 37,
+                          "maxPerOrder": 6
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary service failure for this read request. Retry the read request after Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailableRead": {
+                    "summary": "Temporary read failure",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The read could not be completed. Retry the read request after the stated delay.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/buyer/occurrences/{id}/availability-changes": {
+      "get": {
+        "operationId": "getBuyerAvailabilityChanges",
+        "summary": "Read sequential availability changes",
+        "description": "Returns sequential deltas after sinceRevision. Each delta baseRevision must equal the prior revision; when the retained history cannot bridge the requested revision, resyncRequired is true and changes is empty so the client fetches a new snapshot.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "name": "sinceRevision",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Contiguous changes or an explicit resync request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerAvailabilityChanges"
+                },
+                "examples": {
+                  "contiguousChanges": {
+                    "summary": "Two sequential inventory deltas",
+                    "value": {
+                      "apiVersion": "v2",
+                      "occurrenceId": "concert-2026-10-28-evening",
+                      "layoutVersionId": "layout-v5",
+                      "sinceRevision": 44,
+                      "currentRevision": 46,
+                      "serverTime": "2026-10-28T16:01:00Z",
+                      "resyncRequired": false,
+                      "changes": [
+                        {
+                          "baseRevision": 44,
+                          "revision": 45,
+                          "seats": {
+                            "seat-a-12": "held"
+                          }
+                        },
+                        {
+                          "baseRevision": 45,
+                          "revision": 46,
+                          "zones": {
+                            "zone-floor": {
+                              "available": 36,
+                              "maxPerOrder": 6
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "resyncRequired": {
+                    "summary": "History is unavailable; fetch a fresh snapshot",
+                    "value": {
+                      "apiVersion": "v2",
+                      "occurrenceId": "concert-2026-10-28-evening",
+                      "layoutVersionId": "layout-v5",
+                      "sinceRevision": 12,
+                      "currentRevision": 46,
+                      "serverTime": "2026-10-28T16:01:00Z",
+                      "resyncRequired": true,
+                      "changes": []
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed or fails field validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "validationFailed": {
+                    "summary": "Malformed request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "validation_failed",
+                      "message": "The request contains malformed or invalid input."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary service failure for this read request. Retry the read request after Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailableRead": {
+                    "summary": "Temporary read failure",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The read could not be completed. Retry the read request after the stated delay.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/buyer/occurrences/{id}/prices": {
+      "get": {
+        "operationId": "getBuyerPrices",
+        "summary": "Read authoritative occurrence prices",
+        "description": "Returns server-owned seat and general-admission prices in integer minor units, with occurrence/layout context, pricing revision, and ISO currency.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seat and GA prices at one pricing revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerPrices"
+                },
+                "examples": {
+                  "prices": {
+                    "summary": "Seat and GA prices at one pricing revision",
+                    "value": {
+                      "apiVersion": "v2",
+                      "occurrenceId": "concert-2026-10-28-evening",
+                      "layoutVersionId": "layout-v5",
+                      "pricingRevision": 12,
+                      "currency": "RUB",
+                      "seats": {
+                        "seat-a-12": {
+                          "amountMinor": 125000,
+                          "category": "standard"
+                        }
+                      },
+                      "zones": {
+                        "zone-floor": {
+                          "amountMinor": 90000,
+                          "category": "standing"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary service failure for this read request. Retry the read request after Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailableRead": {
+                    "summary": "Temporary read failure",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The read could not be completed. Retry the read request after the stated delay.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
@@ -2375,7 +3089,7 @@
       "post": {
         "operationId": "createBuyerHold",
         "summary": "Create an owned hold from current availability",
-        "description": "The server verifies occurrence and layout versions, owns and prices the selection, and returns the authoritative line items and total.",
+        "description": "The server verifies occurrence and layout versions, checks the expected availability revision, validates that seat selection and general-admission quantities are available, prices the selection, and returns authoritative line items, total, and expiry. Inventory allocation and the hold state commit atomically.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [
           {
             "buyerSessionAuth": []
@@ -2398,107 +3112,307 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BuyerHoldRequest"
+              },
+              "examples": {
+                "seatedSelection": {
+                  "summary": "Reserve a specific seat at the expected layout and availability revisions",
+                  "value": {
+                    "apiVersion": "v2",
+                    "layoutVersionId": "layout-v5",
+                    "availabilityRevision": 44,
+                    "selection": [
+                      {
+                        "kind": "seat",
+                        "seatId": "seat-a-12"
+                      }
+                    ]
+                  }
+                },
+                "generalAdmissionSelection": {
+                  "summary": "Reserve two places from a GA zone",
+                  "value": {
+                    "apiVersion": "v2",
+                    "layoutVersionId": "layout-v5",
+                    "availabilityRevision": 44,
+                    "selection": [
+                      {
+                        "kind": "generalAdmission",
+                        "zoneId": "zone-floor",
+                        "quantity": 2
+                      }
+                    ]
+                  }
+                }
               }
             }
           }
         },
         "responses": {
           "201": {
-            "description": "Success",
+            "description": "The server-priced inventory hold and expiry",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerHold"
+                },
+                "examples": {
+                  "activeHold": {
+                    "summary": "The server-priced inventory hold and expiry",
+                    "value": {
+                      "apiVersion": "v2",
+                      "id": "hold-72",
+                      "ownerSessionId": "purchase-session-4f",
+                      "occurrenceId": "concert-2026-10-28-evening",
+                      "layoutVersionId": "layout-v5",
+                      "revision": 6,
+                      "expiresAt": "2026-10-28T16:10:00Z",
+                      "serverTime": "2026-10-28T16:00:00Z",
+                      "selection": [
+                        {
+                          "kind": "seat",
+                          "seatId": "seat-a-12"
+                        }
+                      ],
+                      "lineItems": [
+                        {
+                          "label": "A12",
+                          "quantity": 1,
+                          "unitPriceMinor": 125000,
+                          "totalMinor": 125000
+                        }
+                      ],
+                      "totalMinor": 125000,
+                      "currency": "RUB",
+                      "availabilityRevision": 44,
+                      "status": "active"
+                    }
+                  }
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid request or buyer input",
+            "description": "The request is malformed or fails field validation.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "validationFailed": {
+                    "summary": "Malformed request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "validation_failed",
+                      "message": "The request contains malformed or invalid input."
+                    }
+                  }
                 }
               }
             }
           },
           "401": {
-            "description": "Buyer session is unavailable",
+            "description": "The buyer-session credential is missing, invalid, or expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "unauthorized": {
+                    "summary": "Buyer session required",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "unauthorized",
+                      "message": "A valid buyer-session credential is required."
+                    }
+                  }
                 }
               }
             }
           },
           "403": {
-            "description": "Operation is not permitted",
+            "description": "The authenticated buyer is not permitted to access this resource or tenant.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "forbidden": {
+                    "summary": "Resource is not owned by this session",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "forbidden",
+                      "message": "This resource is not owned by the selected purchase session."
+                    }
+                  }
                 }
               }
             }
           },
           "404": {
-            "description": "Buyer resource not found",
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
                 }
               }
             }
           },
           "409": {
-            "description": "State changed. Read current buyer context, compare currentRevision, then retry the intended action.",
+            "description": "Availability, layout, price, or idempotency state changed. Refresh the current occurrence context before retrying; a key conflict requires a new key for a different logical request.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "availabilityConflict": {
+                    "summary": "Inventory changed before the mutation",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "availability_conflict",
+                      "message": "The selected inventory is no longer available.",
+                      "currentRevision": 45
+                    }
+                  },
+                  "priceChanged": {
+                    "summary": "The authoritative price changed",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "price_changed",
+                      "message": "The server price changed; refresh the occurrence context and confirm the new amount.",
+                      "currentRevision": 13
+                    }
+                  },
+                  "layoutChanged": {
+                    "summary": "The occurrence now uses another layout version",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "layout_version_conflict",
+                      "message": "The layout version changed; refresh the public layout and selection."
+                    }
+                  },
+                  "idempotencyConflict": {
+                    "summary": "Idempotency key reused with another request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "idempotency_conflict",
+                      "message": "This Idempotency-Key was already used with a different request body."
+                    }
+                  }
                 }
               }
             }
           },
           "410": {
-            "description": "Buyer session, hold, or quote has expired",
+            "description": "The selected buyer session, hold, quote, or verification challenge has expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "sessionExpired": {
+                    "summary": "Buyer session expired",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "session_expired",
+                      "message": "Buyer session has expired. Start an approved session recovery flow."
+                    }
+                  }
                 }
               }
             }
           },
           "422": {
-            "description": "Request is well formed but cannot be accepted in the current purchase state",
+            "description": "The request is well formed but the current purchase state cannot accept it.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "salesClosed": {
+                    "summary": "Sales are closed",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "sales_closed",
+                      "message": "Sales are closed for this occurrence."
+                    }
+                  }
                 }
               }
             }
           },
           "429": {
-            "description": "Rate limited",
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
           },
           "503": {
-            "description": "Service temporarily unavailable",
+            "description": "The service is temporarily unavailable. For mutations, the server may have committed the request; query current state and retry the exact body with the same Idempotency-Key.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailable": {
+                    "summary": "Mutation outcome may be unknown",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The service is temporarily unavailable; the outcome of a submitted mutation may be unknown.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
@@ -2507,9 +3421,224 @@
       }
     },
     "/api/v2/buyer/holds/{id}": {
+      "get": {
+        "operationId": "getBuyerHold",
+        "summary": "Read an owned hold and its expiry",
+        "description": "Returns the hold owned by this purchase session, including current status, authoritative totals, selection, and expiry. Expired holds remain readable for recovery but cannot be converted into orders.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
+        "security": [
+          {
+            "buyerSessionAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PurchaseSessionId"
+          },
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owned hold, including expired holds retained for recovery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerHold"
+                },
+                "examples": {
+                  "activeHold": {
+                    "summary": "Owned inventory reserved until expiresAt",
+                    "value": {
+                      "apiVersion": "v2",
+                      "id": "hold-72",
+                      "ownerSessionId": "purchase-session-4f",
+                      "occurrenceId": "concert-2026-10-28-evening",
+                      "layoutVersionId": "layout-v5",
+                      "revision": 6,
+                      "expiresAt": "2026-10-28T16:10:00Z",
+                      "serverTime": "2026-10-28T16:00:00Z",
+                      "selection": [
+                        {
+                          "kind": "seat",
+                          "seatId": "seat-a-12"
+                        }
+                      ],
+                      "lineItems": [
+                        {
+                          "label": "A12",
+                          "quantity": 1,
+                          "unitPriceMinor": 125000,
+                          "totalMinor": 125000
+                        }
+                      ],
+                      "totalMinor": 125000,
+                      "currency": "RUB",
+                      "availabilityRevision": 44,
+                      "status": "active"
+                    }
+                  },
+                  "expiredHold": {
+                    "summary": "Expired hold retained for recovery",
+                    "value": {
+                      "apiVersion": "v2",
+                      "id": "hold-72",
+                      "ownerSessionId": "purchase-session-4f",
+                      "occurrenceId": "concert-2026-10-28-evening",
+                      "layoutVersionId": "layout-v5",
+                      "revision": 6,
+                      "expiresAt": "2026-10-28T16:10:00Z",
+                      "serverTime": "2026-10-28T16:12:00Z",
+                      "selection": [
+                        {
+                          "kind": "seat",
+                          "seatId": "seat-a-12"
+                        }
+                      ],
+                      "lineItems": [
+                        {
+                          "label": "A12",
+                          "quantity": 1,
+                          "unitPriceMinor": 125000,
+                          "totalMinor": 125000
+                        }
+                      ],
+                      "totalMinor": 125000,
+                      "currency": "RUB",
+                      "availabilityRevision": 44,
+                      "status": "expired"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The buyer-session credential is missing, invalid, or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "unauthorized": {
+                    "summary": "Buyer session required",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "unauthorized",
+                      "message": "A valid buyer-session credential is required."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated buyer is not permitted to access this resource or tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "forbidden": {
+                    "summary": "Resource is not owned by this session",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "forbidden",
+                      "message": "This resource is not owned by the selected purchase session."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary service failure for this read request. Retry the read request after Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailableRead": {
+                    "summary": "Temporary read failure",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The read could not be completed. Retry the read request after the stated delay.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "operationId": "cancelBuyerHold",
         "summary": "Cancel an owned hold and release its inventory",
+        "description": "Releases this purchase session’s hold. Cancellation is idempotent: an already cancelled or expired hold is treated as released and returns 204.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [
           {
             "buyerSessionAuth": []
@@ -2528,94 +3657,144 @@
         ],
         "responses": {
           "204": {
-            "description": "Completed without a response body"
-          },
-          "400": {
-            "description": "Invalid request or buyer input",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BuyerError"
-                }
-              }
-            }
+            "description": "Hold released; repeated cancellation of the same hold also succeeds without a body."
           },
           "401": {
-            "description": "Buyer session is unavailable",
+            "description": "The buyer-session credential is missing, invalid, or expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "unauthorized": {
+                    "summary": "Buyer session required",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "unauthorized",
+                      "message": "A valid buyer-session credential is required."
+                    }
+                  }
                 }
               }
             }
           },
           "403": {
-            "description": "Operation is not permitted",
+            "description": "The authenticated buyer is not permitted to access this resource or tenant.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "forbidden": {
+                    "summary": "Resource is not owned by this session",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "forbidden",
+                      "message": "This resource is not owned by the selected purchase session."
+                    }
+                  }
                 }
               }
             }
           },
           "404": {
-            "description": "Buyer resource not found",
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
                 }
               }
             }
           },
           "409": {
-            "description": "State changed. Read current buyer context, compare currentRevision, then retry the intended action.",
+            "description": "The Idempotency-Key was already used with a different request body. Use a new key for a different logical request.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
-                }
-              }
-            }
-          },
-          "410": {
-            "description": "Buyer session, hold, or quote has expired",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BuyerError"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Request is well formed but cannot be accepted in the current purchase state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "idempotencyConflict": {
+                    "summary": "Idempotency key reused with another request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "idempotency_conflict",
+                      "message": "This Idempotency-Key was already used with a different request body."
+                    }
+                  }
                 }
               }
             }
           },
           "429": {
-            "description": "Rate limited",
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
           },
           "503": {
-            "description": "Service temporarily unavailable",
+            "description": "The service is temporarily unavailable. For mutations, the server may have committed the request; query current state and retry the exact body with the same Idempotency-Key.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailable": {
+                    "summary": "Mutation outcome may be unknown",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The service is temporarily unavailable; the outcome of a submitted mutation may be unknown.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
@@ -2627,7 +3806,7 @@
       "post": {
         "operationId": "createBuyerSession",
         "summary": "Create a buyer purchase session or exchange a host bootstrap credential",
-        "description": "Returns a purchaseSessionId selector and a separate buyer-session credential. Keep the credential in the approved host or first-party session mechanism.",
+        "description": "Creates a guest buyer session scoped to the occurrenceId in the request or exchanges a one-time host bootstrap credential. Returns a non-secret purchaseSessionId selector separately from the buyer-session credential, plus its expiry. Credential transport and storage must use the approved first-party or host mechanism; this contract does not prescribe a refresh or cookie flow.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [],
         "parameters": [
           {
@@ -2640,107 +3819,185 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BuyerSessionCreateRequest"
+              },
+              "examples": {
+                "guestSession": {
+                  "summary": "Create a guest session for an occurrence",
+                  "value": {
+                    "apiVersion": "v2",
+                    "occurrenceId": "concert-2026-10-28-evening"
+                  }
+                },
+                "hostBootstrap": {
+                  "summary": "Exchange a one-time host bootstrap credential",
+                  "value": {
+                    "apiVersion": "v2",
+                    "occurrenceId": "concert-2026-10-28-evening",
+                    "hostBootstrapCredential": "one-time-host-bootstrap-demo"
+                  }
+                }
               }
             }
           }
         },
         "responses": {
           "201": {
-            "description": "Success",
+            "description": "Selector and credential are separate values",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerSessionCreateResult"
+                },
+                "examples": {
+                  "createdSession": {
+                    "summary": "Selector and credential are separate values",
+                    "value": {
+                      "apiVersion": "v2",
+                      "purchaseSessionId": "purchase-session-4f",
+                      "sessionCredential": "demo-buyer-session-credential",
+                      "expiresAt": "2026-10-28T20:00:00Z"
+                    }
+                  }
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid request or buyer input",
+            "description": "The request is malformed or fails field validation.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "validationFailed": {
+                    "summary": "Malformed request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "validation_failed",
+                      "message": "The request contains malformed or invalid input."
+                    }
+                  }
                 }
               }
             }
           },
           "401": {
-            "description": "Buyer session is unavailable",
+            "description": "The buyer-session credential is missing, invalid, or expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Operation is not permitted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "unauthorized": {
+                    "summary": "Buyer session required",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "unauthorized",
+                      "message": "A valid buyer-session credential is required."
+                    }
+                  }
                 }
               }
             }
           },
           "404": {
-            "description": "Buyer resource not found",
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
                 }
               }
             }
           },
           "409": {
-            "description": "State changed. Read current buyer context, compare currentRevision, then retry the intended action.",
+            "description": "The Idempotency-Key was already used with a different request body. Use a new key for a different logical request.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
-                }
-              }
-            }
-          },
-          "410": {
-            "description": "Buyer session, hold, or quote has expired",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BuyerError"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Request is well formed but cannot be accepted in the current purchase state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "idempotencyConflict": {
+                    "summary": "Idempotency key reused with another request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "idempotency_conflict",
+                      "message": "This Idempotency-Key was already used with a different request body."
+                    }
+                  }
                 }
               }
             }
           },
           "429": {
-            "description": "Rate limited",
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
           },
           "503": {
-            "description": "Service temporarily unavailable",
+            "description": "The service is temporarily unavailable. For mutations, the server may have committed the request; query current state and retry the exact body with the same Idempotency-Key.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailable": {
+                    "summary": "Mutation outcome may be unknown",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The service is temporarily unavailable; the outcome of a submitted mutation may be unknown.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
@@ -2752,7 +4009,7 @@
       "get": {
         "operationId": "resumeBuyerSession",
         "summary": "Resume the purchase session and return its current order",
-        "description": "Includes a converted hold and its existing order so a reload cannot create a duplicate order.",
+        "description": "Returns contacts and verification status, this session’s hold, active order, and payment attempt so reload or redirect return can restore state without creating duplicate orders or payments.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [
           {
             "buyerSessionAuth": []
@@ -2765,51 +4022,203 @@
         ],
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "Current session state with an available hold and no order yet",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerSessionResume"
+                },
+                "examples": {
+                  "resumedSession": {
+                    "summary": "Current session state with an available hold and no order yet",
+                    "value": {
+                      "apiVersion": "v2",
+                      "purchaseSessionId": "purchase-session-4f",
+                      "occurrenceId": "concert-2026-10-28-evening",
+                      "contact": {
+                        "firstName": "Alex",
+                        "lastName": "Buyer",
+                        "phone": "+7 900 123-45-67",
+                        "email": "alex@example.test"
+                      },
+                      "contactRevision": 3,
+                      "emailVerification": {
+                        "status": "unverified",
+                        "verifiedEmail": null
+                      },
+                      "ownHold": {
+                        "apiVersion": "v2",
+                        "id": "hold-72",
+                        "ownerSessionId": "purchase-session-4f",
+                        "occurrenceId": "concert-2026-10-28-evening",
+                        "layoutVersionId": "layout-v5",
+                        "revision": 6,
+                        "expiresAt": "2026-10-28T16:10:00Z",
+                        "serverTime": "2026-10-28T16:00:00Z",
+                        "selection": [
+                          {
+                            "kind": "seat",
+                            "seatId": "seat-a-12"
+                          }
+                        ],
+                        "lineItems": [
+                          {
+                            "label": "A12",
+                            "quantity": 1,
+                            "unitPriceMinor": 125000,
+                            "totalMinor": 125000
+                          }
+                        ],
+                        "totalMinor": 125000,
+                        "currency": "RUB",
+                        "availabilityRevision": 44,
+                        "status": "active"
+                      },
+                      "activeOrder": null,
+                      "activePaymentAttempt": null,
+                      "serverTime": "2026-10-28T16:00:00Z"
+                    }
+                  }
                 }
               }
             }
           },
           "401": {
-            "description": "Buyer session is unavailable",
+            "description": "The buyer-session credential is missing, invalid, or expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "unauthorized": {
+                    "summary": "Buyer session required",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "unauthorized",
+                      "message": "A valid buyer-session credential is required."
+                    }
+                  }
                 }
               }
             }
           },
           "403": {
-            "description": "Operation is not permitted",
+            "description": "The authenticated buyer is not permitted to access this resource or tenant.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "forbidden": {
+                    "summary": "Resource is not owned by this session",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "forbidden",
+                      "message": "This resource is not owned by the selected purchase session."
+                    }
+                  }
                 }
               }
             }
           },
           "404": {
-            "description": "Buyer resource not found",
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
                 }
               }
             }
           },
           "410": {
-            "description": "Buyer session, hold, or quote has expired",
+            "description": "The selected buyer session, hold, quote, or verification challenge has expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "sessionExpired": {
+                    "summary": "Buyer session expired",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "session_expired",
+                      "message": "Buyer session has expired. Start an approved session recovery flow."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary service failure for this read request. Retry the read request after Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailableRead": {
+                    "summary": "Temporary read failure",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The read could not be completed. Retry the read request after the stated delay.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
@@ -2821,7 +4230,7 @@
       "put": {
         "operationId": "saveBuyerContact",
         "summary": "Save contact details in the buyer session",
-        "description": "Requires the contactRevision from the current session. On HTTP 409, resume the session, compare currentRevision, and retry with the refreshed contact revision.",
+        "description": "Requires the contactRevision from the current session. On HTTP 409, resume the session, compare currentRevision, and retry with the refreshed contact revision. A changed email resets verification for the new address.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [
           {
             "buyerSessionAuth": []
@@ -2841,107 +4250,240 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BuyerContactWrite"
+              },
+              "examples": {
+                "contact": {
+                  "summary": "Save contact details against the current contact revision",
+                  "value": {
+                    "apiVersion": "v2",
+                    "contactRevision": 3,
+                    "contact": {
+                      "firstName": "Alex",
+                      "lastName": "Buyer",
+                      "phone": "+7 900 123-45-67",
+                      "email": "alex@example.test"
+                    }
+                  }
+                }
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "Saved contact with current revision and verification state",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerSessionContact"
+                },
+                "examples": {
+                  "savedContact": {
+                    "summary": "Saved contact with current revision and verification state",
+                    "value": {
+                      "apiVersion": "v2",
+                      "contact": {
+                        "firstName": "Alex",
+                        "lastName": "Buyer",
+                        "phone": "+7 900 123-45-67",
+                        "email": "alex@example.test"
+                      },
+                      "contactRevision": 4,
+                      "emailVerification": {
+                        "status": "unverified",
+                        "verifiedEmail": null
+                      }
+                    }
+                  }
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid request or buyer input",
+            "description": "The request is malformed or fails field validation.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "validationFailed": {
+                    "summary": "Malformed request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "validation_failed",
+                      "message": "The request contains malformed or invalid input."
+                    }
+                  }
                 }
               }
             }
           },
           "401": {
-            "description": "Buyer session is unavailable",
+            "description": "The buyer-session credential is missing, invalid, or expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "unauthorized": {
+                    "summary": "Buyer session required",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "unauthorized",
+                      "message": "A valid buyer-session credential is required."
+                    }
+                  }
                 }
               }
             }
           },
           "403": {
-            "description": "Operation is not permitted",
+            "description": "The authenticated buyer is not permitted to access this resource or tenant.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "forbidden": {
+                    "summary": "Resource is not owned by this session",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "forbidden",
+                      "message": "This resource is not owned by the selected purchase session."
+                    }
+                  }
                 }
               }
             }
           },
           "404": {
-            "description": "Buyer resource not found",
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
                 }
               }
             }
           },
           "409": {
-            "description": "State changed. Read current buyer context, compare currentRevision, then retry the intended action.",
+            "description": "The supplied revision is stale or the Idempotency-Key conflicts with a prior request. Read current state, compare currentRevision, and reconcile before retrying a revision conflict; a key conflict requires a new key for the new logical request.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "revisionConflict": {
+                    "summary": "Buyer state changed",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "revision_conflict",
+                      "message": "The buyer state changed. Read current state before retrying.",
+                      "currentRevision": 8
+                    }
+                  },
+                  "idempotencyConflict": {
+                    "summary": "Idempotency key reused with another request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "idempotency_conflict",
+                      "message": "This Idempotency-Key was already used with a different request body."
+                    }
+                  }
                 }
               }
             }
           },
           "410": {
-            "description": "Buyer session, hold, or quote has expired",
+            "description": "The selected buyer session, hold, quote, or verification challenge has expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Request is well formed but cannot be accepted in the current purchase state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "sessionExpired": {
+                    "summary": "Buyer session expired",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "session_expired",
+                      "message": "Buyer session has expired. Start an approved session recovery flow."
+                    }
+                  }
                 }
               }
             }
           },
           "429": {
-            "description": "Rate limited",
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
           },
           "503": {
-            "description": "Service temporarily unavailable",
+            "description": "The service is temporarily unavailable. For mutations, the server may have committed the request; query current state and retry the exact body with the same Idempotency-Key.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailable": {
+                    "summary": "Mutation outcome may be unknown",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The service is temporarily unavailable; the outcome of a submitted mutation may be unknown.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
@@ -2953,7 +4495,7 @@
       "post": {
         "operationId": "startBuyerEmailVerification",
         "summary": "Send a one-time email verification code",
-        "description": "The response contains challenge metadata only and never contains the code.",
+        "description": "Starts an email challenge for the current contact email. The response contains challenge metadata only and never contains the code; server resend limits are reflected in Retry-After and BuyerError.retryAfterMs.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [
           {
             "buyerSessionAuth": []
@@ -2973,107 +4515,220 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BuyerOtpStartRequest"
+              },
+              "examples": {
+                "emailChallenge": {
+                  "summary": "Request a code for the contact address",
+                  "value": {
+                    "apiVersion": "v2",
+                    "email": "alex@example.test"
+                  }
+                }
               }
             }
           }
         },
         "responses": {
           "201": {
-            "description": "Success",
+            "description": "Challenge metadata without the code",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerOtpChallenge"
+                },
+                "examples": {
+                  "challengeCreated": {
+                    "summary": "Challenge metadata without the code",
+                    "value": {
+                      "apiVersion": "v2",
+                      "challengeId": "email-challenge-17",
+                      "destinationMasked": "a***@example.test",
+                      "codeLength": 6,
+                      "expiresAt": "2026-10-28T16:05:00Z",
+                      "resendAvailableAt": "2026-10-28T16:01:00Z",
+                      "attemptsRemaining": 5
+                    }
+                  }
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid request or buyer input",
+            "description": "The request is malformed or fails field validation.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "validationFailed": {
+                    "summary": "Malformed request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "validation_failed",
+                      "message": "The request contains malformed or invalid input."
+                    }
+                  }
                 }
               }
             }
           },
           "401": {
-            "description": "Buyer session is unavailable",
+            "description": "The buyer-session credential is missing, invalid, or expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "unauthorized": {
+                    "summary": "Buyer session required",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "unauthorized",
+                      "message": "A valid buyer-session credential is required."
+                    }
+                  }
                 }
               }
             }
           },
           "403": {
-            "description": "Operation is not permitted",
+            "description": "The authenticated buyer is not permitted to access this resource or tenant.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "forbidden": {
+                    "summary": "Resource is not owned by this session",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "forbidden",
+                      "message": "This resource is not owned by the selected purchase session."
+                    }
+                  }
                 }
               }
             }
           },
           "404": {
-            "description": "Buyer resource not found",
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
                 }
               }
             }
           },
           "409": {
-            "description": "State changed. Read current buyer context, compare currentRevision, then retry the intended action.",
+            "description": "The Idempotency-Key was already used with a different request body. Use a new key for a different logical request.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "idempotencyConflict": {
+                    "summary": "Idempotency key reused with another request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "idempotency_conflict",
+                      "message": "This Idempotency-Key was already used with a different request body."
+                    }
+                  }
                 }
               }
             }
           },
           "410": {
-            "description": "Buyer session, hold, or quote has expired",
+            "description": "The selected buyer session, hold, quote, or verification challenge has expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Request is well formed but cannot be accepted in the current purchase state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "sessionExpired": {
+                    "summary": "Buyer session expired",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "session_expired",
+                      "message": "Buyer session has expired. Start an approved session recovery flow."
+                    }
+                  }
                 }
               }
             }
           },
           "429": {
-            "description": "Rate limited",
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
           },
           "503": {
-            "description": "Service temporarily unavailable",
+            "description": "The service is temporarily unavailable. For mutations, the server may have committed the request; query current state and retry the exact body with the same Idempotency-Key.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailable": {
+                    "summary": "Mutation outcome may be unknown",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The service is temporarily unavailable; the outcome of a submitted mutation may be unknown.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
@@ -3085,6 +4740,7 @@
       "post": {
         "operationId": "confirmBuyerEmailVerification",
         "summary": "Verify a buyer email with a one-time code",
+        "description": "Consumes a one-time code only when it belongs to the active challenge for the current session contact email. Repeated submissions with the same Idempotency-Key return the saved result.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [
           {
             "buyerSessionAuth": []
@@ -3107,107 +4763,261 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BuyerOtpVerifyRequest"
+              },
+              "examples": {
+                "verificationCode": {
+                  "summary": "Submit the code delivered out of band",
+                  "value": {
+                    "apiVersion": "v2",
+                    "code": "482951"
+                  }
+                }
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "Current contact and email verification state",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerSessionContact"
+                },
+                "examples": {
+                  "verifiedContact": {
+                    "summary": "Current contact and email verification state",
+                    "value": {
+                      "apiVersion": "v2",
+                      "contact": {
+                        "firstName": "Alex",
+                        "lastName": "Buyer",
+                        "phone": "+7 900 123-45-67",
+                        "email": "alex@example.test"
+                      },
+                      "contactRevision": 4,
+                      "emailVerification": {
+                        "status": "verified",
+                        "verifiedEmail": "alex@example.test"
+                      }
+                    }
+                  }
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid request or buyer input",
+            "description": "The request is malformed or fails field validation.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "validationFailed": {
+                    "summary": "Malformed request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "validation_failed",
+                      "message": "The request contains malformed or invalid input."
+                    }
+                  }
                 }
               }
             }
           },
           "401": {
-            "description": "Buyer session is unavailable",
+            "description": "The buyer-session credential is missing, invalid, or expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "unauthorized": {
+                    "summary": "Buyer session required",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "unauthorized",
+                      "message": "A valid buyer-session credential is required."
+                    }
+                  }
                 }
               }
             }
           },
           "403": {
-            "description": "Operation is not permitted",
+            "description": "The authenticated buyer is not permitted to access this resource or tenant.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "forbidden": {
+                    "summary": "Resource is not owned by this session",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "forbidden",
+                      "message": "This resource is not owned by the selected purchase session."
+                    }
+                  }
                 }
               }
             }
           },
           "404": {
-            "description": "Buyer resource not found",
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
                 }
               }
             }
           },
           "409": {
-            "description": "State changed. Read current buyer context, compare currentRevision, then retry the intended action.",
+            "description": "The Idempotency-Key was already used with a different request body. Use a new key for a different logical request.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "idempotencyConflict": {
+                    "summary": "Idempotency key reused with another request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "idempotency_conflict",
+                      "message": "This Idempotency-Key was already used with a different request body."
+                    }
+                  }
                 }
               }
             }
           },
           "410": {
-            "description": "Buyer session, hold, or quote has expired",
+            "description": "The selected buyer session, hold, quote, or verification challenge has expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "sessionExpired": {
+                    "summary": "Buyer session expired",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "session_expired",
+                      "message": "Buyer session has expired. Start an approved session recovery flow."
+                    }
+                  },
+                  "codeExpired": {
+                    "summary": "Email code expired",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "code_expired",
+                      "message": "The email verification code expired."
+                    }
+                  }
                 }
               }
             }
           },
           "422": {
-            "description": "Request is well formed but cannot be accepted in the current purchase state",
+            "description": "The request is well formed but the current purchase state cannot accept it.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "invalidCode": {
+                    "summary": "Email code does not match",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "invalid_code",
+                      "message": "The code does not match the active challenge.",
+                      "fieldErrors": [
+                        {
+                          "path": [
+                            "code"
+                          ],
+                          "message": "Enter the code sent for the active challenge."
+                        }
+                      ]
+                    }
+                  }
                 }
               }
             }
           },
           "429": {
-            "description": "Rate limited",
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
           },
           "503": {
-            "description": "Service temporarily unavailable",
+            "description": "The service is temporarily unavailable. For mutations, the server may have committed the request; query current state and retry the exact body with the same Idempotency-Key.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailable": {
+                    "summary": "Mutation outcome may be unknown",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The service is temporarily unavailable; the outcome of a submitted mutation may be unknown.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
@@ -3219,7 +5029,7 @@
       "post": {
         "operationId": "createBuyerOrder",
         "summary": "Create or resume the order for the buyer session hold",
-        "description": "An order is unique for the current hold. Repeating the request returns the session order rather than creating a duplicate.",
+        "description": "Creates at most one order for the owned, unexpired hold and supplied contact revision. Repeating the same logical request returns the existing order. An expired hold returns 410 and cannot be confirmed.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [
           {
             "buyerSessionAuth": []
@@ -3239,107 +5049,492 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BuyerOrderRequest"
+              },
+              "examples": {
+                "orderFromHold": {
+                  "summary": "Create an order from the owned hold and current contact revision",
+                  "value": {
+                    "apiVersion": "v2",
+                    "holdId": "hold-72",
+                    "contactRevision": 4
+                  }
+                }
               }
             }
           }
         },
         "responses": {
           "201": {
-            "description": "Success",
+            "description": "Order created from the hold snapshot",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerOrder"
+                },
+                "examples": {
+                  "createdOrder": {
+                    "summary": "Order created from the hold snapshot",
+                    "value": {
+                      "apiVersion": "v2",
+                      "id": "order-88",
+                      "occurrenceId": "concert-2026-10-28-evening",
+                      "layoutVersionId": "layout-v5",
+                      "revision": 9,
+                      "holdId": "hold-72",
+                      "quoteId": null,
+                      "contactRevision": 4,
+                      "selection": [
+                        {
+                          "kind": "seat",
+                          "seatId": "seat-a-12"
+                        }
+                      ],
+                      "lines": [
+                        {
+                          "label": "A12",
+                          "quantity": 1,
+                          "unitPriceMinor": 125000,
+                          "totalMinor": 125000
+                        }
+                      ],
+                      "currency": "RUB",
+                      "status": "pending",
+                      "paymentStatus": "not_started",
+                      "ticketDeliveryStatus": "pending",
+                      "createdAt": "2026-10-28T15:58:00Z"
+                    }
+                  }
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid request or buyer input",
+            "description": "The request is malformed or fails field validation.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "validationFailed": {
+                    "summary": "Malformed request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "validation_failed",
+                      "message": "The request contains malformed or invalid input."
+                    }
+                  }
                 }
               }
             }
           },
           "401": {
-            "description": "Buyer session is unavailable",
+            "description": "The buyer-session credential is missing, invalid, or expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "unauthorized": {
+                    "summary": "Buyer session required",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "unauthorized",
+                      "message": "A valid buyer-session credential is required."
+                    }
+                  }
                 }
               }
             }
           },
           "403": {
-            "description": "Operation is not permitted",
+            "description": "The authenticated buyer is not permitted to access this resource or tenant.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "forbidden": {
+                    "summary": "Resource is not owned by this session",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "forbidden",
+                      "message": "This resource is not owned by the selected purchase session."
+                    }
+                  }
                 }
               }
             }
           },
           "404": {
-            "description": "Buyer resource not found",
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
                 }
               }
             }
           },
           "409": {
-            "description": "State changed. Read current buyer context, compare currentRevision, then retry the intended action.",
+            "description": "The Idempotency-Key was already used with a different request body. Use a new key for a different logical request.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "idempotencyConflict": {
+                    "summary": "Idempotency key reused with another request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "idempotency_conflict",
+                      "message": "This Idempotency-Key was already used with a different request body."
+                    }
+                  }
                 }
               }
             }
           },
           "410": {
-            "description": "Buyer session, hold, or quote has expired",
+            "description": "The selected buyer session, hold, quote, or verification challenge has expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "sessionExpired": {
+                    "summary": "Buyer session expired",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "session_expired",
+                      "message": "Buyer session has expired. Start an approved session recovery flow."
+                    }
+                  },
+                  "holdExpired": {
+                    "summary": "Hold expired before order creation",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "hold_expired",
+                      "message": "The hold expired before an order could be created."
+                    }
+                  }
                 }
               }
             }
           },
           "422": {
-            "description": "Request is well formed but cannot be accepted in the current purchase state",
+            "description": "The request is well formed but the current purchase state cannot accept it.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "verificationRequired": {
+                    "summary": "Email verification required",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "verification_required",
+                      "message": "Verify the contact email before checkout.",
+                      "fieldErrors": [
+                        {
+                          "path": [
+                            "contact",
+                            "email"
+                          ],
+                          "message": "Verify this email before checkout."
+                        }
+                      ]
+                    }
+                  },
+                  "salesClosed": {
+                    "summary": "Sales are closed",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "sales_closed",
+                      "message": "Sales are closed for this occurrence."
+                    }
+                  }
                 }
               }
             }
           },
           "429": {
-            "description": "Rate limited",
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
           },
           "503": {
-            "description": "Service temporarily unavailable",
+            "description": "The service is temporarily unavailable. For mutations, the server may have committed the request; query current state and retry the exact body with the same Idempotency-Key.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailable": {
+                    "summary": "Mutation outcome may be unknown",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The service is temporarily unavailable; the outcome of a submitted mutation may be unknown.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/buyer/orders/{id}": {
+      "get": {
+        "operationId": "getBuyerOrder",
+        "summary": "Read the current order and payment state",
+        "description": "Returns the owner’s current order state, including payment and ticket-delivery status. Poll this resource after payment redirects or a client timeout; do not create a second order to discover the outcome.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
+        "security": [
+          {
+            "buyerSessionAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PurchaseSessionId"
+          },
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Order is paid while ticket delivery is still pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerOrder"
+                },
+                "examples": {
+                  "orderState": {
+                    "summary": "Order is paid while ticket delivery is still pending",
+                    "value": {
+                      "apiVersion": "v2",
+                      "id": "order-88",
+                      "occurrenceId": "concert-2026-10-28-evening",
+                      "layoutVersionId": "layout-v5",
+                      "revision": 9,
+                      "holdId": "hold-72",
+                      "quoteId": "quote-31",
+                      "contactRevision": 3,
+                      "selection": [
+                        {
+                          "kind": "seat",
+                          "seatId": "seat-a-12"
+                        }
+                      ],
+                      "lines": [
+                        {
+                          "label": "A12",
+                          "quantity": 1,
+                          "unitPriceMinor": 125000,
+                          "totalMinor": 125000
+                        }
+                      ],
+                      "currency": "RUB",
+                      "status": "confirmed",
+                      "paymentStatus": "paid",
+                      "ticketDeliveryStatus": "pending",
+                      "createdAt": "2026-10-28T15:58:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The buyer-session credential is missing, invalid, or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "unauthorized": {
+                    "summary": "Buyer session required",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "unauthorized",
+                      "message": "A valid buyer-session credential is required."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated buyer is not permitted to access this resource or tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "forbidden": {
+                    "summary": "Resource is not owned by this session",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "forbidden",
+                      "message": "This resource is not owned by the selected purchase session."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The selected buyer session, hold, quote, or verification challenge has expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "sessionExpired": {
+                    "summary": "Buyer session expired",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "session_expired",
+                      "message": "Buyer session has expired. Start an approved session recovery flow."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary service failure for this read request. Retry the read request after Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailableRead": {
+                    "summary": "Temporary read failure",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The read could not be completed. Retry the read request after the stated delay.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
@@ -3351,7 +5546,7 @@
       "post": {
         "operationId": "createBuyerQuote",
         "summary": "Calculate an authoritative quote for an order",
-        "description": "The quote fixes the ticket subtotal, discounts, fees, and total in minor units. Send the expected orderRevision. On HTTP 409, read the current order and quote, compare currentRevision, then retry with refreshed data.",
+        "description": "The server calculates ticket subtotal, discount, fees, commission, and total in minor units. Send the expected orderRevision. On HTTP 409, read the current order, compare currentRevision, then retry with refreshed data. An invalid promotion is reported as a semantic 422 response.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [
           {
             "buyerSessionAuth": []
@@ -3374,107 +5569,288 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BuyerQuoteRequest"
+              },
+              "examples": {
+                "quote": {
+                  "summary": "Quote the current order with no promotion code",
+                  "value": {
+                    "apiVersion": "v2",
+                    "orderRevision": 8
+                  }
+                },
+                "quoteWithPromotion": {
+                  "summary": "Quote the order with a promotion code",
+                  "value": {
+                    "apiVersion": "v2",
+                    "orderRevision": 8,
+                    "promoCode": "AUTUMN10"
+                  }
+                }
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "Server-calculated quote in integer minor units",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerQuote"
+                },
+                "examples": {
+                  "authoritativeQuote": {
+                    "summary": "Server-calculated quote in integer minor units",
+                    "value": {
+                      "apiVersion": "v2",
+                      "quoteId": "quote-31",
+                      "orderId": "order-88",
+                      "revision": 2,
+                      "expiresAt": "2026-10-28T16:05:00Z",
+                      "currency": "RUB",
+                      "lines": [
+                        {
+                          "label": "A12",
+                          "quantity": 1,
+                          "unitPriceMinor": 125000,
+                          "totalMinor": 125000
+                        }
+                      ],
+                      "ticketsSubtotalMinor": 125000,
+                      "discountMinor": 0,
+                      "serviceFeeMinor": 5000,
+                      "commissionMinor": 2500,
+                      "totalMinor": 132500,
+                      "promo": {
+                        "status": "none"
+                      }
+                    }
+                  }
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid request or buyer input",
+            "description": "The request is malformed or fails field validation.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "validationFailed": {
+                    "summary": "Malformed request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "validation_failed",
+                      "message": "The request contains malformed or invalid input."
+                    }
+                  }
                 }
               }
             }
           },
           "401": {
-            "description": "Buyer session is unavailable",
+            "description": "The buyer-session credential is missing, invalid, or expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "unauthorized": {
+                    "summary": "Buyer session required",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "unauthorized",
+                      "message": "A valid buyer-session credential is required."
+                    }
+                  }
                 }
               }
             }
           },
           "403": {
-            "description": "Operation is not permitted",
+            "description": "The authenticated buyer is not permitted to access this resource or tenant.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "forbidden": {
+                    "summary": "Resource is not owned by this session",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "forbidden",
+                      "message": "This resource is not owned by the selected purchase session."
+                    }
+                  }
                 }
               }
             }
           },
           "404": {
-            "description": "Buyer resource not found",
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
                 }
               }
             }
           },
           "409": {
-            "description": "State changed. Read current buyer context, compare currentRevision, then retry the intended action.",
+            "description": "The supplied revision is stale or the Idempotency-Key conflicts with a prior request. Read current state, compare currentRevision, and reconcile before retrying a revision conflict; a key conflict requires a new key for the new logical request.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "revisionConflict": {
+                    "summary": "Buyer state changed",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "revision_conflict",
+                      "message": "The buyer state changed. Read current state before retrying.",
+                      "currentRevision": 8
+                    }
+                  },
+                  "idempotencyConflict": {
+                    "summary": "Idempotency key reused with another request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "idempotency_conflict",
+                      "message": "This Idempotency-Key was already used with a different request body."
+                    }
+                  }
                 }
               }
             }
           },
           "410": {
-            "description": "Buyer session, hold, or quote has expired",
+            "description": "The selected buyer session, hold, quote, or verification challenge has expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "sessionExpired": {
+                    "summary": "Buyer session expired",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "session_expired",
+                      "message": "Buyer session has expired. Start an approved session recovery flow."
+                    }
+                  },
+                  "holdExpired": {
+                    "summary": "Hold expired before order creation",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "hold_expired",
+                      "message": "The hold expired before an order could be created."
+                    }
+                  }
                 }
               }
             }
           },
           "422": {
-            "description": "Request is well formed but cannot be accepted in the current purchase state",
+            "description": "The request is well formed but the current purchase state cannot accept it.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "invalidPromo": {
+                    "summary": "Promotion cannot be applied",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "invalid_promo",
+                      "message": "The promotion code is invalid or no longer active.",
+                      "fieldErrors": [
+                        {
+                          "path": [
+                            "promoCode"
+                          ],
+                          "message": "This promotion cannot be applied."
+                        }
+                      ]
+                    }
+                  }
                 }
               }
             }
           },
           "429": {
-            "description": "Rate limited",
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
           },
           "503": {
-            "description": "Service temporarily unavailable",
+            "description": "The service is temporarily unavailable. For mutations, the server may have committed the request; query current state and retry the exact body with the same Idempotency-Key.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailable": {
+                    "summary": "Mutation outcome may be unknown",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The service is temporarily unavailable; the outcome of a submitted mutation may be unknown.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
@@ -3486,7 +5862,7 @@
       "post": {
         "operationId": "checkoutBuyerOrder",
         "summary": "Accept a current quote and begin server-selected payment",
-        "description": "Order revision increments when a quote is accepted and on every checkout, payment, or order state change. Reads do not mutate revision. On HTTP 409, resume the current session and read the order, refresh against currentRevision, and retry the intended action only after comparing state.",
+        "description": "Send both the expected quoteRevision and orderRevision. The backend validates the active hold, contact and verification requirements, accepts the quote, and creates or reuses one payment attempt. Order revision increments when a quote is accepted and on each checkout, payment, or order state change. Reads do not mutate revision. On HTTP 409, resume the session, read the order, compare currentRevision, then retry only after reconciling state. Inventory lease duration during external payment and treatment of a provider callback arriving after expiry remain backend integration decisions.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [
           {
             "buyerSessionAuth": []
@@ -3509,107 +5885,342 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BuyerCheckoutRequest"
+              },
+              "examples": {
+                "checkout": {
+                  "summary": "Accept the current quote and begin payment",
+                  "value": {
+                    "apiVersion": "v2",
+                    "quoteId": "quote-31",
+                    "quoteRevision": 2,
+                    "orderRevision": 8
+                  }
+                }
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "Payment succeeded; tickets are still being issued asynchronously",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerCheckoutResult"
+                },
+                "examples": {
+                  "paidDeliveryPending": {
+                    "summary": "Payment succeeded; tickets are still being issued asynchronously",
+                    "value": {
+                      "apiVersion": "v2",
+                      "order": {
+                        "apiVersion": "v2",
+                        "id": "order-88",
+                        "occurrenceId": "concert-2026-10-28-evening",
+                        "layoutVersionId": "layout-v5",
+                        "revision": 9,
+                        "holdId": "hold-72",
+                        "quoteId": "quote-31",
+                        "contactRevision": 3,
+                        "selection": [
+                          {
+                            "kind": "seat",
+                            "seatId": "seat-a-12"
+                          }
+                        ],
+                        "lines": [
+                          {
+                            "label": "A12",
+                            "quantity": 1,
+                            "unitPriceMinor": 125000,
+                            "totalMinor": 125000
+                          }
+                        ],
+                        "currency": "RUB",
+                        "status": "confirmed",
+                        "paymentStatus": "paid",
+                        "ticketDeliveryStatus": "pending",
+                        "createdAt": "2026-10-28T15:58:00Z"
+                      },
+                      "paymentAttempt": {
+                        "apiVersion": "v2",
+                        "id": "payment-52",
+                        "orderId": "order-88",
+                        "status": "succeeded",
+                        "action": {
+                          "kind": "none"
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid request or buyer input",
+            "description": "The request is malformed or fails field validation.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "validationFailed": {
+                    "summary": "Malformed request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "validation_failed",
+                      "message": "The request contains malformed or invalid input."
+                    }
+                  }
                 }
               }
             }
           },
           "401": {
-            "description": "Buyer session is unavailable",
+            "description": "The buyer-session credential is missing, invalid, or expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "unauthorized": {
+                    "summary": "Buyer session required",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "unauthorized",
+                      "message": "A valid buyer-session credential is required."
+                    }
+                  }
                 }
               }
             }
           },
           "403": {
-            "description": "Operation is not permitted",
+            "description": "The authenticated buyer is not permitted to access this resource or tenant.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "forbidden": {
+                    "summary": "Resource is not owned by this session",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "forbidden",
+                      "message": "This resource is not owned by the selected purchase session."
+                    }
+                  }
                 }
               }
             }
           },
           "404": {
-            "description": "Buyer resource not found",
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
                 }
               }
             }
           },
           "409": {
-            "description": "State changed. Read current buyer context, compare currentRevision, then retry the intended action.",
+            "description": "The supplied revision is stale or the Idempotency-Key conflicts with a prior request. Read current state, compare currentRevision, and reconcile before retrying a revision conflict; a key conflict requires a new key for the new logical request.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "revisionConflict": {
+                    "summary": "Buyer state changed",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "revision_conflict",
+                      "message": "The buyer state changed. Read current state before retrying.",
+                      "currentRevision": 8
+                    }
+                  },
+                  "idempotencyConflict": {
+                    "summary": "Idempotency key reused with another request",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "idempotency_conflict",
+                      "message": "This Idempotency-Key was already used with a different request body."
+                    }
+                  },
+                  "priceChanged": {
+                    "summary": "The authoritative price changed",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "price_changed",
+                      "message": "The server price changed; refresh the occurrence context and confirm the new amount.",
+                      "currentRevision": 13
+                    }
+                  },
+                  "layoutChanged": {
+                    "summary": "The occurrence now uses another layout version",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "layout_version_conflict",
+                      "message": "The layout version changed; refresh the public layout and selection."
+                    }
+                  },
+                  "availabilityConflict": {
+                    "summary": "Inventory changed before the mutation",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "availability_conflict",
+                      "message": "The selected inventory is no longer available.",
+                      "currentRevision": 45
+                    }
+                  }
                 }
               }
             }
           },
           "410": {
-            "description": "Buyer session, hold, or quote has expired",
+            "description": "The selected buyer session, hold, quote, or verification challenge has expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "sessionExpired": {
+                    "summary": "Buyer session expired",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "session_expired",
+                      "message": "Buyer session has expired. Start an approved session recovery flow."
+                    }
+                  },
+                  "holdExpired": {
+                    "summary": "Hold expired before order creation",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "hold_expired",
+                      "message": "The hold expired before an order could be created."
+                    }
+                  },
+                  "quoteExpired": {
+                    "summary": "Quote expired before checkout",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "quote_expired",
+                      "message": "The quote expired before checkout."
+                    }
+                  }
                 }
               }
             }
           },
           "422": {
-            "description": "Request is well formed but cannot be accepted in the current purchase state",
+            "description": "The request is well formed but the current purchase state cannot accept it.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "verificationRequired": {
+                    "summary": "Email verification required",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "verification_required",
+                      "message": "Verify the contact email before checkout.",
+                      "fieldErrors": [
+                        {
+                          "path": [
+                            "contact",
+                            "email"
+                          ],
+                          "message": "Verify this email before checkout."
+                        }
+                      ]
+                    }
+                  },
+                  "paymentFailed": {
+                    "summary": "Payment could not be started",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "payment_failed",
+                      "message": "The payment provider could not start this payment attempt."
+                    }
+                  }
                 }
               }
             }
           },
           "429": {
-            "description": "Rate limited",
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
           },
           "503": {
-            "description": "Service temporarily unavailable",
+            "description": "The service is temporarily unavailable. For mutations, the server may have committed the request; query current state and retry the exact body with the same Idempotency-Key.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailable": {
+                    "summary": "Mutation outcome may be unknown",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The service is temporarily unavailable; the outcome of a submitted mutation may be unknown.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
@@ -3617,11 +6228,11 @@
         }
       }
     },
-    "/api/v2/buyer/tickets": {
+    "/api/v2/buyer/orders/{id}/tickets": {
       "get": {
-        "operationId": "listBuyerTickets",
-        "summary": "List tickets owned by the buyer session",
-        "description": "Ticket delivery may be asynchronous. Ticket open URLs are owner-only and expire at the timestamp returned with each URL.",
+        "operationId": "listBuyerOrderTickets",
+        "summary": "List tickets issued or pending for an order",
+        "description": "Returns only tickets belonging to this session’s order. Ticket delivery can remain pending after a successful payment. Ticket open URLs are owner-only and expire at the timestamp returned with each URL.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
         "security": [
           {
             "buyerSessionAuth": []
@@ -3630,55 +6241,181 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/PurchaseSessionId"
+          },
+          {
+            "$ref": "#/components/parameters/Id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "Payment has completed but ticket delivery is still pending",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerTicketList"
+                },
+                "examples": {
+                  "ticketDeliveryPending": {
+                    "summary": "Payment has completed but ticket delivery is still pending",
+                    "value": {
+                      "apiVersion": "v2",
+                      "items": [
+                        {
+                          "apiVersion": "v2",
+                          "ticketId": "ticket-6",
+                          "orderId": "order-88",
+                          "occurrenceId": "concert-2026-10-28-evening",
+                          "displayLabels": {
+                            "eventTitle": "Autumn Chamber Orchestra",
+                            "occurrenceTitle": "28 October, 19:00",
+                            "seat": "A12"
+                          },
+                          "deliveryStatus": "pending",
+                          "open": null
+                        }
+                      ]
+                    }
+                  }
                 }
               }
             }
           },
           "401": {
-            "description": "Buyer session is unavailable",
+            "description": "The buyer-session credential is missing, invalid, or expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "unauthorized": {
+                    "summary": "Buyer session required",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "unauthorized",
+                      "message": "A valid buyer-session credential is required."
+                    }
+                  }
                 }
               }
             }
           },
           "403": {
-            "description": "Operation is not permitted",
+            "description": "The authenticated buyer is not permitted to access this resource or tenant.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "forbidden": {
+                    "summary": "Resource is not owned by this session",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "forbidden",
+                      "message": "This resource is not owned by the selected purchase session."
+                    }
+                  }
                 }
               }
             }
           },
           "404": {
-            "description": "Buyer resource not found",
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
                 }
               }
             }
           },
           "410": {
-            "description": "Buyer session, hold, or quote has expired",
+            "description": "The selected buyer session, hold, quote, or verification challenge has expired.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "sessionExpired": {
+                    "summary": "Buyer session expired",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "session_expired",
+                      "message": "Buyer session has expired. Start an approved session recovery flow."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary service failure for this read request. Retry the read request after Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailableRead": {
+                    "summary": "Temporary read failure",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The read could not be completed. Retry the read request after the stated delay.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
@@ -3737,7 +6474,7 @@
         "name": "Idempotency-Key",
         "in": "header",
         "required": true,
-        "description": "Stable for one logical mutation; backend scopes it to caller and route.",
+        "description": "Stable for one logical mutation; the backend scopes it to caller and route, stores the original response, and returns that same response for a retry with the same body. Reusing the key with a different body returns HTTP 409. After an uncertain timeout or client abort, retry the exact body with the same key.",
         "schema": {
           "type": "string",
           "minLength": 1,
@@ -16927,6 +19664,313 @@
             "additionalProperties": false
           }
         ]
+      },
+      "BuyerAvailability": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "apiVersion": {
+            "type": "string",
+            "const": "v2"
+          },
+          "occurrenceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "layoutVersionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "serverTime": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "seats": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "available",
+                "held",
+                "sold",
+                "blocked",
+                "unavailable"
+              ]
+            }
+          },
+          "zones": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "available": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "maxPerOrder": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "available"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "apiVersion",
+          "occurrenceId",
+          "layoutVersionId",
+          "revision",
+          "serverTime",
+          "seats",
+          "zones"
+        ],
+        "additionalProperties": false
+      },
+      "BuyerAvailabilityChanges": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "apiVersion": {
+            "type": "string",
+            "const": "v2"
+          },
+          "occurrenceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "layoutVersionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "sinceRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "currentRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "serverTime": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "resyncRequired": {
+            "type": "boolean"
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "seats": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "available",
+                          "held",
+                          "sold",
+                          "blocked",
+                          "unavailable"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "zones": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "available": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "maxPerOrder": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "available"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "baseRevision",
+                "revision"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "apiVersion",
+          "occurrenceId",
+          "layoutVersionId",
+          "sinceRevision",
+          "currentRevision",
+          "serverTime",
+          "resyncRequired",
+          "changes"
+        ],
+        "additionalProperties": false
+      },
+      "BuyerPrices": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "apiVersion": {
+            "type": "string",
+            "const": "v2"
+          },
+          "occurrenceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "layoutVersionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "pricingRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "seats": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "amountMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "category": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "amountMinor"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "zones": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "amountMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "category": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "amountMinor"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "apiVersion",
+          "occurrenceId",
+          "layoutVersionId",
+          "pricingRevision",
+          "currency",
+          "seats",
+          "zones"
+        ],
+        "additionalProperties": false
       },
       "BuyerOccurrenceSummary": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",

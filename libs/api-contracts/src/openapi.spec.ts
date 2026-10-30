@@ -17,11 +17,11 @@ describe('OpenAPI contract', () => {
 
   it('documents the separate v2 buyer flow and revision refresh semantics', () => {
     const schemas = openApiDocument.components.schemas as unknown as Record<string, Record<string, unknown>>;
-    expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/occurrences');
-    expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/occurrences/{id}/layout');
+    expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/events/{eventId}/occurrences');
+    expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/occurrences/{id}/seat-map');
     expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/sessions/current/resume');
     expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/orders/{id}/checkout');
-    expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/tickets');
+    expect(openApiDocument.paths).toHaveProperty('/api/v2/buyer/orders/{id}/tickets');
     expect((schemas.BuyerOccurrenceList!.properties as Record<string, unknown>).apiVersion)
       .toMatchObject({ const: 'v2', type: 'string' });
     const publicLayoutProperties = schemas.BuyerPublicLayout!.properties as Record<string, unknown>;
@@ -54,7 +54,8 @@ describe('OpenAPI contract', () => {
     expect(openApiDocument.components.securitySchemes).toHaveProperty('buyerSessionAuth');
     expect(operation('/api/v2/buyer/sessions', 'post').security).toEqual([]);
     const sessionScoped = [
-      ['/api/v2/buyer/occurrences/{id}', 'get'],
+      ['/api/v2/buyer/occurrences/{id}/context', 'get'],
+      ['/api/v2/buyer/holds/{id}', 'get'],
       ['/api/v2/buyer/occurrences/{id}/holds', 'post'],
       ['/api/v2/buyer/holds/{id}', 'delete'],
       ['/api/v2/buyer/sessions/current/resume', 'get'],
@@ -64,13 +65,31 @@ describe('OpenAPI contract', () => {
       ['/api/v2/buyer/orders', 'post'],
       ['/api/v2/buyer/orders/{id}/quote', 'post'],
       ['/api/v2/buyer/orders/{id}/checkout', 'post'],
-      ['/api/v2/buyer/tickets', 'get'],
+      ['/api/v2/buyer/orders/{id}', 'get'],
+      ['/api/v2/buyer/orders/{id}/tickets', 'get'],
     ] as const;
     for (const [path, method] of sessionScoped) {
       const scopedOperation = operation(path, method);
       expect(scopedOperation.security, path).toEqual([{ buyerSessionAuth: [] }]);
       expect(scopedOperation.parameters, path).toContainEqual({ $ref: '#/components/parameters/PurchaseSessionId' });
     }
+  });
+
+  it('uses the approved v2 buyer resource paths without alternate aliases', () => {
+    const paths = openApiDocument.paths;
+    expect(paths).toHaveProperty('/api/v2/buyer/events/{eventId}/occurrences');
+    expect(paths).toHaveProperty('/api/v2/buyer/occurrences/{id}/context');
+    expect(paths).toHaveProperty('/api/v2/buyer/occurrences/{id}/seat-map');
+    expect(paths).toHaveProperty('/api/v2/buyer/occurrences/{id}/availability');
+    expect(paths).toHaveProperty('/api/v2/buyer/occurrences/{id}/availability-changes');
+    expect(paths).toHaveProperty('/api/v2/buyer/occurrences/{id}/prices');
+    expect(paths).toHaveProperty('/api/v2/buyer/holds/{id}');
+    expect(paths).toHaveProperty('/api/v2/buyer/orders/{id}');
+    expect(paths).toHaveProperty('/api/v2/buyer/orders/{id}/tickets');
+    expect(paths).not.toHaveProperty('/api/v2/buyer/occurrences');
+    expect(paths).not.toHaveProperty('/api/v2/buyer/occurrences/{id}');
+    expect(paths).not.toHaveProperty('/api/v2/buyer/occurrences/{id}/layout');
+    expect(paths).not.toHaveProperty('/api/v2/buyer/tickets');
   });
 
   it('requires buyer mutation revisions and documents expired and unprocessable responses', () => {
@@ -83,13 +102,121 @@ describe('OpenAPI contract', () => {
     const schemas = openApiDocument.components.schemas as unknown as Record<string, { required?: string[] }>;
     const contactResponses = contact.responses as Record<string, unknown>;
     const quoteResponses = quote.responses as Record<string, unknown>;
-    expect(schemas.BuyerContactWrite!.required).toContain('contactRevision');
-    expect(schemas.BuyerQuoteRequest!.required).toContain('orderRevision');
+    const requiredFields = (name: string) => {
+      const schema = schemas[name];
+      if (!schema?.required) throw new Error(`Expected required fields for ${name}`);
+      return schema.required;
+    };
+    expect(requiredFields('BuyerContactWrite')).toContain('contactRevision');
+    expect(requiredFields('BuyerQuoteRequest')).toContain('orderRevision');
+    expect(requiredFields('BuyerHoldRequest')).toContain('availabilityRevision');
+    expect(requiredFields('BuyerOrderRequest')).toContain('contactRevision');
+    expect(requiredFields('BuyerCheckoutRequest')).toEqual(expect.arrayContaining(['quoteRevision', 'orderRevision']));
     expect(contactResponses).toHaveProperty('410');
-    expect(contactResponses).toHaveProperty('422');
+    expect(contactResponses).not.toHaveProperty('422');
     expect(quoteResponses).toHaveProperty('410');
     expect(quoteResponses).toHaveProperty('422');
     expect((quoteResponses['409'] as { description: string }).description).toContain('currentRevision');
+  });
+
+  it('gives every v2 buyer operation examples and backend transaction guidance', () => {
+    const paths = openApiDocument.paths as unknown as Record<string, Record<string, Record<string, unknown>>>;
+    const buyerOperations = Object.entries(paths)
+      .filter(([path]) => path.startsWith('/api/v2/buyer/'))
+      .flatMap(([path, methods]) => Object.entries(methods).map(([method, operation]) => ({ path, method, operation })));
+
+    expect(buyerOperations.length).toBeGreaterThan(0);
+    for (const { path, method, operation } of buyerOperations) {
+      expect(operation.description, `${method.toUpperCase()} ${path} description`).toContain('backend owns durable purchase state');
+      expect(operation.description, `${method.toUpperCase()} ${path} abort semantics`).toContain('AbortSignal abort does not cancel a mutation');
+      if (method !== 'get') {
+        expect(operation.parameters, `${method.toUpperCase()} ${path} idempotency`)
+          .toContainEqual({ $ref: '#/components/parameters/IdempotencyKey' });
+      }
+
+      const requestBody = operation.requestBody as { content?: Record<string, { examples?: Record<string, unknown> }> } | undefined;
+      if (requestBody) {
+        expect(requestBody.content?.['application/json']?.examples, `${method.toUpperCase()} ${path} request examples`)
+          .toBeDefined();
+      }
+
+      const responses = operation.responses as Record<string, { content?: Record<string, { examples?: Record<string, unknown> }> }>;
+      for (const [status, response] of Object.entries(responses)) {
+        const examples = response.content?.['application/json']?.examples;
+        if (response.content?.['application/json']) {
+          expect(examples, `${method.toUpperCase()} ${path} ${status} examples`).toBeDefined();
+        }
+      }
+    }
+  });
+
+  it('keeps public buyer listing and layout responses independent of buyer session errors', () => {
+    const publicOperations = [
+      openApiDocument.paths['/api/v2/buyer/events/{eventId}/occurrences'].get,
+      openApiDocument.paths['/api/v2/buyer/occurrences/{id}/seat-map'].get,
+      openApiDocument.paths['/api/v2/buyer/occurrences/{id}/availability'].get,
+      openApiDocument.paths['/api/v2/buyer/occurrences/{id}/availability-changes'].get,
+      openApiDocument.paths['/api/v2/buyer/occurrences/{id}/prices'].get,
+    ] as unknown as Array<{ security?: unknown; responses: Record<string, { description: string }> }>;
+
+    for (const operation of publicOperations) {
+      expect(operation.security).toEqual([]);
+      expect(operation.responses).not.toHaveProperty('401');
+      expect(operation.responses).not.toHaveProperty('403');
+      expect(operation.responses).not.toHaveProperty('410');
+      const unavailable = operation.responses['503'];
+      if (!unavailable) throw new Error('Expected a 503 response');
+      expect(unavailable.description).toContain('read request');
+    }
+  });
+
+  it('documents an expired hold and a successful payment with asynchronous ticket delivery', () => {
+    const createOrder = openApiDocument.paths['/api/v2/buyer/orders'].post;
+    const checkout = openApiDocument.paths['/api/v2/buyer/orders/{id}/checkout'].post;
+    type ExampleResponse = { content: Record<string, { examples: Record<string, { value: unknown }> }> };
+    const createOrderResponses = createOrder.responses as unknown as Record<string, ExampleResponse>;
+    const checkoutResponses = checkout.responses as unknown as Record<string, ExampleResponse>;
+    const holdExpiredResponse = createOrderResponses['410'];
+    const checkoutResponse = checkoutResponses['200'];
+    if (!holdExpiredResponse || !checkoutResponse) throw new Error('Expected order and checkout responses');
+    const holdExpiredContent = holdExpiredResponse.content['application/json'];
+    const checkoutContent = checkoutResponse.content['application/json'];
+    if (!holdExpiredContent || !checkoutContent) throw new Error('Expected JSON response examples');
+    const holdExpiredExample = holdExpiredContent.examples.holdExpired;
+    const paidDeliveryExample = checkoutContent.examples.paidDeliveryPending;
+    if (!holdExpiredExample || !paidDeliveryExample) throw new Error('Expected expired-hold and paid-delivery examples');
+    const holdExpired = holdExpiredExample.value as Record<string, unknown>;
+    const paymentPendingTickets = paidDeliveryExample.value as Record<string, unknown>;
+
+    expect(holdExpired).toMatchObject({ apiVersion: 'v2', code: 'hold_expired' });
+    expect(paymentPendingTickets.order).toMatchObject({
+      status: 'confirmed', paymentStatus: 'paid', ticketDeliveryStatus: 'pending',
+    });
+    expect((paymentPendingTickets.paymentAttempt as Record<string, unknown>).status).toBe('succeeded');
+  });
+
+  it('defines mutation replay, revision, rate-limit, and uncertain-timeout semantics', () => {
+    const idempotency = openApiDocument.components.parameters.IdempotencyKey.description;
+    expect(idempotency).toContain('same body');
+    expect(idempotency).toContain('409');
+    expect(idempotency).toContain('same response');
+    const quote = openApiDocument.paths['/api/v2/buyer/orders/{id}/quote'].post;
+    const checkout = openApiDocument.paths['/api/v2/buyer/orders/{id}/checkout'].post;
+    expect(quote.description).toContain('orderRevision');
+    expect(checkout.description).toContain('orderRevision');
+    const responses = quote.responses as unknown as Record<string, {
+      description: string;
+      content: Record<string, { examples: Record<string, { value: Record<string, unknown> }> }>;
+    }>;
+    const rateLimited = responses['429'];
+    const unavailable = responses['503'];
+    if (!rateLimited || !unavailable) throw new Error('Expected 429 and 503 responses');
+    const rateLimitedContent = rateLimited.content['application/json'];
+    if (!rateLimitedContent) throw new Error('Expected a JSON rate-limit response');
+    const rateLimitedExample = rateLimitedContent.examples.rateLimited;
+    if (!rateLimitedExample) throw new Error('Expected a rate-limit example');
+    expect(rateLimitedExample.value.retryAfterMs).toBeGreaterThan(0);
+    expect(unavailable.description).toContain('same Idempotency-Key');
   });
 
   it('describes minor-unit money and an idempotency header', () => {

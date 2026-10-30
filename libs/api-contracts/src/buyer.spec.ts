@@ -15,6 +15,9 @@ import {
   buyerQuoteRequestSchema,
   buyerSessionResumeSchema,
   buyerTicketSummarySchema,
+  buyerAvailabilityChangesSchema,
+  buyerAvailabilitySchema,
+  buyerPricesSchema,
 } from './buyer.js';
 
 const summary = {
@@ -52,6 +55,44 @@ const quote = {
 };
 
 describe('v2 buyer contracts', () => {
+  it('validates v2 availability snapshots and requires contiguous availability deltas or explicit resync', () => {
+    expect(buyerAvailabilitySchema.parse({
+      apiVersion: 'v2', occurrenceId: 'occ-1', layoutVersionId: 'layout-1', revision: 8,
+      serverTime: '2026-11-01T17:40:00+03:00', seats: { 'seat-1': 'available' },
+      zones: { 'zone-ga': { available: 40, maxPerOrder: 6 } },
+    }).revision).toBe(8);
+    expect(buyerAvailabilityChangesSchema.safeParse({
+      apiVersion: 'v2', occurrenceId: 'occ-1', layoutVersionId: 'layout-1',
+      sinceRevision: 8, currentRevision: 10, serverTime: '2026-11-01T17:41:00+03:00', resyncRequired: false,
+      changes: [
+        { baseRevision: 8, revision: 9, seats: { 'seat-1': 'held' } },
+        { baseRevision: 9, revision: 10, zones: { 'zone-ga': { available: 39 } } },
+      ],
+    }).success).toBe(true);
+    expect(buyerAvailabilityChangesSchema.safeParse({
+      apiVersion: 'v2', occurrenceId: 'occ-1', layoutVersionId: 'layout-1',
+      sinceRevision: 8, currentRevision: 10, serverTime: '2026-11-01T17:41:00+03:00', resyncRequired: false,
+      changes: [{ baseRevision: 7, revision: 10 }],
+    }).success).toBe(false);
+    expect(buyerAvailabilityChangesSchema.safeParse({
+      apiVersion: 'v2', occurrenceId: 'occ-1', layoutVersionId: 'layout-1',
+      sinceRevision: 8, currentRevision: 10, serverTime: '2026-11-01T17:41:00+03:00', resyncRequired: true,
+      changes: [{ baseRevision: 8, revision: 9 }],
+    }).success).toBe(false);
+  });
+
+  it('validates buyer prices in minor units with occurrence and layout revisions', () => {
+    expect(buyerPricesSchema.parse({
+      apiVersion: 'v2', occurrenceId: 'occ-1', layoutVersionId: 'layout-1', pricingRevision: 4, currency: 'RUB',
+      seats: { 'seat-1': { amountMinor: 10000, category: 'standard' } },
+      zones: { 'zone-ga': { amountMinor: 5000 } },
+    }).currency).toBe('RUB');
+    expect(buyerPricesSchema.safeParse({
+      apiVersion: 'v2', occurrenceId: 'occ-1', layoutVersionId: 'layout-1', pricingRevision: 4, currency: 'RUB',
+      seats: { 'seat-1': { amountMinor: 1.5 } }, zones: {},
+    }).success).toBe(false);
+  });
+
   it('lists occurrence summaries with pagination and no hall geometry', () => {
     const listing = {
       apiVersion: 'v2', items: [summary],

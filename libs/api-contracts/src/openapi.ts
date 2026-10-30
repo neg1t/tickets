@@ -30,6 +30,8 @@ import {
 import {
   buyerCheckoutRequestSchema,
   buyerCheckoutResultSchema,
+  buyerAvailabilityChangesSchema,
+  buyerAvailabilitySchema,
   buyerContactWriteSchema,
   buyerErrorSchema,
   buyerHoldRequestSchema,
@@ -43,6 +45,7 @@ import {
   buyerOtpVerifyRequestSchema,
   buyerPaymentAttemptSchema,
   buyerPublicLayoutSchema,
+  buyerPricesSchema,
   buyerQuoteRequestSchema,
   buyerQuoteSchema,
   buyerSessionContactSchema,
@@ -74,25 +77,178 @@ const readErrors = {
   '403': mutationErrors['403'],
   '404': { description: 'Resource not found', ...json('Error') },
 };
-const buyerMutationErrors = {
-  '400': { description: 'Invalid request or buyer input', ...json('BuyerError') },
-  '401': { description: 'Buyer session is unavailable', ...json('BuyerError') },
-  '403': { description: 'Operation is not permitted', ...json('BuyerError') },
-  '404': { description: 'Buyer resource not found', ...json('BuyerError') },
-  '409': {
-    description: 'State changed. Read current buyer context, compare currentRevision, then retry the intended action.',
-    ...json('BuyerError'),
+const buyerBackendRules = 'The backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.';
+const buyerOperationDescription = (detail: string) => `${detail}\n\n${buyerBackendRules}`;
+const buyerErrorExample = (code: string, message: string, extras: Record<string, unknown> = {}) => ({
+  apiVersion: 'v2', code, message, ...extras,
+});
+const buyerErrorResponse = (
+  description: string,
+  exampleName: string,
+  summary: string,
+  value: Record<string, unknown>,
+) => ({
+  description,
+  ...jsonExamples('BuyerError', { [exampleName]: { summary, value } }),
+});
+const buyerSuccessResponse = (
+  schema: string,
+  status: string,
+  exampleName: string,
+  summary: string,
+  value: unknown,
+) => ({
+  [status]: {
+    description: summary,
+    ...jsonExamples(schema, { [exampleName]: { summary, value } }),
   },
-  '410': { description: 'Buyer session, hold, or quote has expired', ...json('BuyerError') },
-  '422': { description: 'Request is well formed but cannot be accepted in the current purchase state', ...json('BuyerError') },
-  '429': { description: 'Rate limited', ...json('BuyerError') },
-  '503': { description: 'Service temporarily unavailable', ...json('BuyerError') },
+});
+const buyerRequest = (schema: string, examples: Record<string, unknown>) => ({
+  required: true,
+  ...jsonExamples(schema, examples),
+});
+const expiredSessionError = buyerErrorExample('session_expired', 'Buyer session has expired. Start an approved session recovery flow.');
+const unauthenticatedBuyerError = buyerErrorExample('unauthorized', 'A valid buyer-session credential is required.');
+const forbiddenBuyerError = buyerErrorExample('forbidden', 'This resource is not owned by the selected purchase session.');
+const missingBuyerResourceError = buyerErrorExample('not_found', 'The requested buyer resource was not found.');
+const revisionConflictError = buyerErrorExample('revision_conflict', 'The buyer state changed. Read current state before retrying.', { currentRevision: 8 });
+const idempotencyConflictError = buyerErrorExample('idempotency_conflict', 'This Idempotency-Key was already used with a different request body.');
+const rateLimitedBuyerError = buyerErrorExample('rate_limited', 'Too many requests. Retry after the stated delay.', { retryAfterMs: 30000 });
+const unavailableBuyerError = buyerErrorExample('service_unavailable', 'The service is temporarily unavailable; the outcome of a submitted mutation may be unknown.', { retryAfterMs: 5000 });
+
+const buyerOccurrenceSummaryExample = {
+  occurrenceId: 'concert-2026-10-28-evening', eventId: 'concert-2026-10-28',
+  title: 'Autumn Chamber Orchestra', startsAt: '2026-10-28T19:00:00+03:00', timeZone: 'Europe/Moscow',
+  venue: { name: 'North Hall', city: 'Krasnoyarsk', address: '1 Theatre Square' },
+  poster: { url: 'https://example.test/posters/autumn-orchestra.jpg', alt: 'Autumn Chamber Orchestra' },
+  salesStatus: 'open', currency: 'RUB', capabilities: { seats: true, generalAdmission: true },
 };
-const buyerReadErrors = {
-  '401': buyerMutationErrors['401'],
-  '403': buyerMutationErrors['403'],
-  '404': buyerMutationErrors['404'],
-  '410': buyerMutationErrors['410'],
+const buyerHoldExample = {
+  apiVersion: 'v2', id: 'hold-72', ownerSessionId: 'purchase-session-4f', occurrenceId: 'concert-2026-10-28-evening',
+  layoutVersionId: 'layout-v5', revision: 6, expiresAt: '2026-10-28T16:10:00Z', serverTime: '2026-10-28T16:00:00Z',
+  selection: [{ kind: 'seat', seatId: 'seat-a-12' }],
+  lineItems: [{ label: 'A12', quantity: 1, unitPriceMinor: 125000, totalMinor: 125000 }],
+  totalMinor: 125000, currency: 'RUB', availabilityRevision: 44, status: 'active',
+};
+const buyerExpiredHoldExample = {
+  ...buyerHoldExample, status: 'expired', serverTime: '2026-10-28T16:12:00Z',
+};
+const buyerOrderExample = {
+  apiVersion: 'v2', id: 'order-88', occurrenceId: 'concert-2026-10-28-evening', layoutVersionId: 'layout-v5',
+  revision: 9, holdId: 'hold-72', quoteId: 'quote-31', contactRevision: 3,
+  selection: [{ kind: 'seat', seatId: 'seat-a-12' }],
+  lines: [{ label: 'A12', quantity: 1, unitPriceMinor: 125000, totalMinor: 125000 }],
+  currency: 'RUB', status: 'confirmed', paymentStatus: 'paid', ticketDeliveryStatus: 'pending',
+  createdAt: '2026-10-28T15:58:00Z',
+};
+const buyerQuoteExample = {
+  apiVersion: 'v2', quoteId: 'quote-31', orderId: 'order-88', revision: 2,
+  expiresAt: '2026-10-28T16:05:00Z', currency: 'RUB',
+  lines: [{ label: 'A12', quantity: 1, unitPriceMinor: 125000, totalMinor: 125000 }],
+  ticketsSubtotalMinor: 125000, discountMinor: 0, serviceFeeMinor: 5000, commissionMinor: 2500,
+  totalMinor: 132500, promo: { status: 'none' },
+};
+const buyerPaidCheckoutExample = {
+  apiVersion: 'v2',
+  order: buyerOrderExample,
+  paymentAttempt: { apiVersion: 'v2', id: 'payment-52', orderId: 'order-88', status: 'succeeded', action: { kind: 'none' } },
+};
+const buyerPublicLayoutExample = {
+  apiVersion: 'v2', hallName: 'North Hall',
+  snapshot: {
+    id: 'snapshot-v5', layoutVersionId: 'layout-v5', floors: [], zones: [], rows: [], seats: [],
+    tables: [], backgrounds: [], decorations: [],
+  },
+};
+const buyerAvailabilityExample = {
+  apiVersion: 'v2', occurrenceId: 'concert-2026-10-28-evening', layoutVersionId: 'layout-v5',
+  revision: 44, serverTime: '2026-10-28T16:00:00Z',
+  seats: { 'seat-a-12': 'available', 'seat-a-13': 'held' },
+  zones: { 'zone-floor': { available: 37, maxPerOrder: 6 } },
+};
+const buyerAvailabilityChangesExample = {
+  apiVersion: 'v2', occurrenceId: 'concert-2026-10-28-evening', layoutVersionId: 'layout-v5',
+  sinceRevision: 44, currentRevision: 46, serverTime: '2026-10-28T16:01:00Z', resyncRequired: false,
+  changes: [
+    { baseRevision: 44, revision: 45, seats: { 'seat-a-12': 'held' } },
+    { baseRevision: 45, revision: 46, zones: { 'zone-floor': { available: 36, maxPerOrder: 6 } } },
+  ],
+};
+const buyerAvailabilityResyncExample = {
+  apiVersion: 'v2', occurrenceId: 'concert-2026-10-28-evening', layoutVersionId: 'layout-v5',
+  sinceRevision: 12, currentRevision: 46, serverTime: '2026-10-28T16:01:00Z', resyncRequired: true, changes: [],
+};
+const buyerPricesExample = {
+  apiVersion: 'v2', occurrenceId: 'concert-2026-10-28-evening', layoutVersionId: 'layout-v5',
+  pricingRevision: 12, currency: 'RUB', seats: { 'seat-a-12': { amountMinor: 125000, category: 'standard' } },
+  zones: { 'zone-floor': { amountMinor: 90000, category: 'standing' } },
+};
+const buyerErrorResponses = {
+  badRequest: buyerErrorResponse('The request is malformed or fails field validation.', 'validationFailed', 'Malformed request',
+    buyerErrorExample('validation_failed', 'The request contains malformed or invalid input.')),
+  unauthorized: buyerErrorResponse('The buyer-session credential is missing, invalid, or expired.', 'unauthorized', 'Buyer session required', unauthenticatedBuyerError),
+  forbidden: buyerErrorResponse('The authenticated buyer is not permitted to access this resource or tenant.', 'forbidden', 'Resource is not owned by this session', forbiddenBuyerError),
+  notFound: buyerErrorResponse('The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.', 'notFound', 'Buyer resource not found', missingBuyerResourceError),
+  rateLimited: {
+    ...buyerErrorResponse('Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.', 'rateLimited', 'Retry after the supplied delay', rateLimitedBuyerError),
+    headers: { 'Retry-After': { description: 'Minimum wait before retry, in seconds; the body also provides retryAfterMs.', schema: { type: 'integer', minimum: 0 } } },
+  },
+  unavailable: {
+    ...buyerErrorResponse('The service is temporarily unavailable. For mutations, the server may have committed the request; query current state and retry the exact body with the same Idempotency-Key.', 'serviceUnavailable', 'Mutation outcome may be unknown', unavailableBuyerError),
+    headers: { 'Retry-After': { description: 'Optional minimum wait before retry, in seconds.', schema: { type: 'integer', minimum: 0 } } },
+  },
+};
+const buyerErrorsByStatus = {
+  '400': buyerErrorResponses.badRequest,
+  '401': buyerErrorResponses.unauthorized,
+  '403': buyerErrorResponses.forbidden,
+  '404': buyerErrorResponses.notFound,
+  '409': { description: 'The supplied revision is stale or the Idempotency-Key conflicts with a prior request.' },
+  '410': { description: 'The selected buyer session, hold, quote, or verification challenge has expired.' },
+  '422': { description: 'The request is well formed but the current purchase state cannot accept it.' },
+  '429': buyerErrorResponses.rateLimited,
+  '503': buyerErrorResponses.unavailable,
+} as const;
+const buyerErrorSamples = {
+  revisionConflict: { summary: 'Buyer state changed', value: revisionConflictError },
+  idempotencyConflict: { summary: 'Idempotency key reused with another request', value: idempotencyConflictError },
+  priceChanged: { summary: 'The authoritative price changed', value: buyerErrorExample('price_changed', 'The server price changed; refresh the occurrence context and confirm the new amount.', { currentRevision: 13 }) },
+  layoutChanged: { summary: 'The occurrence now uses another layout version', value: buyerErrorExample('layout_version_conflict', 'The layout version changed; refresh the public layout and selection.') },
+  availabilityConflict: { summary: 'Inventory changed before the mutation', value: buyerErrorExample('availability_conflict', 'The selected inventory is no longer available.', { currentRevision: 45 }) },
+  sessionExpired: { summary: 'Buyer session expired', value: expiredSessionError },
+  holdExpired: { summary: 'Hold expired before order creation', value: buyerErrorExample('hold_expired', 'The hold expired before an order could be created.') },
+  quoteExpired: { summary: 'Quote expired before checkout', value: buyerErrorExample('quote_expired', 'The quote expired before checkout.') },
+  codeExpired: { summary: 'Email code expired', value: buyerErrorExample('code_expired', 'The email verification code expired.') },
+  verificationRequired: { summary: 'Email verification required', value: buyerErrorExample('verification_required', 'Verify the contact email before checkout.', { fieldErrors: [{ path: ['contact', 'email'], message: 'Verify this email before checkout.' }] }) },
+  invalidCode: { summary: 'Email code does not match', value: buyerErrorExample('invalid_code', 'The code does not match the active challenge.', { fieldErrors: [{ path: ['code'], message: 'Enter the code sent for the active challenge.' }] }) },
+  invalidPromo: { summary: 'Promotion cannot be applied', value: buyerErrorExample('invalid_promo', 'The promotion code is invalid or no longer active.', { fieldErrors: [{ path: ['promoCode'], message: 'This promotion cannot be applied.' }] }) },
+  salesClosed: { summary: 'Sales are closed', value: buyerErrorExample('sales_closed', 'Sales are closed for this occurrence.') },
+  paymentFailed: { summary: 'Payment could not be started', value: buyerErrorExample('payment_failed', 'The payment provider could not start this payment attempt.') },
+  serviceUnavailableRead: { summary: 'Temporary read failure', value: buyerErrorExample('service_unavailable', 'The read could not be completed. Retry the read request after the stated delay.', { retryAfterMs: 5000 }) },
+} as const;
+type BuyerErrorStatus = keyof typeof buyerErrorsByStatus;
+type BuyerErrorVariant = Partial<Record<'409' | '410' | '422' | '503', readonly (keyof typeof buyerErrorSamples)[]>>;
+const buyerErrorVariantResponse = (status: '409' | '410' | '422' | '503', samples: readonly (keyof typeof buyerErrorSamples)[]) => ({
+  ...buyerErrorsByStatus[status],
+  description: status === '409'
+    ? samples.includes('revisionConflict')
+      ? 'The supplied revision is stale or the Idempotency-Key conflicts with a prior request. Read current state, compare currentRevision, and reconcile before retrying a revision conflict; a key conflict requires a new key for the new logical request.'
+      : samples.some((sample) => ['availabilityConflict', 'priceChanged', 'layoutChanged'].includes(sample))
+        ? 'Availability, layout, price, or idempotency state changed. Refresh the current occurrence context before retrying; a key conflict requires a new key for a different logical request.'
+        : 'The Idempotency-Key was already used with a different request body. Use a new key for a different logical request.'
+    : status === '503' && samples.includes('serviceUnavailableRead')
+      ? 'Temporary service failure for this read request. Retry the read request after Retry-After.'
+      : buyerErrorsByStatus[status].description,
+  ...jsonExamples('BuyerError', Object.fromEntries(samples.map((sample) => [sample, buyerErrorSamples[sample]]))),
+});
+const buyerErrors = (...args: (BuyerErrorStatus | BuyerErrorVariant)[]) => {
+  const variants = args.find((arg): arg is BuyerErrorVariant => typeof arg === 'object');
+  const statuses = args.filter((arg): arg is BuyerErrorStatus => typeof arg === 'string');
+  const responses: Record<string, unknown> = Object.fromEntries(statuses.map((status) => [status, buyerErrorsByStatus[status]]));
+  (['409', '410', '422', '503'] as const).forEach((status) => {
+    if (variants?.[status]) responses[status] = buyerErrorVariantResponse(status, variants[status]);
+  });
+  return responses;
 };
 const id = { $ref: '#/components/parameters/Id' };
 const key = { $ref: '#/components/parameters/IdempotencyKey' };
@@ -185,7 +341,7 @@ export const openApiDocument = {
     title: 'Hall Platform API',
     version: '1.0.0',
     description:
-      'Proposed backend contract. The backend is the authority for availability, minor-unit prices, hold ownership and expiry, idempotency, tenant access, and immutable published versions. A local demo is not a backend implementation.',
+      'Proposed backend contract for agreement; it is not a claim that a backend exists. The backend owns durable persistence for immutable published layout versions and occurrence mappings, pricing assignments and revisions, inventory and capacity, buyer sessions and contact verification, holds and expiry, order-line snapshots, quote breakdowns, payment attempts, tickets, and idempotency results. Server transactions must prevent a seat from being sold twice, keep general-admission capacity nonnegative, reject confirmation of expired holds, make provider callbacks idempotent, and reuse payment attempts on checkout retry. Public projections are built server-side; draft editor assets remain in admin storage. Physical tables and indexes are intentionally unspecified. Session restoration mechanism, payment inventory lease, and handling of late provider callbacks after expiry remain open integration decisions.',
   },
   servers: [{ url: 'http://localhost:8080', description: 'Example backend URL; no server is bundled' }],
   security: [{ bearerAuth: [] }],
@@ -418,136 +574,330 @@ export const openApiDocument = {
         responses: { ...success('Order'), ...mutationErrors },
       },
     },
-    '/api/v2/buyer/occurrences': {
+    '/api/v2/buyer/events/{eventId}/occurrences': {
       get: {
-        operationId: 'listBuyerOccurrences',
-        summary: 'List buyer occurrence summaries with pagination',
-        description: 'Returns summary cards only; event layout geometry is available from one occurrence context at a time.',
+        operationId: 'listBuyerOccurrences', summary: 'List occurrences for an event',
+        description: buyerOperationDescription('Returns lightweight public occurrence summaries for event date/time selection. Use the optional cursor to continue; this public endpoint does not require a buyer session.'),
         security: [],
-        responses: { ...success('BuyerOccurrenceList'), ...buyerReadErrors },
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string', minLength: 1 } },
+          { name: 'cursor', in: 'query', required: false, schema: { type: 'string', minLength: 1 } },
+        ],
+        responses: {
+          ...buyerSuccessResponse('BuyerOccurrenceList', '200', 'occurrences', 'One page of public event occurrences', {
+            apiVersion: 'v2', items: [buyerOccurrenceSummaryExample], pagination: { nextCursor: 'occurrence-page-2', hasMore: true },
+          }),
+          ...buyerErrors('429', '503', { '503': ['serviceUnavailableRead'] }),
+        },
       },
     },
-    '/api/v2/buyer/occurrences/{id}': {
+    '/api/v2/buyer/occurrences/{id}/context': {
       get: {
-        operationId: 'getBuyerOccurrenceContext',
-        summary: 'Read the current buyer context for an occurrence',
+        operationId: 'getBuyerOccurrenceContext', summary: 'Read the current buyer context for an occurrence',
+        description: buyerOperationDescription('Returns public occurrence metadata together with this purchase session’s own active hold and current capability flags. The server verifies the session selector and owner before returning private session state.'),
         security: buyerSessionSecurity,
-        parameters: [purchaseSession, id], responses: { ...success('BuyerOccurrenceContext'), ...buyerReadErrors },
+        parameters: [purchaseSession, id],
+        responses: {
+          ...buyerSuccessResponse('BuyerOccurrenceContext', '200', 'occurrenceContext', 'Occurrence context with no active hold', {
+            apiVersion: 'v2', summary: buyerOccurrenceSummaryExample, layoutVersionId: 'layout-v5',
+            availabilityRevision: 44, pricingRevision: 12, serverTime: '2026-10-28T16:00:00Z', ownHold: null,
+            capabilities: { promoCode: true, emailVerification: true, paymentMode: 'redirect' },
+          }),
+          ...buyerErrors('401', '403', '404', '410', '429', '503', { '410': ['sessionExpired'], '503': ['serviceUnavailableRead'] }),
+        },
       },
     },
-    '/api/v2/buyer/occurrences/{id}/layout': {
+    '/api/v2/buyer/occurrences/{id}/seat-map': {
       get: {
         operationId: 'getBuyerPublicLayout',
         summary: 'Read the public layout without editor backgrounds or assets',
+        description: buyerOperationDescription('Returns immutable public geometry for the occurrence layout version. The public projection contains no editor backgrounds, PDF assets, images, or local blobs.'),
         security: [],
-        parameters: [id], responses: { ...success('BuyerPublicLayout'), ...buyerReadErrors },
+        parameters: [id],
+        responses: {
+          ...buyerSuccessResponse('BuyerPublicLayout', '200', 'publicLayout', 'Public projection of the selected layout version', buyerPublicLayoutExample),
+          ...buyerErrors('404', '429', '503', { '503': ['serviceUnavailableRead'] }),
+        },
+      },
+    },
+    '/api/v2/buyer/occurrences/{id}/availability': {
+      get: {
+        operationId: 'getBuyerAvailability', summary: 'Read current occurrence inventory',
+        description: buyerOperationDescription('Returns an authoritative availability snapshot stamped with occurrence, immutable layout version, monotonically increasing availability revision, and server time. This public read does not reveal buyer-owned hold data.'),
+        security: [], parameters: [id],
+        responses: {
+          ...buyerSuccessResponse('BuyerAvailability', '200', 'availabilitySnapshot', 'Current seats and general-admission capacity', buyerAvailabilityExample),
+          ...buyerErrors('404', '429', '503', { '503': ['serviceUnavailableRead'] }),
+        },
+      },
+    },
+    '/api/v2/buyer/occurrences/{id}/availability-changes': {
+      get: {
+        operationId: 'getBuyerAvailabilityChanges', summary: 'Read sequential availability changes',
+        description: buyerOperationDescription('Returns sequential deltas after sinceRevision. Each delta baseRevision must equal the prior revision; when the retained history cannot bridge the requested revision, resyncRequired is true and changes is empty so the client fetches a new snapshot.'),
+        security: [],
+        parameters: [id, { name: 'sinceRevision', in: 'query', required: true, schema: { type: 'integer', minimum: 0 } }],
+        responses: {
+          '200': {
+            description: 'Contiguous changes or an explicit resync request',
+            ...jsonExamples('BuyerAvailabilityChanges', {
+              contiguousChanges: { summary: 'Two sequential inventory deltas', value: buyerAvailabilityChangesExample },
+              resyncRequired: { summary: 'History is unavailable; fetch a fresh snapshot', value: buyerAvailabilityResyncExample },
+            }),
+          },
+          ...buyerErrors('400', '404', '429', '503', { '503': ['serviceUnavailableRead'] }),
+        },
+      },
+    },
+    '/api/v2/buyer/occurrences/{id}/prices': {
+      get: {
+        operationId: 'getBuyerPrices', summary: 'Read authoritative occurrence prices',
+        description: buyerOperationDescription('Returns server-owned seat and general-admission prices in integer minor units, with occurrence/layout context, pricing revision, and ISO currency.'),
+        security: [], parameters: [id],
+        responses: {
+          ...buyerSuccessResponse('BuyerPrices', '200', 'prices', 'Seat and GA prices at one pricing revision', buyerPricesExample),
+          ...buyerErrors('404', '429', '503', { '503': ['serviceUnavailableRead'] }),
+        },
       },
     },
     '/api/v2/buyer/occurrences/{id}/holds': {
       post: {
         operationId: 'createBuyerHold',
         summary: 'Create an owned hold from current availability',
-        description: 'The server verifies occurrence and layout versions, owns and prices the selection, and returns the authoritative line items and total.',
+        description: buyerOperationDescription('The server verifies occurrence and layout versions, checks the expected availability revision, validates that seat selection and general-admission quantities are available, prices the selection, and returns authoritative line items, total, and expiry. Inventory allocation and the hold state commit atomically.'),
         security: buyerSessionSecurity,
-        parameters: [purchaseSession, id, key], requestBody: request('BuyerHoldRequest'),
-        responses: { ...success('BuyerHold', '201'), ...buyerMutationErrors },
+        parameters: [purchaseSession, id, key],
+        requestBody: buyerRequest('BuyerHoldRequest', {
+          seatedSelection: { summary: 'Reserve a specific seat at the expected layout and availability revisions', value: { apiVersion: 'v2', layoutVersionId: 'layout-v5', availabilityRevision: 44, selection: [{ kind: 'seat', seatId: 'seat-a-12' }] } },
+          generalAdmissionSelection: { summary: 'Reserve two places from a GA zone', value: { apiVersion: 'v2', layoutVersionId: 'layout-v5', availabilityRevision: 44, selection: [{ kind: 'generalAdmission', zoneId: 'zone-floor', quantity: 2 }] } },
+        }),
+        responses: {
+          ...buyerSuccessResponse('BuyerHold', '201', 'activeHold', 'The server-priced inventory hold and expiry', buyerHoldExample),
+          ...buyerErrors('400', '401', '403', '404', '409', '410', '422', '429', '503', {
+            '409': ['availabilityConflict', 'priceChanged', 'layoutChanged', 'idempotencyConflict'],
+            '410': ['sessionExpired'], '422': ['salesClosed'],
+          }),
+        },
       },
     },
     '/api/v2/buyer/holds/{id}': {
+      get: {
+        operationId: 'getBuyerHold', summary: 'Read an owned hold and its expiry',
+        description: buyerOperationDescription('Returns the hold owned by this purchase session, including current status, authoritative totals, selection, and expiry. Expired holds remain readable for recovery but cannot be converted into orders.'),
+        security: buyerSessionSecurity, parameters: [purchaseSession, id],
+        responses: {
+          '200': {
+            description: 'Owned hold, including expired holds retained for recovery',
+            ...jsonExamples('BuyerHold', {
+              activeHold: { summary: 'Owned inventory reserved until expiresAt', value: buyerHoldExample },
+              expiredHold: { summary: 'Expired hold retained for recovery', value: buyerExpiredHoldExample },
+            }),
+          },
+          ...buyerErrors('401', '403', '404', '429', '503', { '503': ['serviceUnavailableRead'] }),
+        },
+      },
       delete: {
         operationId: 'cancelBuyerHold',
         summary: 'Cancel an owned hold and release its inventory',
+        description: buyerOperationDescription('Releases this purchase session’s hold. Cancellation is idempotent: an already cancelled or expired hold is treated as released and returns 204.'),
         security: buyerSessionSecurity,
-        parameters: [purchaseSession, id, key], responses: { ...emptySuccess, ...buyerMutationErrors },
+        parameters: [purchaseSession, id, key],
+        responses: {
+          '204': { description: 'Hold released; repeated cancellation of the same hold also succeeds without a body.' },
+          ...buyerErrors('401', '403', '404', '409', '429', '503', { '409': ['idempotencyConflict'] }),
+        },
       },
     },
     '/api/v2/buyer/sessions': {
       post: {
         operationId: 'createBuyerSession',
         summary: 'Create a buyer purchase session or exchange a host bootstrap credential',
-        description: 'Returns a purchaseSessionId selector and a separate buyer-session credential. Keep the credential in the approved host or first-party session mechanism.',
+        description: buyerOperationDescription('Creates a guest buyer session scoped to the occurrenceId in the request or exchanges a one-time host bootstrap credential. Returns a non-secret purchaseSessionId selector separately from the buyer-session credential, plus its expiry. Credential transport and storage must use the approved first-party or host mechanism; this contract does not prescribe a refresh or cookie flow.'),
         security: [],
-        parameters: [key], requestBody: request('BuyerSessionCreateRequest'),
-        responses: { ...success('BuyerSessionCreateResult', '201'), ...buyerMutationErrors },
+        parameters: [key],
+        requestBody: buyerRequest('BuyerSessionCreateRequest', {
+          guestSession: { summary: 'Create a guest session for an occurrence', value: { apiVersion: 'v2', occurrenceId: 'concert-2026-10-28-evening' } },
+          hostBootstrap: { summary: 'Exchange a one-time host bootstrap credential', value: { apiVersion: 'v2', occurrenceId: 'concert-2026-10-28-evening', hostBootstrapCredential: 'one-time-host-bootstrap-demo' } },
+        }),
+        responses: {
+          ...buyerSuccessResponse('BuyerSessionCreateResult', '201', 'createdSession', 'Selector and credential are separate values', {
+            apiVersion: 'v2', purchaseSessionId: 'purchase-session-4f', sessionCredential: 'demo-buyer-session-credential', expiresAt: '2026-10-28T20:00:00Z',
+          }),
+          ...buyerErrors('400', '401', '404', '409', '429', '503', { '409': ['idempotencyConflict'] }),
+        },
       },
     },
     '/api/v2/buyer/sessions/current/resume': {
       get: {
         operationId: 'resumeBuyerSession',
         summary: 'Resume the purchase session and return its current order',
-        description: 'Includes a converted hold and its existing order so a reload cannot create a duplicate order.',
+        description: buyerOperationDescription('Returns contacts and verification status, this session’s hold, active order, and payment attempt so reload or redirect return can restore state without creating duplicate orders or payments.'),
         security: buyerSessionSecurity,
         parameters: [purchaseSession],
-        responses: { ...success('BuyerSessionResume'), ...buyerReadErrors },
+        responses: {
+          ...buyerSuccessResponse('BuyerSessionResume', '200', 'resumedSession', 'Current session state with an available hold and no order yet', {
+            apiVersion: 'v2', purchaseSessionId: 'purchase-session-4f', occurrenceId: 'concert-2026-10-28-evening',
+            contact: { firstName: 'Alex', lastName: 'Buyer', phone: '+7 900 123-45-67', email: 'alex@example.test' }, contactRevision: 3,
+            emailVerification: { status: 'unverified', verifiedEmail: null }, ownHold: buyerHoldExample,
+            activeOrder: null, activePaymentAttempt: null, serverTime: '2026-10-28T16:00:00Z',
+          }),
+          ...buyerErrors('401', '403', '404', '410', '429', '503', { '410': ['sessionExpired'], '503': ['serviceUnavailableRead'] }),
+        },
       },
     },
     '/api/v2/buyer/sessions/current/contact': {
       put: {
         operationId: 'saveBuyerContact',
         summary: 'Save contact details in the buyer session',
-        description: 'Requires the contactRevision from the current session. On HTTP 409, resume the session, compare currentRevision, and retry with the refreshed contact revision.',
+        description: buyerOperationDescription('Requires the contactRevision from the current session. On HTTP 409, resume the session, compare currentRevision, and retry with the refreshed contact revision. A changed email resets verification for the new address.'),
         security: buyerSessionSecurity,
-        parameters: [purchaseSession, key], requestBody: request('BuyerContactWrite'),
-        responses: { ...success('BuyerSessionContact'), ...buyerMutationErrors },
+        parameters: [purchaseSession, key],
+        requestBody: buyerRequest('BuyerContactWrite', {
+          contact: { summary: 'Save contact details against the current contact revision', value: { apiVersion: 'v2', contactRevision: 3, contact: { firstName: 'Alex', lastName: 'Buyer', phone: '+7 900 123-45-67', email: 'alex@example.test' } } },
+        }),
+        responses: {
+          ...buyerSuccessResponse('BuyerSessionContact', '200', 'savedContact', 'Saved contact with current revision and verification state', {
+            apiVersion: 'v2', contact: { firstName: 'Alex', lastName: 'Buyer', phone: '+7 900 123-45-67', email: 'alex@example.test' },
+            contactRevision: 4, emailVerification: { status: 'unverified', verifiedEmail: null },
+          }),
+          ...buyerErrors('400', '401', '403', '404', '409', '410', '429', '503', {
+            '409': ['revisionConflict', 'idempotencyConflict'], '410': ['sessionExpired'],
+          }),
+        },
       },
     },
     '/api/v2/buyer/sessions/current/email-challenges': {
       post: {
         operationId: 'startBuyerEmailVerification',
         summary: 'Send a one-time email verification code',
-        description: 'The response contains challenge metadata only and never contains the code.',
+        description: buyerOperationDescription('Starts an email challenge for the current contact email. The response contains challenge metadata only and never contains the code; server resend limits are reflected in Retry-After and BuyerError.retryAfterMs.'),
         security: buyerSessionSecurity,
-        parameters: [purchaseSession, key], requestBody: request('BuyerOtpStartRequest'),
-        responses: { ...success('BuyerOtpChallenge', '201'), ...buyerMutationErrors },
+        parameters: [purchaseSession, key],
+        requestBody: buyerRequest('BuyerOtpStartRequest', {
+          emailChallenge: { summary: 'Request a code for the contact address', value: { apiVersion: 'v2', email: 'alex@example.test' } },
+        }),
+        responses: {
+          ...buyerSuccessResponse('BuyerOtpChallenge', '201', 'challengeCreated', 'Challenge metadata without the code', {
+            apiVersion: 'v2', challengeId: 'email-challenge-17', destinationMasked: 'a***@example.test', codeLength: 6,
+            expiresAt: '2026-10-28T16:05:00Z', resendAvailableAt: '2026-10-28T16:01:00Z', attemptsRemaining: 5,
+          }),
+          ...buyerErrors('400', '401', '403', '404', '409', '410', '429', '503', {
+            '409': ['idempotencyConflict'], '410': ['sessionExpired'],
+          }),
+        },
       },
     },
     '/api/v2/buyer/email-challenges/{id}/verify': {
       post: {
         operationId: 'confirmBuyerEmailVerification',
         summary: 'Verify a buyer email with a one-time code',
+        description: buyerOperationDescription('Consumes a one-time code only when it belongs to the active challenge for the current session contact email. Repeated submissions with the same Idempotency-Key return the saved result.'),
         security: buyerSessionSecurity,
-        parameters: [purchaseSession, id, key], requestBody: request('BuyerOtpVerifyRequest'),
-        responses: { ...success('BuyerSessionContact'), ...buyerMutationErrors },
+        parameters: [purchaseSession, id, key],
+        requestBody: buyerRequest('BuyerOtpVerifyRequest', {
+          verificationCode: { summary: 'Submit the code delivered out of band', value: { apiVersion: 'v2', code: '482951' } },
+        }),
+        responses: {
+          ...buyerSuccessResponse('BuyerSessionContact', '200', 'verifiedContact', 'Current contact and email verification state', {
+            apiVersion: 'v2', contact: { firstName: 'Alex', lastName: 'Buyer', phone: '+7 900 123-45-67', email: 'alex@example.test' },
+            contactRevision: 4, emailVerification: { status: 'verified', verifiedEmail: 'alex@example.test' },
+          }),
+          ...buyerErrors('400', '401', '403', '404', '409', '410', '422', '429', '503', {
+            '409': ['idempotencyConflict'], '410': ['sessionExpired', 'codeExpired'], '422': ['invalidCode'],
+          }),
+        },
       },
     },
     '/api/v2/buyer/orders': {
       post: {
         operationId: 'createBuyerOrder',
         summary: 'Create or resume the order for the buyer session hold',
-        description: 'An order is unique for the current hold. Repeating the request returns the session order rather than creating a duplicate.',
+        description: buyerOperationDescription('Creates at most one order for the owned, unexpired hold and supplied contact revision. Repeating the same logical request returns the existing order. An expired hold returns 410 and cannot be confirmed.'),
         security: buyerSessionSecurity,
-        parameters: [purchaseSession, key], requestBody: request('BuyerOrderRequest'),
-        responses: { ...success('BuyerOrder', '201'), ...buyerMutationErrors },
+        parameters: [purchaseSession, key],
+        requestBody: buyerRequest('BuyerOrderRequest', {
+          orderFromHold: { summary: 'Create an order from the owned hold and current contact revision', value: { apiVersion: 'v2', holdId: 'hold-72', contactRevision: 4 } },
+        }),
+        responses: {
+          ...buyerSuccessResponse('BuyerOrder', '201', 'createdOrder', 'Order created from the hold snapshot', {
+            ...buyerOrderExample, quoteId: null, contactRevision: 4,
+            status: 'pending', paymentStatus: 'not_started', ticketDeliveryStatus: 'pending',
+          }),
+          ...buyerErrors('400', '401', '403', '404', '409', '410', '422', '429', '503', {
+            '409': ['idempotencyConflict'], '410': ['sessionExpired', 'holdExpired'],
+            '422': ['verificationRequired', 'salesClosed'],
+          }),
+        },
+      },
+    },
+    '/api/v2/buyer/orders/{id}': {
+      get: {
+        operationId: 'getBuyerOrder', summary: 'Read the current order and payment state',
+        description: buyerOperationDescription('Returns the owner’s current order state, including payment and ticket-delivery status. Poll this resource after payment redirects or a client timeout; do not create a second order to discover the outcome.'),
+        security: buyerSessionSecurity,
+        parameters: [purchaseSession, id],
+        responses: {
+          ...buyerSuccessResponse('BuyerOrder', '200', 'orderState', 'Order is paid while ticket delivery is still pending', buyerOrderExample),
+          ...buyerErrors('401', '403', '404', '410', '429', '503', { '410': ['sessionExpired'], '503': ['serviceUnavailableRead'] }),
+        },
       },
     },
     '/api/v2/buyer/orders/{id}/quote': {
       post: {
         operationId: 'createBuyerQuote',
         summary: 'Calculate an authoritative quote for an order',
-        description: 'The quote fixes the ticket subtotal, discounts, fees, and total in minor units. Send the expected orderRevision. On HTTP 409, read the current order and quote, compare currentRevision, then retry with refreshed data.',
+        description: buyerOperationDescription('The server calculates ticket subtotal, discount, fees, commission, and total in minor units. Send the expected orderRevision. On HTTP 409, read the current order, compare currentRevision, then retry with refreshed data. An invalid promotion is reported as a semantic 422 response.'),
         security: buyerSessionSecurity,
-        parameters: [purchaseSession, id, key], requestBody: request('BuyerQuoteRequest'),
-        responses: { ...success('BuyerQuote'), ...buyerMutationErrors },
+        parameters: [purchaseSession, id, key],
+        requestBody: buyerRequest('BuyerQuoteRequest', {
+          quote: { summary: 'Quote the current order with no promotion code', value: { apiVersion: 'v2', orderRevision: 8 } },
+          quoteWithPromotion: { summary: 'Quote the order with a promotion code', value: { apiVersion: 'v2', orderRevision: 8, promoCode: 'AUTUMN10' } },
+        }),
+        responses: {
+          ...buyerSuccessResponse('BuyerQuote', '200', 'authoritativeQuote', 'Server-calculated quote in integer minor units', buyerQuoteExample),
+          ...buyerErrors('400', '401', '403', '404', '409', '410', '422', '429', '503', {
+            '409': ['revisionConflict', 'idempotencyConflict'], '410': ['sessionExpired', 'holdExpired'],
+            '422': ['invalidPromo'],
+          }),
+        },
       },
     },
     '/api/v2/buyer/orders/{id}/checkout': {
       post: {
         operationId: 'checkoutBuyerOrder',
         summary: 'Accept a current quote and begin server-selected payment',
-        description: 'Order revision increments when a quote is accepted and on every checkout, payment, or order state change. Reads do not mutate revision. On HTTP 409, resume the current session and read the order, refresh against currentRevision, and retry the intended action only after comparing state.',
+        description: buyerOperationDescription('Send both the expected quoteRevision and orderRevision. The backend validates the active hold, contact and verification requirements, accepts the quote, and creates or reuses one payment attempt. Order revision increments when a quote is accepted and on each checkout, payment, or order state change. Reads do not mutate revision. On HTTP 409, resume the session, read the order, compare currentRevision, then retry only after reconciling state. Inventory lease duration during external payment and treatment of a provider callback arriving after expiry remain backend integration decisions.'),
         security: buyerSessionSecurity,
-        parameters: [purchaseSession, id, key], requestBody: request('BuyerCheckoutRequest'),
-        responses: { ...success('BuyerCheckoutResult'), ...buyerMutationErrors },
+        parameters: [purchaseSession, id, key],
+        requestBody: buyerRequest('BuyerCheckoutRequest', {
+          checkout: { summary: 'Accept the current quote and begin payment', value: { apiVersion: 'v2', quoteId: 'quote-31', quoteRevision: 2, orderRevision: 8 } },
+        }),
+        responses: {
+          ...buyerSuccessResponse('BuyerCheckoutResult', '200', 'paidDeliveryPending', 'Payment succeeded; tickets are still being issued asynchronously', buyerPaidCheckoutExample),
+          ...buyerErrors('400', '401', '403', '404', '409', '410', '422', '429', '503', {
+            '409': ['revisionConflict', 'idempotencyConflict', 'priceChanged', 'layoutChanged', 'availabilityConflict'],
+            '410': ['sessionExpired', 'holdExpired', 'quoteExpired'], '422': ['verificationRequired', 'paymentFailed'],
+          }),
+        },
       },
     },
-    '/api/v2/buyer/tickets': {
+    '/api/v2/buyer/orders/{id}/tickets': {
       get: {
-        operationId: 'listBuyerTickets',
-        summary: 'List tickets owned by the buyer session',
-        description: 'Ticket delivery may be asynchronous. Ticket open URLs are owner-only and expire at the timestamp returned with each URL.',
+        operationId: 'listBuyerOrderTickets',
+        summary: 'List tickets issued or pending for an order',
+        description: buyerOperationDescription('Returns only tickets belonging to this session’s order. Ticket delivery can remain pending after a successful payment. Ticket open URLs are owner-only and expire at the timestamp returned with each URL.'),
         security: buyerSessionSecurity,
-        parameters: [purchaseSession],
-        responses: { ...success('BuyerTicketList'), ...buyerReadErrors },
+        parameters: [purchaseSession, id],
+        responses: {
+          ...buyerSuccessResponse('BuyerTicketList', '200', 'ticketDeliveryPending', 'Payment has completed but ticket delivery is still pending', {
+            apiVersion: 'v2', items: [{
+              apiVersion: 'v2', ticketId: 'ticket-6', orderId: 'order-88', occurrenceId: 'concert-2026-10-28-evening',
+              displayLabels: { eventTitle: 'Autumn Chamber Orchestra', occurrenceTitle: '28 October, 19:00', seat: 'A12' },
+              deliveryStatus: 'pending', open: null,
+            }],
+          }),
+          ...buyerErrors('401', '403', '404', '410', '429', '503', { '410': ['sessionExpired'], '503': ['serviceUnavailableRead'] }),
+        },
       },
     },
   },
@@ -570,7 +920,7 @@ export const openApiDocument = {
       },
       IdempotencyKey: {
         name: 'Idempotency-Key', in: 'header', required: true,
-        description: 'Stable for one logical mutation; backend scopes it to caller and route.',
+        description: 'Stable for one logical mutation; the backend scopes it to caller and route, stores the original response, and returns that same response for a retry with the same body. Reusing the key with a different body returns HTTP 409. After an uncertain timeout or client abort, retry the exact body with the same key.',
         schema: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._:-]+$' },
       },
     },
@@ -605,6 +955,9 @@ export const openApiDocument = {
       AssetUploadIntent: z.toJSONSchema(apiAssetUploadIntentSchema),
       Asset: z.toJSONSchema(apiAssetSchema),
       BuyerSelection: z.toJSONSchema(buyerHoldRequestSchema.shape.selection.element),
+      BuyerAvailability: z.toJSONSchema(buyerAvailabilitySchema),
+      BuyerAvailabilityChanges: z.toJSONSchema(buyerAvailabilityChangesSchema),
+      BuyerPrices: z.toJSONSchema(buyerPricesSchema),
       BuyerOccurrenceSummary: z.toJSONSchema(buyerOccurrenceListSchema.shape.items.element),
       BuyerOccurrenceList: z.toJSONSchema(buyerOccurrenceListSchema),
       BuyerLineItem: z.toJSONSchema(buyerHoldSchema.shape.lineItems.element),

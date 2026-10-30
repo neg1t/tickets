@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { hallLayoutDraftSchema, layoutSnapshotSchema } from '@hall-platform/domain';
+import { hallLayoutDraftSchema, layoutSnapshotSchema, seatStatusSchema } from '@hall-platform/domain';
 
 export const buyerApiVersionSchema = z.literal('v2');
 
@@ -100,6 +100,66 @@ export const buyerOccurrenceContextSchema = z.strictObject({
   });
 });
 export type BuyerOccurrenceContext = z.infer<typeof buyerOccurrenceContextSchema>;
+
+const buyerZoneAvailabilitySchema = z.strictObject({
+  available: revisionSchema,
+  maxPerOrder: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+});
+const buyerAvailabilityDeltaSchema = z.strictObject({
+  baseRevision: revisionSchema,
+  revision: revisionSchema,
+  seats: z.record(idSchema, seatStatusSchema.nullable()).optional(),
+  zones: z.record(idSchema, buyerZoneAvailabilitySchema.nullable()).optional(),
+}).refine(({ baseRevision, revision }) => revision > baseRevision, {
+  path: ['revision'], message: 'Availability delta revision must advance its base revision',
+});
+
+export const buyerAvailabilitySchema = z.strictObject({
+  apiVersion: buyerApiVersionSchema,
+  occurrenceId: idSchema,
+  layoutVersionId: idSchema,
+  revision: revisionSchema,
+  serverTime: dateTimeSchema,
+  seats: z.record(idSchema, seatStatusSchema),
+  zones: z.record(idSchema, buyerZoneAvailabilitySchema),
+});
+export type BuyerAvailability = z.infer<typeof buyerAvailabilitySchema>;
+
+export const buyerAvailabilityChangesSchema = z.strictObject({
+  apiVersion: buyerApiVersionSchema,
+  occurrenceId: idSchema,
+  layoutVersionId: idSchema,
+  sinceRevision: revisionSchema,
+  currentRevision: revisionSchema,
+  serverTime: dateTimeSchema,
+  resyncRequired: z.boolean(),
+  changes: z.array(buyerAvailabilityDeltaSchema),
+}).refine(({ sinceRevision, currentRevision, resyncRequired, changes }) => {
+  if (currentRevision < sinceRevision) return false;
+  if (resyncRequired) return changes.length === 0;
+  if (currentRevision === sinceRevision) return changes.length === 0;
+  const firstChange = changes[0];
+  const lastChange = changes.at(-1);
+  if (!firstChange || !lastChange || firstChange.baseRevision !== sinceRevision) return false;
+  return changes.every((change, index) => index === 0 || change.baseRevision === changes[index - 1]?.revision) &&
+    lastChange.revision === currentRevision;
+}, { message: 'Availability deltas must be contiguous, or an explicit resync must contain no deltas' });
+export type BuyerAvailabilityChanges = z.infer<typeof buyerAvailabilityChangesSchema>;
+
+const buyerPriceSchema = z.strictObject({
+  amountMinor: minorAmountSchema,
+  category: z.string().min(1).optional(),
+});
+export const buyerPricesSchema = z.strictObject({
+  apiVersion: buyerApiVersionSchema,
+  occurrenceId: idSchema,
+  layoutVersionId: idSchema,
+  pricingRevision: revisionSchema,
+  currency: currencySchema,
+  seats: z.record(idSchema, buyerPriceSchema),
+  zones: z.record(idSchema, buyerPriceSchema),
+});
+export type BuyerPrices = z.infer<typeof buyerPricesSchema>;
 
 export const buyerHoldRequestSchema = z.strictObject({
   apiVersion: buyerApiVersionSchema,
