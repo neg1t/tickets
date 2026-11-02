@@ -44,6 +44,8 @@ export type SeatMapProps = PropsWithChildren<{
   readonly focusedZoneId?: string | null;
   readonly locale?: string;
   readonly height?: number;
+  readonly showReset?: boolean;
+  readonly showStatus?: boolean;
   readonly rendererPreference?: RendererPreference;
   readonly webglEnabled?: boolean;
   /** undefined means a full availability snapshot; an empty list means no seat updates. */
@@ -63,6 +65,8 @@ export function SeatMap({
   focusedZoneId = null,
   locale = 'ru-RU',
   height = 400,
+  showReset = true,
+  showStatus = true,
   rendererPreference = 'auto',
   webglEnabled = false,
   updatedSeatIds,
@@ -146,6 +150,8 @@ export function SeatMap({
         webglEnabled={webglEnabled}
         {...(onError ? { onRendererError: onError } : {})}
         stageId={`seat-stage-${instanceId}`}
+        showReset={showReset}
+        showStatus={showStatus}
         fitKey={`${snapshot.id}:${focusedFloorId}:${focusedZoneId ?? ''}`}
         focusedFloorId={focusedFloorId}
         {...(focusedZoneId ? { focusedZoneId } : {})}

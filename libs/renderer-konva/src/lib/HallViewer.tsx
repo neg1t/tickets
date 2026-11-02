@@ -134,6 +134,10 @@ export type HallViewerProps = {
   readonly snapshot: LayoutSnapshot;
   readonly hallName: string;
   readonly height?: number;
+  /** Shows the world-scale reset control in the viewer toolbar. */
+  readonly showReset?: boolean;
+  /** Shows the renderer status row with scale and selected targets. */
+  readonly showStatus?: boolean;
   readonly fitKey?: string;
   readonly stageId?: string;
   readonly labels?: Partial<HallViewerLabels>;
@@ -306,6 +310,8 @@ export function HallViewer(props: HallViewerProps) {
     snapshot,
     hallName,
     height = 500,
+    showReset = true,
+    showStatus = true,
     fitKey,
     stageId = 'hall-stage',
     labels,
@@ -1796,9 +1802,11 @@ export function HallViewer(props: HallViewerProps) {
           {ui.fit}
         </button>
 
-        <button type="button" onClick={handleReset}>
-          {ui.reset}
-        </button>
+        {showReset && (
+          <button type="button" onClick={handleReset}>
+            {ui.reset}
+          </button>
+        )}
 
         <button
           type="button"
@@ -2232,16 +2240,18 @@ export function HallViewer(props: HallViewerProps) {
         )}
       </div>
 
-      <div className="hall-viewer-status" aria-live="polite">
-        <span>
-          {ui.scale}: {Math.round(viewport.scale * 100)}%
-        </span>
+      {showStatus && (
+        <div className="hall-viewer-status" aria-live="polite">
+          <span>
+            {ui.scale}: {Math.round(viewport.scale * 100)}%
+          </span>
 
-        <span>
-          {ui.selected}: {selection.length}
-          {selectedText ? ` — ${selectedText}` : ''}
-        </span>
-      </div>
+          <span>
+            {ui.selected}: {selection.length}
+            {selectedText ? ` — ${selectedText}` : ''}
+          </span>
+        </div>
+      )}
     </section>
   );
 }

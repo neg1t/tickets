@@ -277,6 +277,8 @@ function InteractiveSelectionBody({
               focusedFloorId={activeFloorId}
               locale={purchase.locale}
               height={mapHeight}
+              showReset={false}
+              showStatus={false}
               onSeatClick={selectionState.toggleSeat}
               onZoneClick={(zoneId) => {
                 if (!generalAdmissionZoneIds.has(zoneId)) return;
