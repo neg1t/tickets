@@ -54,6 +54,10 @@ import {
   buyerSessionResumeSchema,
   buyerTicketListSchema,
 } from './buyer.js';
+import {
+  buyerGeometryChunkSchema,
+  buyerGeometryManifestSchema,
+} from './buyerGeometry.js';
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
 const json = (name: string) => ({
@@ -337,6 +341,27 @@ const pricingConflictExamples = {
       issues: [{ severity: 'error', code: 'not_ga_zone', message: 'Zone is not GA.', targetId: 'zone-parterre' }],
     },
   },
+} as const;
+const buyerGeometryManifestExample = {
+  apiVersion: 'v2', occurrenceId: 'concert-2026-10-28', layoutVersionId: 'hall-layout-v3', schemaVersion: 1,
+  bounds: { minX: 0, minY: 0, maxX: 1200, maxY: 800 },
+  overview: {
+    bounds: { minX: 0, minY: 0, maxX: 1200, maxY: 800 },
+    floors: [{ id: 'floor-main', name: 'Main floor' }],
+    zones: [],
+  },
+  blocks: [{
+    id: 'block-main-01', floorId: 'floor-main', bounds: { minX: 0, minY: 0, maxX: 600, maxY: 400 },
+    asset: {
+      url: 'https://geometry.example.test/layouts/hall-layout-v3/blocks/block-main-01.json',
+      byteLength: 4096,
+      sha256: `sha256:${'a'.repeat(64)}`,
+    },
+  }],
+} as const;
+const buyerGeometryChunkExample = {
+  apiVersion: 'v2', occurrenceId: 'concert-2026-10-28', layoutVersionId: 'hall-layout-v3',
+  blockId: 'block-main-01', floorId: 'floor-main', rows: [], seats: [], tables: [], decorations: [],
 } as const;
 const emptySuccess = { '204': { description: 'Completed without a response body' } };
 
@@ -623,6 +648,31 @@ export const openApiDocument = {
         responses: {
           ...buyerSuccessResponse('BuyerPublicLayout', '200', 'publicLayout', 'Public projection of the selected layout version', buyerPublicLayoutExample),
           ...buyerErrors('404', '429', '503', { '503': ['serviceUnavailableRead'] }),
+        },
+      },
+    },
+    '/api/v2/buyer/occurrences/{id}/geometry-manifest': {
+      get: {
+        operationId: 'getBuyerGeometryManifest', summary: 'Read the immutable occurrence geometry manifest',
+        description: buyerOperationDescription('Returns immutable geometry metadata and a compact overview for the occurrence’s layout version. Availability and prices are separate revisioned resources. Each versioned block URL describes a disjoint geometry partition; the same seat ID must belong to exactly one block. Small halls may continue to use the complete seat-map operation.'),
+        security: [], parameters: [id],
+        responses: {
+          ...buyerSuccessResponse('BuyerGeometryManifest', '200', 'geometryManifest', 'Overview and versioned geometry block manifest', buyerGeometryManifestExample),
+          ...buyerErrors('404', '409', '429', '503', { '503': ['serviceUnavailableRead'] }),
+        },
+      },
+    },
+    '/api/v2/buyer/geometry/{layoutVersionId}/blocks/{blockId}': {
+      get: {
+        operationId: 'getBuyerGeometryBlock', summary: 'Read an immutable public geometry block',
+        description: buyerOperationDescription('Returns a hash-verified, occurrence-versioned layout fragment with no editor backgrounds or assets. Rows and tables referenced by seats in this fragment are owned by the same block.'),
+        security: [], parameters: [
+          { name: 'layoutVersionId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'blockId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          ...buyerSuccessResponse('BuyerGeometryChunk', '200', 'geometryBlock', 'Immutable public layout fragment', buyerGeometryChunkExample),
+          ...buyerErrors('404', '410', '429', '503', { '503': ['serviceUnavailableRead'] }),
         },
       },
     },
@@ -990,6 +1040,8 @@ export const openApiDocument = {
       BuyerSessionCreateRequest: z.toJSONSchema(buyerSessionCreateRequestSchema),
       BuyerSessionCreateResult: z.toJSONSchema(buyerSessionCreateResultSchema),
       BuyerPublicLayout: z.toJSONSchema(buyerPublicLayoutSchema),
+      BuyerGeometryManifest: z.toJSONSchema(buyerGeometryManifestSchema),
+      BuyerGeometryChunk: z.toJSONSchema(buyerGeometryChunkSchema),
       BuyerError: z.toJSONSchema(buyerErrorSchema),
       BuyerCheckoutResult: z.toJSONSchema(buyerCheckoutResultSchema),
     },

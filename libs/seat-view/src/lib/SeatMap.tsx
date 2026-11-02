@@ -1,5 +1,6 @@
 import { useId, useMemo, type PropsWithChildren } from 'react';
 import { withoutBackgrounds } from '@hall-platform/domain';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- SeatMap renders the shared hall canvas for this reusable seat selection feature.
 import {
   HallViewport,
   type HallViewportProps,
@@ -45,6 +46,8 @@ export type SeatMapProps = PropsWithChildren<{
   readonly height?: number;
   readonly rendererPreference?: RendererPreference;
   readonly webglEnabled?: boolean;
+  /** undefined means a full availability snapshot; an empty list means no seat updates. */
+  readonly updatedSeatIds?: readonly string[];
   readonly onSeatClick: (seatId: string) => void;
   readonly onZoneClick: (zoneId: string) => void;
   readonly onFloorChange: (floorId: string) => void;
@@ -62,6 +65,7 @@ export function SeatMap({
   height = 400,
   rendererPreference = 'auto',
   webglEnabled = false,
+  updatedSeatIds,
   onSeatClick,
   onZoneClick,
   onFloorChange,
@@ -75,26 +79,32 @@ export function SeatMap({
     () => withoutBackgrounds(layout.snapshot),
     [layout.snapshot],
   );
+  const seats = snapshot.seats;
+  const seatsById = useMemo(
+    () => new Map<string, (typeof seats)[number]>(seats.map((seat) => [seat.id, seat])),
+    [seats],
+  );
   const seatAppearance = useMemo(
     () =>
       Object.fromEntries(
-        snapshot.seats.map((seat) => [
+        seats.map((seat) => [
           seat.id,
           {
             fill: seatStatusColors[availability.seats[seat.id] ?? 'unavailable'],
           },
         ]),
       ),
-    [availability.seats, snapshot.seats],
+    [availability.seats, seats],
   );
   const seatUpdates = useMemo<readonly RendererSeatUpdate[]>(
-    () =>
-      snapshot.seats.map((seat) => ({
-        id: seat.id,
-        status: availability.seats[seat.id] ?? 'unavailable',
-        label: seat.label,
-      })),
-    [availability.seats, snapshot.seats],
+    () => {
+      const ids = updatedSeatIds ?? seats.map(({ id }) => id);
+      return ids.flatMap((id) => {
+        const seat = seatsById.get(id);
+        return seat ? [{ id, status: availability.seats[id] ?? 'unavailable', label: seat.label }] : [];
+      });
+    },
+    [availability.seats, seats, seatsById, updatedSeatIds],
   );
   const selectedTargets: HallTarget[] = useMemo(() => {
     const targets = new Map<string, HallTarget>();

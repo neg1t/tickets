@@ -15,3 +15,6 @@ export type {
 } from './lib/useSeatSelection.js';
 export { applySeatAvailabilityDeltas } from './lib/availabilityDeltas.js';
 export type { SeatAvailabilityDeltaResult } from './lib/availabilityDeltas.js';
+export { BuyerGeometryLoader } from './lib/geometryLoader.js';
+export type { BuyerGeometrySource, GeometryViewportResult } from './lib/geometryLoader.js';
+export { GeometryByteCache } from './lib/geometryCache.js';

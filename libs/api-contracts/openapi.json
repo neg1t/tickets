@@ -2649,6 +2649,300 @@
         }
       }
     },
+    "/api/v2/buyer/occurrences/{id}/geometry-manifest": {
+      "get": {
+        "operationId": "getBuyerGeometryManifest",
+        "summary": "Read the immutable occurrence geometry manifest",
+        "description": "Returns immutable geometry metadata and a compact overview for the occurrence’s layout version. Availability and prices are separate revisioned resources. Each versioned block URL describes a disjoint geometry partition; the same seat ID must belong to exactly one block. Small halls may continue to use the complete seat-map operation.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Overview and versioned geometry block manifest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerGeometryManifest"
+                },
+                "examples": {
+                  "geometryManifest": {
+                    "summary": "Overview and versioned geometry block manifest",
+                    "value": {
+                      "apiVersion": "v2",
+                      "occurrenceId": "concert-2026-10-28",
+                      "layoutVersionId": "hall-layout-v3",
+                      "schemaVersion": 1,
+                      "bounds": {
+                        "minX": 0,
+                        "minY": 0,
+                        "maxX": 1200,
+                        "maxY": 800
+                      },
+                      "overview": {
+                        "bounds": {
+                          "minX": 0,
+                          "minY": 0,
+                          "maxX": 1200,
+                          "maxY": 800
+                        },
+                        "floors": [
+                          {
+                            "id": "floor-main",
+                            "name": "Main floor"
+                          }
+                        ],
+                        "zones": []
+                      },
+                      "blocks": [
+                        {
+                          "id": "block-main-01",
+                          "floorId": "floor-main",
+                          "bounds": {
+                            "minX": 0,
+                            "minY": 0,
+                            "maxX": 600,
+                            "maxY": 400
+                          },
+                          "asset": {
+                            "url": "https://geometry.example.test/layouts/hall-layout-v3/blocks/block-main-01.json",
+                            "byteLength": 4096,
+                            "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The supplied revision is stale or the Idempotency-Key conflicts with a prior request."
+          },
+          "429": {
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary service failure for this read request. Retry the read request after Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailableRead": {
+                    "summary": "Temporary read failure",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The read could not be completed. Retry the read request after the stated delay.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/buyer/geometry/{layoutVersionId}/blocks/{blockId}": {
+      "get": {
+        "operationId": "getBuyerGeometryBlock",
+        "summary": "Read an immutable public geometry block",
+        "description": "Returns a hash-verified, occurrence-versioned layout fragment with no editor backgrounds or assets. Rows and tables referenced by seats in this fragment are owned by the same block.\n\nThe backend owns durable purchase state for buyer sessions, contact verification, holds, orders, quotes, payment attempts, tickets, and idempotency results. Inventory and purchase-state changes are committed by the backend. Seat allocations and general-admission capacity checks are atomic, expired holds cannot be confirmed, provider callbacks are idempotent, and checkout reuses the payment attempt for the same logical operation. Physical tables and indexes remain backend implementation details. An HTTP timeout or AbortSignal abort does not cancel a mutation already accepted by the server; after an uncertain outcome, retry the exact body with the same Idempotency-Key and resume the session.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "layoutVersionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "blockId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable public layout fragment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerGeometryChunk"
+                },
+                "examples": {
+                  "geometryBlock": {
+                    "summary": "Immutable public layout fragment",
+                    "value": {
+                      "apiVersion": "v2",
+                      "occurrenceId": "concert-2026-10-28",
+                      "layoutVersionId": "hall-layout-v3",
+                      "blockId": "block-main-01",
+                      "floorId": "floor-main",
+                      "rows": [],
+                      "seats": [],
+                      "tables": [],
+                      "decorations": []
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested occurrence, session resource, hold, challenge, quote, or order does not exist or is not visible.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "notFound": {
+                    "summary": "Buyer resource not found",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "not_found",
+                      "message": "The requested buyer resource was not found."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The selected buyer session, hold, quote, or verification challenge has expired."
+          },
+          "429": {
+            "description": "Too many requests. The BuyerError.retryAfterMs field states the minimum delay before retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "rateLimited": {
+                    "summary": "Retry after the supplied delay",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "rate_limited",
+                      "message": "Too many requests. Retry after the stated delay.",
+                      "retryAfterMs": 30000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum wait before retry, in seconds; the body also provides retryAfterMs.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary service failure for this read request. Retry the read request after Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerError"
+                },
+                "examples": {
+                  "serviceUnavailableRead": {
+                    "summary": "Temporary read failure",
+                    "value": {
+                      "apiVersion": "v2",
+                      "code": "service_unavailable",
+                      "message": "The read could not be completed. Retry the read request after the stated delay.",
+                      "retryAfterMs": 5000
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Optional minimum wait before retry, in seconds.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/buyer/occurrences/{id}/availability": {
       "get": {
         "operationId": "getBuyerAvailability",
@@ -23673,6 +23967,1205 @@
           "apiVersion",
           "hallName",
           "snapshot"
+        ],
+        "additionalProperties": false
+      },
+      "BuyerGeometryManifest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "apiVersion": {
+            "type": "string",
+            "const": "v2"
+          },
+          "occurrenceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "layoutVersionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "bounds": {
+            "type": "object",
+            "properties": {
+              "minX": {
+                "type": "number"
+              },
+              "minY": {
+                "type": "number"
+              },
+              "maxX": {
+                "type": "number"
+              },
+              "maxY": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "minX",
+              "minY",
+              "maxX",
+              "maxY"
+            ],
+            "additionalProperties": false
+          },
+          "overview": {
+            "type": "object",
+            "properties": {
+              "bounds": {
+                "type": "object",
+                "properties": {
+                  "minX": {
+                    "type": "number"
+                  },
+                  "minY": {
+                    "type": "number"
+                  },
+                  "maxX": {
+                    "type": "number"
+                  },
+                  "maxY": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "minX",
+                  "minY",
+                  "maxX",
+                  "maxY"
+                ],
+                "additionalProperties": false
+              },
+              "floors": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "zones": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "floorId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "default": "seated",
+                      "type": "string",
+                      "enum": [
+                        "seated",
+                        "ga"
+                      ]
+                    },
+                    "capacity": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "polygon": {
+                      "minItems": 3,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "number"
+                          },
+                          "y": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "floorId",
+                    "name",
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "bounds",
+              "floors",
+              "zones"
+            ],
+            "additionalProperties": false
+          },
+          "blocks": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "floorId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "sectorId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "bounds": {
+                  "type": "object",
+                  "properties": {
+                    "minX": {
+                      "type": "number"
+                    },
+                    "minY": {
+                      "type": "number"
+                    },
+                    "maxX": {
+                      "type": "number"
+                    },
+                    "maxY": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "minX",
+                    "minY",
+                    "maxX",
+                    "maxY"
+                  ],
+                  "additionalProperties": false
+                },
+                "asset": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "byteLength": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 33554432
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^sha256:[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "url",
+                    "byteLength",
+                    "sha256"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "floorId",
+                "bounds",
+                "asset"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "apiVersion",
+          "occurrenceId",
+          "layoutVersionId",
+          "schemaVersion",
+          "bounds",
+          "overview",
+          "blocks"
+        ],
+        "additionalProperties": false
+      },
+      "BuyerGeometryChunk": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "apiVersion": {
+            "type": "string",
+            "const": "v2"
+          },
+          "occurrenceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "layoutVersionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "blockId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "floorId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "floorId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "zoneId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "curve": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "line"
+                        },
+                        "start": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number"
+                            },
+                            "y": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "end": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number"
+                            },
+                            "y": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "start",
+                        "end"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "arc"
+                        },
+                        "center": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number"
+                            },
+                            "y": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "radius": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "startAngle": {
+                          "type": "number"
+                        },
+                        "endAngle": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "center",
+                        "radius",
+                        "startAngle",
+                        "endAngle"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "bezier"
+                        },
+                        "p0": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number"
+                            },
+                            "y": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "p1": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number"
+                            },
+                            "y": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "p2": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number"
+                            },
+                            "y": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "p3": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number"
+                            },
+                            "y": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "p0",
+                        "p1",
+                        "p2",
+                        "p3"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "polyline"
+                        },
+                        "points": {
+                          "minItems": 2,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "x": {
+                                "type": "number"
+                              },
+                              "y": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "x",
+                              "y"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "points"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "generation": {
+                  "type": "object",
+                  "properties": {
+                    "distribution": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "even"
+                            },
+                            "count": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 500
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "count"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "fixed"
+                            },
+                            "count": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 500
+                            },
+                            "step": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "count",
+                            "step"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "startInset": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "endInset": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "gaps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "afterSlot": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "length": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          }
+                        },
+                        "required": [
+                          "afterSlot",
+                          "length"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "skippedSlots": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "numbering": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "direction": {
+                          "type": "string",
+                          "enum": [
+                            "forward",
+                            "reverse"
+                          ]
+                        },
+                        "skippedNumbers": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "adjustments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "slotIndex": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "offset": {
+                            "type": "object",
+                            "properties": {
+                              "x": {
+                                "type": "number"
+                              },
+                              "y": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "x",
+                              "y"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "rotationOffsetRadians": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "slotIndex"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "distribution"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "floorId",
+                "name",
+                "curve"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "seats": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "floorId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "zoneId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "position": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y"
+                  ],
+                  "additionalProperties": false
+                },
+                "placement": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "standalone"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "row"
+                        },
+                        "rowId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "rowId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "table"
+                        },
+                        "tableId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "tableId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "slotKey": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "visualKind": {
+                  "type": "string",
+                  "enum": [
+                    "chair",
+                    "armchair",
+                    "wheelchairBay"
+                  ]
+                },
+                "rotationRadians": {
+                  "type": "number"
+                },
+                "manual": {
+                  "type": "object",
+                  "properties": {
+                    "offset": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number"
+                        },
+                        "y": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "rotationOffsetRadians": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "offset"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "floorId",
+                "label",
+                "position",
+                "placement"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "tables": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "floorId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "zoneId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "center": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y"
+                  ],
+                  "additionalProperties": false
+                },
+                "rotationRadians": {
+                  "type": "number"
+                },
+                "shape": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "circle"
+                        },
+                        "radius": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "seatCount": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "radius",
+                        "seatCount"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "rectangle"
+                        },
+                        "width": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "height": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "seatsPerSide": {
+                          "type": "object",
+                          "properties": {
+                            "top": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "right": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "bottom": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "left": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "top",
+                            "right",
+                            "bottom",
+                            "left"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "width",
+                        "height",
+                        "seatsPerSide"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "generation": {
+                  "type": "object",
+                  "properties": {
+                    "seatOffset": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "skippedSlotKeys": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "numbering": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "direction": {
+                          "type": "string",
+                          "enum": [
+                            "forward",
+                            "reverse"
+                          ]
+                        },
+                        "prefix": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "adjustments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "slotKey": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "offset": {
+                            "type": "object",
+                            "properties": {
+                              "x": {
+                                "type": "number"
+                              },
+                              "y": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "x",
+                              "y"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "facingOffsetRadians": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "slotKey"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "seatOffset"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "floorId",
+                "label",
+                "center",
+                "rotationRadians",
+                "shape"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "decorations": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "floorId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "stage"
+                    },
+                    "polygon": {
+                      "minItems": 3,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "number"
+                          },
+                          "y": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "floorId",
+                    "kind",
+                    "polygon"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "floorId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "obstacle"
+                    },
+                    "polygon": {
+                      "minItems": 3,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "number"
+                          },
+                          "y": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "floorId",
+                    "kind",
+                    "polygon"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "floorId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "label"
+                    },
+                    "position": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number"
+                        },
+                        "y": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "floorId",
+                    "kind",
+                    "position",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "apiVersion",
+          "occurrenceId",
+          "layoutVersionId",
+          "blockId",
+          "floorId",
+          "rows",
+          "seats",
+          "tables",
+          "decorations"
         ],
         "additionalProperties": false
       },

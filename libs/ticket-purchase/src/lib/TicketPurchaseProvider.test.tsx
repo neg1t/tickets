@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode, useEffect, useState } from 'react';
 import type { PurchaseDataSource } from './model/purchase.types.js';
 import {
   TicketPurchaseProvider,
@@ -26,6 +27,18 @@ function Probe({ label }: { readonly label: string }) {
         Tickets {label}
       </button>
     </section>
+  );
+}
+
+function ControllerProbe() {
+  const { controller } = useTicketPurchase();
+  const [status, setStatus] = useState(controller.getSnapshot().status);
+  useEffect(() => controller.subscribe(() => setStatus(controller.getSnapshot().status)), [controller]);
+  return (
+    <>
+      <output>{status}</output>
+      <button type="button" onClick={() => void controller.start('event-1', 'occ-1')}>Start controller</button>
+    </>
   );
 }
 
@@ -76,5 +89,27 @@ describe('TicketPurchaseProvider', () => {
         </TicketPurchaseProvider>,
       ),
     ).toThrow(/data source must be configured/i);
+  });
+
+  it('keeps the controller usable through React StrictMode effect replay', async () => {
+    const strictModeDataSource = {
+      listOccurrences: vi.fn().mockRejectedValue(new Error('Offline')),
+      createSession: vi.fn().mockResolvedValue({
+        apiVersion: 'v2',
+        purchaseSessionId: 'session-1',
+        sessionCredential: 'secret',
+        expiresAt: '2026-10-31T12:00:00Z',
+      }),
+    } as unknown as PurchaseDataSource;
+    render(
+      <StrictMode>
+        <TicketPurchaseProvider dataSource={strictModeDataSource}>
+          <ControllerProbe />
+        </TicketPurchaseProvider>
+      </StrictMode>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start controller' }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('error'));
   });
 });

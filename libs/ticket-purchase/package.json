@@ -30,6 +30,7 @@
     "@hall-platform/api-axios": "workspace:*",
     "@hall-platform/api-contracts": "workspace:*",
     "@hall-platform/domain": "workspace:*",
+    "@hall-platform/seat-view": "workspace:*",
     "@hall-platform/ui": "workspace:*"
   },
   "peerDependencies": {

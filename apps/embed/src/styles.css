@@ -19,7 +19,34 @@
 
 body {
   min-width: 320px;
+  min-height: 100dvh;
   margin: 0;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+.embed-handshake {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  min-height: 100dvh;
+  padding: max(28px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(28px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  align-content: center;
+  background: #fff;
+  color: #323544;
+}
+
+.embed-handshake h1,
+.embed-handshake p {
+  max-width: 520px;
+  margin: 0;
+}
+
+.embed-handshake p {
+  color: #717278;
+  line-height: 1.5;
 }
 
 .embed-host {

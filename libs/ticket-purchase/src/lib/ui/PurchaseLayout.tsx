@@ -15,6 +15,7 @@ export type PurchaseLayoutProps = PropsWithChildren<{
   readonly className?: string;
   /** Step-specific selectors/countdown rendered before the responsive summary. */
   readonly headerContent?: ReactNode;
+  readonly backAction?: Readonly<{ label: string; onClick: () => void }>;
 }>;
 
 function themeStyle(theme: ReturnType<typeof useTicketPurchase>['theme']): CSSProperties {
@@ -36,6 +37,7 @@ export function PurchaseLayout({
   error = null,
   className = '',
   headerContent,
+  backAction,
   children,
 }: PurchaseLayoutProps) {
   const purchase = useTicketPurchase();
@@ -53,11 +55,11 @@ export function PurchaseLayout({
           <Button
             className="tp-layout__back"
             tone="quiet"
-            onClick={purchase.hostActions.onBack}
-            disabled={!purchase.hostActions.onBack}
+            onClick={backAction?.onClick ?? purchase.hostActions.onBack}
+            disabled={!backAction && !purchase.hostActions.onBack}
           >
             <img className="tp-layout__back-icon" src={backArrowUrl} alt="" aria-hidden="true" />
-            {messages.backToEvent}
+            {backAction?.label ?? messages.backToEvent}
           </Button>
           <h2 className="tp-layout__title">{messages.steps[purchase.step]}</h2>
           {headerContent && (

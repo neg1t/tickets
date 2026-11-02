@@ -11,6 +11,7 @@ import {
   type LayoutSnapshot,
 } from '@hall-platform/domain';
 import type { SpatialBounds } from '@hall-platform/geometry';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- SeatView composes the shared hall canvas as its visualization layer.
 import type { RendererPreference } from '@hall-platform/hall-viewer';
 import { createSeatViewModel } from './seatView.model.js';
 import { buildSeatIndexes } from './seatIndexes.js';

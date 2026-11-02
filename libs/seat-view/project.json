@@ -3,6 +3,6 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "libs/seat-view/src",
   "projectType": "library",
-  "tags": ["scope:shared", "layer:pages", "type:ui"],
+  "tags": ["scope:shared", "layer:features", "type:ui"],
   "targets": {}
 }

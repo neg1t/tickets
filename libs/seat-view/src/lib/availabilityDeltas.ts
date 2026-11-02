@@ -40,7 +40,10 @@ export function applySeatAvailabilityDeltas(
       resyncRequired: true,
     };
 
-  let availability = snapshot;
+  let seats = snapshot.seats;
+  let mutableSeats: Record<string, SeatStatus> | null = null;
+  let zones = snapshot.zones;
+  let mutableZones: Record<string, { readonly available: number; readonly maxPerOrder?: number }> | null = null;
   let revision = snapshotRevision;
   for (const delta of deltas) {
     if (
@@ -61,25 +64,33 @@ export function applySeatAvailabilityDeltas(
         resyncRequired: true,
       };
 
-    const seats = { ...availability.seats };
-    for (const [id, status] of Object.entries(delta.seats ?? {})) {
-      if (status === null) delete seats[id];
-      else seats[id] = status;
+    if (delta.seats && Object.keys(delta.seats).length > 0) {
+      if (!mutableSeats) {
+        mutableSeats = { ...seats };
+        seats = mutableSeats;
+      }
+      for (const [id, status] of Object.entries(delta.seats)) {
+        if (status === null) delete mutableSeats[id];
+        else mutableSeats[id] = status;
+      }
     }
 
-    const zones = { ...availability.zones };
-    for (const [id, stock] of Object.entries(delta.zones ?? {})) {
-      if (stock === null) delete zones[id];
-      else zones[id] = stock;
+    if (delta.zones && Object.keys(delta.zones).length > 0) {
+      if (!mutableZones) {
+        mutableZones = { ...(zones ?? {}) };
+        zones = mutableZones;
+      }
+      for (const [id, stock] of Object.entries(delta.zones)) {
+        if (stock === null) delete mutableZones[id];
+        else mutableZones[id] = stock;
+      }
     }
-    availability = {
-      seats,
-      ...(availability.zones !== undefined || delta.zones !== undefined
-        ? { zones }
-        : {}),
-    };
     revision = delta.revision;
   }
 
-  return { availability, revision, resyncRequired: false };
+  return {
+    availability: { seats, ...(zones !== undefined ? { zones } : {}) },
+    revision,
+    resyncRequired: false,
+  };
 }

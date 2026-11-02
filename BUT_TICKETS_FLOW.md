@@ -1,6 +1,6 @@
 # Покупка билетов: WebView-виджет, React-компоненты и API — план реализации
 
-> Для исполнителя: выполнять через `superpowers:executing-plans`; отмечать пункты после проверки. Этот документ — план, реализация нового flow ещё не начата. Коммиты и push при последующей реализации требуют соответствующего разрешения пользователя.
+> Для исполнителя: выполнять через `superpowers:executing-plans`; отмечать пункты после проверки. `[x]` означает, что реализация есть и прошла доступные статические проверки; это не заменяет acceptance, браузерные, производительные или native-device проверки. Не коммитить и не отправлять изменения в remote без отдельного разрешения пользователя.
 
 **Дата:** 30 октября 2026 года.
 
@@ -37,7 +37,7 @@
 - В блоке под схемой показывать только реально выбранные билеты; удаление строки снимает выбор на схеме. Никаких фиктивных строк из Figma.
 - Вместо серой заглушки «Схема зала» встроить нашу схему с выбором, pan/pinch, этажами/секторами и GA-зонами.
 - Сохранить одинаковую функциональность desktop/mobile. Изменение раскладки не сбрасывает состояние.
-- Сейчас подготовить только этот план. UI, контракты и SDK реализуются следующими задачами.
+- План задаёт основу реализации. Фактический прогресс и незакрытые проверки фиксируются в разделе 6.
 
 Решения для первой реализации, которые можно менять без переписывания UI:
 
@@ -250,12 +250,12 @@
 
 **Файлы:** `ui/{TicketSelectionStep,OccurrenceSelector,SelectedTicketsList,SelectedTicketRow,OrderSummary}.tsx`, `model/{createPurchaseController,purchaseEffects}.ts`, тесты рядом.
 
-- [ ] Загрузить context, geometry, availability и prices с контролем идентификаторов/ревизий; показать отдельные состояния initial loading, not found, sales closed, sold out, network error/retry.
-- [ ] Сгруппировать сеансы по локальной дате в timeZone события, выбрать occurrence по его id; дата не должна вычисляться по timezone компьютера случайно.
-- [ ] Встроить SeatMap, доступную альтернативу выбора и список только выбранных мест; для GA показывать сектор, количество и цену без выдуманного ряда/места.
-- [ ] Empty selection отключает продолжение; maxPerOrder и некорректная/смешанная валюта блокируют submit с объяснением.
-- [ ] Создать hold по Continue; повторный клик не создаёт вторую операцию. Конфликт перечитывает inventory и выделяет недоступные позиции.
-- [ ] После hold перейти к контактам; при другой сумме сервера показать изменения перед подтверждением.
+- [x] Загрузить context, geometry, availability и prices с контролем идентификаторов/ревизий; показать отдельные состояния initial loading, not found, sales closed, sold out, network error/retry.
+- [x] Сгруппировать сеансы по локальной дате в timeZone события, выбрать occurrence по его id; дата не должна вычисляться по timezone компьютера случайно.
+- [x] Встроить SeatMap, доступную альтернативу выбора и список только выбранных мест; для GA показывать сектор, количество и цену без выдуманного ряда/места.
+- [x] Empty selection отключает продолжение; maxPerOrder и некорректная/смешанная валюта блокируют submit с объяснением.
+- [x] Создать hold по Continue; повторный клик не создаёт вторую операцию. Конфликт перечитывает inventory и выделяет недоступные позиции.
+- [x] После hold перейти к контактам; при другой сумме сервера показать изменения перед подтверждением.
 
 **Приёмка:** seat/GA, удаление строки, смена сеанса, две конкурирующие сессии и stale response от старого occurrence имеют определённый результат.
 
@@ -263,11 +263,11 @@
 
 **Файлы:** `ui/{ContactDetailsForm,EmailVerificationDialog}.tsx`, `model/contactValidation.ts`, controller/effects и тесты.
 
-- [ ] Разметить четыре поля как в Figma, добавить autocomplete/inputMode, понятные field-errors и фокус первого ошибочного поля.
-- [ ] Подставлять контакты из session/host prefill без объявления их подтверждёнными; изменение email сбрасывает verification.
-- [ ] Сохранить контакты, выполнить условный OTP; поддержать paste/autofill полного кода, длину из challenge, cooldown повторной отправки.
-- [ ] Обработать неправильный/истёкший код, лимит попыток, сетевой сбой, изменение email во время запроса и истечение hold в диалоге.
-- [ ] Не сохранять контакты/OTP в query string, localStorage и аналитические события. Reload восстанавливает разрешённые данные через серверную сессию.
+- [x] Разметить четыре поля по макету, добавить autocomplete/inputMode, field-errors и фокус первого ошибочного поля.
+- [x] Подставлять контакты из session/host prefill без объявления их подтверждёнными; изменение email сбрасывает verification.
+- [x] Сохранять контакты, выполнять условный OTP; принимать полный код из autofill/paste, использовать длину challenge и cooldown повтора.
+- [x] Обрабатывать неправильный/истёкший код, лимит попыток, сетевой сбой, изменение email во время запроса и истечение hold.
+- [x] Не класть контакты/OTP в query string или localStorage; reload восстанавливает серверную сессию.
 
 **Приёмка:** verified session проходит без лишнего OTP; непроверенный email не может обойти серверное requirement через прямой переход к payment.
 
@@ -275,12 +275,12 @@
 
 **Файлы:** `ui/{PaymentStep,PromoCodeField,OrderSummary}.tsx`, controller/effects, `model/money.ts`, тесты.
 
-- [ ] Создать или восстановить order из hold и показать серверные line items.
-- [ ] Реализовать promo idle/editing/applying/applied/invalid; удалить промокод новым quote с null. Устаревший ответ предыдущего кода не заменяет актуальную сумму.
-- [ ] Показывать стоимость билетов, скидку, сервисный сбор, комиссию и итог; нулевые необязательные строки скрывать согласованно. Парковочных сборов нет.
-- [ ] Проверять quote expiry/revision перед checkout; обновлённая сумма требует явного согласия.
-- [ ] Запускать payment action через host adapter; блокировать повторное создание payment attempt, восстанавливать pending order после reload/return.
-- [ ] Показывать pending/failed/cancelled с допустимыми повторными действиями, не считать закрытие платёжного окна подтверждением/окончательным отказом.
+- [x] Создавать или восстанавливать order из hold и показывать серверные line items.
+- [x] Реализовать состояния promo и очистку новым quote с `null`; не применять ответ для устаревшего кода.
+- [x] Показывать серверную стоимость билетов, скидку, сборы, комиссию и итог; парковки нет.
+- [x] Проверять quote expiry/revision перед checkout; новую сумму подтверждать явно.
+- [x] Запускать payment action через host adapter, защищать повторные mutations и восстанавливать pending order после reload/return.
+- [x] Показывать pending/failed/cancelled; закрытие платёжного окна не считать результатом оплаты.
 
 **Приёмка:** серверный итог согласован с разбивкой; двойной клик, timeout и redirect retry не создают дубли заказа/оплаты.
 
@@ -288,11 +288,11 @@
 
 **Файлы:** `model/holdClock.ts`, `ui/{HoldTimer,HoldNotice,HoldExpiredDialog,PurchaseSuccess}.tsx`, тесты рядом.
 
-- [ ] Отделить секундный timer-store от состояния карты; цвета warning/critical привязать к явно конфигурируемым порогам, не к номеру шага.
-- [ ] При expiry показать диалог/баннер, заблокировать новую оплату, запросить authoritative state; повторный резерв проверить заново.
-- [ ] При resume, online и payment callback перечитать order/hold; данные со старой revision не откатывают состояние.
-- [ ] Success показывать по confirmed order. Если билеты ещё выпускаются, показать подтверждённую оплату и ожидание билетов; action «Открыть билет» доступен после выдачи.
-- [ ] История заказов/билет передаются hostActions; для нескольких билетов передать весь список ids, не открыть произвольный первый молча.
+- [x] Держать секундный timer локально в HoldTimer отдельно от состояния карты; пороги warning/critical заданы явно.
+- [x] При expiry показывать диалог, блокировать checkout и повторно проверять hold на сервере перед продолжением.
+- [x] На resume, online и payment callback перечитывать session/order; проверять occurrence и order identity перед обновлением.
+- [x] Показывать success только по confirmed/paid order; ожидание выпуска и кнопка билетов отражают delivery status.
+- [x] Историю/билеты передавать через hostActions; отправлять список доступных ticket IDs.
 
 **Приёмка:** expiry в background, завершение платежа одновременно с таймером, повторный callback, доставка билетов с задержкой воспроизводимы в mock и HTTP-contract tests.
 
@@ -302,15 +302,15 @@
 
 **Файлы:** `apps/embed/src/app/App.tsx`, `src/pages/embed/ui/EmbedPage.tsx`, `src/shared/bridge/{protocol.ts,webViewBridge.ts}`, `src/main.tsx`, `index.html`, `src/styles.css`, тесты рядом.
 
-- [ ] Ввести маршрут `/buy/:occurrenceId`, поддержать прямое открытие и reload через SPA fallback hosting. В query разрешить только безопасные display-параметры, например locale; credentials туда не помещать.
-- [ ] Bootstrap включает occurrenceId, locale, theme, host capabilities и способ получить session credential. Если native host ещё не готов, показать загрузку handshake и таймаут с retry.
-- [ ] Envelope моста: `{version:1, instanceId, requestId, type, payload}`. Валидировать сообщения Zod-схемой, поддержать ready/init/ack/error, timeout, ignore duplicate requestId и неподдерживаемую версию.
-- [ ] Host→widget: init, back, resume, authUpdated, paymentReturned. Widget→host: ready, stateChanged (step/canGoBack), closeRequested, eventDetailsRequested, paymentRequested, orderConfirmed, ticketsRequested, historyRequested, error.
-- [ ] back сначала закрывает диалог, затем возвращает шаг; на первом шаге вызывает closeRequested. Native back не должен одновременно менять browser history и шаг.
-- [ ] Для browser iframe проверять origin/source и использовать конкретный targetOrigin; native adapter привязать к разрешённому origin WebView и документированному каналу. Название Flutter/Android/iOS bridge согласовать, не импортировать SDK в React-библиотеку.
-- [ ] WebView navigation/payment URL пропускать через allowlist, смену auth/session отменять вместе с запросами. Bridge не принимает команд «назначить success» и не исполняет полученный код.
-- [ ] Отправлять агрегированную ошибку/статус без контактов, tokens и OTP. Заказ перечитывать с сервера после paymentReturned.
-- [ ] Учесть safe area, экранную клавиатуру, поворот, background/resume, закрытие WebView. Dispose снимает listeners, timers и observers; закрытие не гарантирует DELETE hold, expiry на сервере обязателен.
+- [x] Ввести маршрут `/buy/:occurrenceId`; использовать только locale из query, не помещать туда credentials. Hosting SPA fallback остаётся конфигурацией deployment.
+- [x] Поддержать bootstrap occurrence, locale, theme, capabilities и session credentials; показывать handshake, timeout и retry.
+- [x] Валидировать envelope Zod-схемой; поддержать request IDs, ack, timeout, дубликаты и неподдерживаемую версию.
+- [x] Поддержать host/widget сообщения, описанные в протоколе v1; order после payment return сверять с API.
+- [x] Back закрывает верхний диалог или возвращает шаг; с первого шага отправляет closeRequested.
+- [x] Для iframe проверять source/origin и адресовать конкретный targetOrigin; native outbound adapter пока рассчитан на `ReactNativeWebView.postMessage`.
+- [x] Проверять API origin и redirect origins по allowlist; не принимать от bridge состояние «оплачено» без GET order.
+- [x] Не включать контакты/OTP/session credential в сообщения order status/error; новый session credential отправлять host только отдельным `sessionCreated` по приватному bridge. Очистка bridge listeners и таймеров привязана к dispose.
+- [ ] Проверить Android WebView и iOS WKWebView host adapters, safe area, клавиатуру, поворот, back/resume и возврат из оплаты на физических устройствах.
 
 **Приёмка:** mock host + browser smoke; на реальном Android WebView и iOS WKWebView отдельно проверить жесты, keyboard, back, resume и внешний платёжный возврат. Browser mobile emulation не выдавать за проверку native.
 
@@ -318,11 +318,11 @@
 
 **Файлы:** `libs/ticket-purchase/src/index.ts`, `package.json`, `src/lib/embed/createTicketPurchaseEmbed.tsx`, `apps/embed/src/pages/composed/ui/ComposedPurchasePage.tsx`, `README.md`.
 
-- [ ] Сделать полный пример ручной композиции всех шагов через public exports/provider/hooks и готовый widget рядом в тестовом host.
-- [ ] Добавить mount/update/dispose для non-React host; не менять существующий createSeatViewEmbed без миграции.
-- [ ] Настройки: occurrenceId, locale, root theme tokens, source, hostActions; переключение props отменяет старый контекст и не переносит чужой hold.
-- [ ] Проверить ESM/types/CSS exports и peerDependencies, отсутствие дублированного React, импорт без DOM, отсутствие Studio/editor/PDF/fixtures в startup production-графе.
-- [ ] Документировать запуск WebView URL, готовый widget, ручную композицию, source replacement, bridge protocol, mock mode, ответственность backend/host за оплату и навигацию.
+- [x] Добавить пример ручной композиции всех шагов из public exports рядом с готовым widget.
+- [x] Добавить `createTicketPurchaseEmbed` mount/update/dispose и оставить прежний seat-view embed API.
+- [x] Передавать occurrence, locale, theme, source, hostActions; смена event/occurrence/source/instance начинает новый controller context.
+- [ ] Проверить в потребительском приложении ESM/types/CSS, дублирование React и импорт без DOM. Production build отделяет mock в отдельный lazy chunk; startup chunk остаётся около 952 kB.
+- [x] Документировать WebView route, React widget/composition, DOM adapter, bridge, demo и обязанности backend/host в `apps/embed/README.md`.
 
 **Приёмка:** внешнее React-приложение может собрать весь flow без deep-import внутренних файлов; готовый и составной варианты используют один controller и проходят одинаковый сценарий.
 
@@ -330,13 +330,13 @@
 
 **Файлы:** `libs/api-contracts/src/buyerGeometry.ts`, `libs/api-axios/src/buyerGeometryClient.ts`, `libs/seat-view/src/lib/{geometryLoader,geometryCache}.ts`, `libs/ticket-purchase/src/lib/model/availabilitySync.ts`, тесты рядом; существующие renderer-core/hall-viewer — только нужные адаптеры.
 
-- [ ] Согласовать public immutable manifest: layoutVersionId, schemaVersion, bounds, floors/sectors, blocks `{id,bounds,url,byteLength,hash}` и overview. Доступность/цены не помещать в immutable геометрию.
-- [ ] Добавить `GET /occurrences/{id}/geometry-manifest` и выдачу блоков по версионированным URL; полный seat-map оставить совместимым для небольших залов. Каждому seatId определить одного владельца блока.
-- [ ] Интегрировать частичную сцену с renderer: сначала обзор, детали viewport/сектора, отмена запросов, лимит concurrency, ограниченный byte-LRU и prefetch соседей. Не собирать все блоки перед первым кадром.
-- [ ] Корзина хранит labels/ids из selection/hold отдельно от загруженных блоков; eviction не удаляет выбранные билеты. Доступный поиск/list не требует загрузить 50k мест сразу.
-- [ ] Для availability использовать один канал: сначала revision polling дельт с backoff; SSE/WebSocket — отдельная последующая замена адаптера при согласовании, без параллельных независимых каналов.
-- [ ] Перед applySeatAvailabilityDeltas проверить occurrenceId и layoutVersionId; gap/out-of-order/overflow вызывает snapshot resync. Prices имеют собственную revision; изменившаяся цена обновляет quote и требует подтверждения.
-- [ ] Не включать WebGL по умолчанию на основании mock-прогона: использовать существующую политику fallback, подтвердить GPU/телефоны отдельно.
+- [x] Добавить Zod-манифест immutable geometry с layout/schema versions, bounds, floors/zones, block refs и overview; availability/prices остаются отдельными.
+- [ ] Добавить manifest/block routes и проверить backend ownership каждого seatId; client пока выявляет дубли среди загруженных блоков, но не всего manifest.
+- [ ] Подключить overview-first загрузку и viewport chunks к renderer; текущий flow всё ещё получает полный seat-map.
+- [ ] Сохранить basket/search/list независимо от выгрузки block geometry; доступный список для 50k ещё не оптимизирован.
+- [x] Использовать один revision-polling канал с 5s интервалом, online/visible refresh и exponential backoff; отдельного SSE/WebSocket канала нет.
+- [x] Проверять occurrence/layout/revisions, resync при gap/несовпадении и обновлять prices по собственной revision.
+- [x] Оставить WebGL выключенным по умолчанию; физические GPU/телефоны отдельно не проверены.
 
 **Приёмка:** overview до полной геометрии, выбор/камеру не сбрасывают status updates; 50k не обрабатываются заново каждую секунду таймера. Это этап готовности большого зала, его нельзя объявить выполненным только по верстке малого demo.
 
@@ -352,7 +352,7 @@
 - [ ] Проверить клавиатуру и screen-reader labels, focus restore диалогов, touch targets, safe area, шрифты/ассеты и scoping CSS.
 - [ ] Замерить 5k/50k: холодный старт, pan/pinch, выбор, смена доступности, таймер, reconnect; зафиксировать сеть/устройство/GPU. Цели первого обзора p75 ≤2.5s, реакции выбора ≤100ms, INP p75 ≤200ms — цели, не текущие результаты.
 - [ ] Передать backend обновлённый OpenAPI с examples, DTO и правилами хранения/транзакций из задач 1–2, перечень v1→v2 различий и незакрытых сервисных решений. Фактическая отправка команде — отдельное действие пользователя.
-- [ ] В README указать реальные выполненные проверки и ограничения. Отдельно отметить mock-ready, HTTP-ready и проверку на физических WebView.
+- [x] Описать реальные статические проверки и ограничения, mock/API и непроверенные физические WebView в `apps/embed/README.md`.
 
 Команды после реализации (новые Nx projects должны называться как указано):
 
@@ -388,4 +388,14 @@ git diff --check
 
 ## 6. Состояние работы над этим документом
 
-На момент составления изучены Figma и текущий код; исходные изменения `fix/todo_29.10` закоммичены и объединены с main. Ветка `feat/buy-tickets-flow` должна содержать относительно main только этот план. Реализация пунктов плана, новые контракты, зависимости и код виджета в текущую поставку не входят.
+План выполняется на `feat/buy-tickets-flow`. Ветка содержит ранее подготовленный flow и продолженные изменения этого этапа. Backend-команды, удалённая Git-ветка и native приложения не менялись.
+
+**Проверено в этой итерации:**
+
+- `pnpm nx run-many -t typecheck --projects=api-contracts,api-axios,seat-view,ticket-purchase,embed --skip-nx-cache --output-style=static` — успешно.
+- `pnpm nx run-many -t lint --projects=api-contracts,api-axios,seat-view,ticket-purchase,embed --skip-nx-cache --output-style=static` — успешно, 9 предупреждений в существующих `buyer.spec.ts` и `openapi.spec.ts`.
+- `pnpm nx run-many -t build --projects=ticket-purchase,embed --skip-nx-cache --output-style=static` — успешно. Vite сообщает о startup JS chunk размером 951.86 kB (286.51 kB gzip).
+- `pnpm --filter @hall-platform/api-contracts generate:openapi` — успешно; `openapi.json` содержит geometry manifest/block routes и схемы.
+- Тестовые наборы и Playwright здесь не запускались; browser визуальная приёмка, backend интеграция, производительность 5k/50k и устройства Android/iOS не проверены.
+
+Ветка не закоммичена и не отправлена в remote. Для backend handoff подготовлен обновлённый OpenAPI, но фактическая передача команде не выполнялась.

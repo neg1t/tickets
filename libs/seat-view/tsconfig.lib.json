@@ -11,6 +11,7 @@
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "references": [
+    { "path": "../api-contracts/tsconfig.lib.json" },
     {
       "path": "../renderer-konva/tsconfig.lib.json"
     },

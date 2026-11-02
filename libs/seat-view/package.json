@@ -16,6 +16,7 @@
     }
   },
   "dependencies": {
+    "@hall-platform/api-contracts": "workspace:*",
     "@hall-platform/domain": "workspace:*",
     "@hall-platform/geometry": "workspace:*",
     "@hall-platform/hall-viewer": "workspace:*",
